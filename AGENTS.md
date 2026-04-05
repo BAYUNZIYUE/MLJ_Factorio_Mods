@@ -5,7 +5,7 @@
 **Branch:** n/a (not a git repo)
 
 ## OVERVIEW
-Factorio mod workspace with six standalone mods plus one shared packer. Most mods are plain Lua under `src/`; `autocraft` is the outlier and uses TypeScript sources intended for Lua output.
+Factorio mod workspace with six standalone mods plus one shared packer. Mods in this workspace are authored directly in Lua under `src/`.
 
 ## STRUCTURE
 ```text
@@ -13,7 +13,7 @@ MLJ_Factorio_Mods/
 ├── pack_mods.py                # discovers `<mod>/src/info.json`, validates, zips into ModZips/
 ├── ModZips/                    # packaged artifacts only; do not edit as source
 ├── MOD编写说明.txt             # local reminder of official Factorio docs and stage order
-├── autocraft/                  # TypeScriptToLua-based mod
+├── autocraft/                  # runtime/data/settings mod authored directly in Lua
 ├── DynamicInventory/           # runtime-only inventory resizing mod
 ├── factorio-todo-list/         # largest mod; todo domain + UI + spec tests
 ├── mythic-quality-fg/          # small prototype/settings-heavy mod
@@ -30,7 +30,7 @@ MLJ_Factorio_Mods/
 | Platform/cargo logic | `ups_saving_quality_ships/` | Event-driven runtime split into script modules |
 | Prototype and quality tuning changes | `mythic-quality-fg/` | `data.lua` forwards into `src/prototypes/`, while `data-updates.lua` tweaks quality behavior |
 | Runtime-only player inventory logic | `DynamicInventory/`, `py_quick_start/` | No `data.lua`; mainly `control.lua` + `settings.lua` |
-| TypeScript-based mod work | `autocraft/` | README mentions npm/TSTL, but manifests are absent in this checkout |
+| Autocraft runtime/data work | `autocraft/` | Lua sources live directly under `src/` |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
@@ -45,7 +45,7 @@ MLJ_Factorio_Mods/
 ## CONVENTIONS
 - Treat the official docs as authority: `https://lua-api.factorio.com/latest/`, especially Data Lifecycle, Runtime, Prototype, Mod Structure, Migrations, and Events.
 - This workspace stores mod metadata at `<mod>/src/info.json`, not at the mod root. `pack_mods.py` only discovers projects with that layout.
-- `pack_mods.py` accepts both Lua and TypeScript Factorio entrypoints in `src/` (`control.*`, `data.*`, `settings.*`, update/final-fixes variants).
+- `pack_mods.py` accepts standard Factorio entrypoint names in `src/` (`control.*`, `data.*`, `settings.*`, update/final-fixes variants); `autocraft` is now authored directly in Lua.
 - Zip outputs must be `{info.name}_{info.version}.zip`, and the archive root must be that directory name rather than loose files.
 - Runtime persistence uses `storage`, not legacy `global`.
 - Locale files stay under `src/locale/<lang>/...`; do not create AGENTS files inside locale trees.
@@ -53,7 +53,7 @@ MLJ_Factorio_Mods/
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not mix Factorio stages: `game`/runtime objects belong in `control.*`; `data`/prototype work belongs in `data.*`; verify against the official stage docs before editing.
 - Do not edit `ModZips/` or `obj/` as source; they are outputs/cache, not authoring locations.
-- Do not assume README commands are always backed by manifests in this checkout; `autocraft/README.md` mentions npm, but `package.json` is absent here.
+- Do not assume README commands are always backed by manifests in this checkout; verify local tooling files before claiming a build step exists.
 - Do not move `info.json` out of `src/`; the packer will stop discovering that mod.
 - Do not add duplicate per-locale or per-artifact documentation; parent AGENTS should cover those directories.
 

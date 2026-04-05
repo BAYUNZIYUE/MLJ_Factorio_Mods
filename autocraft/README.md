@@ -1,14 +1,15 @@
 # Autocraft
 
 A [Factorio](https://factorio.com/) mod for automatically hand-crafting items based on
-a logistics section called `Autocraft`. You can leave the section disabled (so that logistics bots
-don't try to bring you the items) and Autocraft will still build them. You can leave the section
-enabled and Autocraft will build items until Autocraft or bots satisfy the requests. Set the
-minimum to however many of the item you want to have in your inventory and Autocraft will build them.
+a logistics section named `Autocraft-<player name>`. When that section is active, Autocraft
+automatically hand-crafts missing items for the current player. It can also include other active
+logistics sections when the `Existing sections use autocraft` runtime-per-user setting is enabled.
 
-Make sure to enable the shortcut to start crafting. If you want to stop, just disable the shortcut.
-Cancelling an item in the crafting queue added by Autocraft will disable the shortcut. Re-enable
-it when you are ready!
+Missing amount is calculated from the combined section requests, then reduced by:
+
+- items already in the player's inventory
+- items already present in the current logistic network
+- items already queued for hand crafting
 
 ## Download
 
@@ -19,23 +20,18 @@ either on the website or in-game.
 
 TODO: take screenshots
 
-# Contributing
+# Development
 
-Autocraft is written in TypeScript and compiled to Lua with [TypeScriptToLua](https://typescripttolua.github.io/).
-Typings are provided by [typed-factorio](https://github.com/GlassBricks/typed-factorio).
-
-Debugging can be done with [Factorio Modding Tool Kit](https://github.com/justarandomgeek/vscode-factoriomod-debug).
+Autocraft now lives directly as Lua source under `src/`.
 
 ```bash
-# install dependencies
-npm install
-
-# start watching
-npm run dev
-
-# build a release you can drop into your mods folder
-npm run release
+# package all mods in this workspace
+python3 pack_mods.py
 ```
+
+For hot-reload style debugging, extract the packaged mod folder (the archive root directory, not
+`src/`) into `%AppData%\Factorio\mods` and remove any older zip or folder version of the same mod
+before launching the game.
 
 # Icons
 
