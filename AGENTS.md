@@ -81,7 +81,7 @@ python3 pack_mods.py
 - Commit messages in **Chinese**, conventional style: `功能：`, `修复：`, `重构：`, `杂项：`
 - Atomic commits (one logical change per commit)
 - When running `git add` / `git commit` in this workspace, prefer the host Windows Git executable: `'/mnt/c/Program Files/Git/cmd/git.exe'`
-- `git commit` operations must run serially; do not execute multiple commit flows in parallel within the same repository.
+- All Git operations must run serially. Do not run `git add`, `git commit`, `git rebase`, `git stash`, `git checkout`, `git merge` or any other Git command in parallel. Even when the target files do not overlap, wait until the previous Git command has fully finished and the repository lock has been released before starting the next Git command.
 - Do **not** push unless explicitly approved by the user
 
 ## NOTES
