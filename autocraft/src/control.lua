@@ -102,6 +102,7 @@ local function on_player_crafted_item(event)
 
   if data.active_item_name == event.item_stack.name then
     data.active_item_name = nil
+    data.active_queue_index = nil
     data.active_recipe_name = nil
 
     if #player.crafting_queue == 1 then

@@ -242,18 +242,21 @@ end
 
 local function get_module_queue_index(player)
   local data = storage.data and storage.data[player.index] or nil
-  if not data or not data.active_recipe_name or not player.crafting_queue then
+  if not data or not data.active_recipe_name or not data.active_queue_index or not player.crafting_queue then
     return nil
   end
 
-  for index, queue_item in pairs(player.crafting_queue) do
-    local recipe_name = type(queue_item.recipe) == "string" and queue_item.recipe or queue_item.recipe.name
-    if recipe_name == data.active_recipe_name and not queue_item.prerequisite then
-      return index, queue_item
-    end
+  local queue_item = player.crafting_queue[data.active_queue_index]
+  if not queue_item or queue_item.prerequisite then
+    return nil
   end
 
-  return nil
+  local recipe_name = type(queue_item.recipe) == "string" and queue_item.recipe or queue_item.recipe.name
+  if recipe_name ~= data.active_recipe_name then
+    return nil
+  end
+
+  return data.active_queue_index, queue_item
 end
 
 function autocraft.cancel_active_crafting(player)
@@ -269,6 +272,7 @@ function autocraft.cancel_active_crafting(player)
   end
 
   data.active_item_name = nil
+  data.active_queue_index = nil
   data.active_recipe_name = nil
   remove_missing_materials_section(player)
 end
@@ -281,6 +285,7 @@ function autocraft.clear_active_state(player)
   end
 
   data.active_item_name = nil
+  data.active_queue_index = nil
   data.active_recipe_name = nil
   remove_missing_materials_section(player)
 end
@@ -593,6 +598,7 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
     pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_for_item)
   if recipe_name then
     data.active_item_name = item_name
+    data.active_queue_index = player.crafting_queue and (#player.crafting_queue + 1) or 1
     data.active_recipe_name = recipe_name
     storage.data[player.index] = data
     player.begin_crafting({ count = 1, recipe = recipe_name, silent = true })
