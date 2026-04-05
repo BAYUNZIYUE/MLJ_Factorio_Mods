@@ -1,0 +1,26 @@
+--local procession_graphic_catalogue_types = require("__base__/prototypes/planet/procession-graphic-catalogue-types")
+
+--if mods["space-age"] then
+--    ---- 修改物流接驳站原型，为其添加额外的接收口
+--    --local cargo_landing_pad_hatches = data.raw["cargo-bay"]["cargo-bay"].hatch_definitions
+--    --local addCargoCount = #cargo_landing_pad_hatches
+--    --        * (settings.startup["cargo_landing_pad_hatch_multiplier"].value - 1)
+--    --for _ = 1, addCargoCount do
+--    --    table.insert(cargo_landing_pad_hatches,
+--    --            shared_bay_hatch({ -0.32, -1.5 }, procession_graphic_catalogue_types.hatch_emission_bay))
+--    --end
+--
+--    ---- 修改扩展接驳站原型，为其添加额外的接收口
+--    --local cargo_bay_hatches = data.raw["cargo-bay"]["cargo-bay"].hatch_definitions
+--    --local addCargoCount = #cargo_bay_hatches * (settings.startup["cargo_bay_hatch_multiplier"].value - 1)
+--    --for i = 1, addCargoCount do
+--    --    local x = -0.32 + math.random() * 2 - 1
+--    --    local y = -1.5 + math.random() * 2 - 1
+--    --    table.insert(cargo_bay_hatches,
+--    --            shared_bay_hatch({ x, y }, procession_graphic_catalogue_types.hatch_emission_bay))
+--    --end
+--
+--    -- 修改火箭货舱大小
+--    --data.raw["cargo-pod"]["cargo-pod"].inventory_size = 50
+--    --data.raw["cargo-landing-pad"]["cargo-landing-pad"].inventory_size = 50
+--end

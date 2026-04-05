@@ -1,0 +1,112 @@
+---------------------------------------------------------------------------------------------------
+Version: 1.1.0
+Date: 2026-03-30
+  Changes:
+    - 优化了货舱与物流编组的调度逻辑，减少全量扫描，并修复若干缓存、蓝图与自动物流编组残留问题.
+    - Optimized cargo pod and logistic section scheduling to reduce full scans, and fixed several cache, blueprint, and stale auto-logistic-section issues.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.14
+Date: 2025-11-22
+  Changes:
+    - 飞船向地面投放货物时，不再创建新筒仓，而是直接修改原始筒仓的物品（感谢@VVVVVVEmersonFisioVVVVVV提供的思路！）.
+    - Instead of creating a new silo when the ship drops cargo to the ground, the items in the original silo are modified directly (thanks to @VVVVVVEmersonFisioVVVVVVV for the idea!).
+---------------------------------------------------------------------------------------------------
+Version: 1.0.13
+Date: 2025-11-18
+  Changes:
+    - 修复pod.cargo_pod_origin为nil时会导致游戏报错的问题.
+    - Fix the problem that when pod.cargo_pod_origin is nil, the game will report an error.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.12
+Date: 2025-08-20
+  Changes:
+    - 增加扩展接驳站的接驳口倍率设置.
+    - Add the hatch multiplier setting for cargo bay.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.11
+Date: 2025-06-04
+  Changes:
+    - 增加控制提示“接驳站不足”显示频率的设置.
+    - 修改了提示的内容，现在可以直接跳转到对应平台表面了.
+    - Adding the setting for the frequency of displaying the control tip "not enough cargo".
+    - Changed the content of tip so that you can now jump directly to the platform surface.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.10
+Date: 2025-05-17
+  Changes:
+    - 对于自动请求的建筑编组，也同样应用物流倍数处理.
+    - The same logistic multiplier treatment is applied for automatically requested building groupings.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.9
+Date: 2025-05-16
+  Changes:
+    - 修复更改飞船中心品质时会额外添加空编组的问题.
+    - Fixed the issue that when changing the quality of a ship, it would add an extra empty group.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.8
+Date: 2025-05-15
+  Changes:
+    - 修复删除空火箭而导致的异常报错.
+    - Fix the exception error caused by deleting empty rockets.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.7
+Date: 2025-05-10
+  Changes:
+    - 修复蓝图不可写情况下直接崩溃的问题.
+    - 优化了点击按钮时的提示内容.
+    - Fixed the problem of crashing directly when blueprints are not writable.
+    - Optimized the content of the prompt when clicking the button.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.6
+Date: 2025-05-09
+  Changes:
+    - 新增用于升降太空平台枢纽品质的按钮.
+    - 新增部分本地化翻译（English）.
+    - Added a new button for changing the quality of the space platform hub.
+    - Added some localization translations (English).
+---------------------------------------------------------------------------------------------------
+Version: 1.0.5
+Date: 2025-05-09
+  Changes:
+    - 修复动态物流编组不能正确生成的bug.
+    - Fix the bug that dynamic logistics grouping cannot be generated correctly.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.4
+Date: 2025-05-08
+  Changes:
+    - 【重要】增加动态物流编组，以确保飞船请求的数目是正确的.
+    - [Important] Addition of dynamic logistics grouping to ensure that the number of spaceship requests is correct.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.3
+Date: 2025-05-04
+  Changes:
+    - 【重要】优化飞船投放逻辑，现基本移除返还机制，改为投放数个相同的火箭下去.
+    - 修复误判火箭包含玩家而导致没有应用倍率修改的bug.
+    - 修复误判是否从飞船发射火箭而导致物品处理错误的bug.
+    - 对于普通品质的飞船，不再处理与它们相关的火箭，从而大幅提升性能.
+    - 飞船的倍数不再使用1 2 3 4 6，而是1 2 3 4 5，以方便货物数目的计算.
+    - [Important] Optimize spaceship launching logic, now basically removes the return mechanism and replaces it with launching several identical rockets.
+    - Fixed a bug that caused the multiplier modification to not be applied due to misjudging if the rocket contains a player.
+    - Fixed a bug that incorrectly determined if a rocket was launched from an airship, resulting in incorrect item handling.
+    - For normal quality airships, the rockets associated with them are no longer processed, resulting in a significant performance increase.
+    - The multiplier for airships no longer uses 1 2 3 4 6, but rather 1 2 3 4 5, to make it easier to calculate the number of cargoes.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.2
+Date: 2025-04-28
+  Changes:
+    - 修复global_remove_count为nil的bug.
+    - Fix bug that global_remove_count is nil.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.1
+Date: 2025-04-28
+  Changes:
+    - 修复玩家降落时会直接弹出到飞船表面，以及玩家上飞船时直接死亡的bug.
+    - 去除自定义倍率，改为通过飞船中心的品质决定实际倍率.
+    - Fix bugs where players would eject directly to the surface of the ship when landing, and where players would die directly when boarding the ship.
+    - Remove custom multipliers and replace them with actual multipliers determined by the quality of the ship's center.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.0
+Date: 2025-04-24
+  Changes:
+    - 初始版本.
+    - First version.
