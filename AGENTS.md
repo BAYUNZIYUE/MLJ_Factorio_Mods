@@ -68,6 +68,15 @@ MLJ_Factorio_Mods/
 python3 pack_mods.py
 ```
 
+## BUILD AND DEBUG DEPLOYMENT
+- 先运行 `python3 pack_mods.py`，打包当前工作区内所有模组。
+- 然后打开 `ModZips/` 文件夹，确认目标模组的最新产物名称。
+- 如果修改了某个模组，调试时优先把该模组以“文件夹形式”而不是 `.zip` 形式放入 Factorio 模组目录：
+  - Windows 环境变量路径：`%AppData%\Factorio\mods`
+- 这里的“文件夹形式”指的是压缩包内根目录那一层模组文件夹（例如 `{info.name}_{info.version}`），不是把 `src/` 目录直接拷贝到 `%AppData%\Factorio\mods`。
+- 部署某个模组的文件夹版本前，先移除同模组的旧版本；无论旧版本是 `.zip` 还是同名文件夹，都不要同时保留。
+- 这种“模组文件夹直放到 mods 目录”的方式是异星支持的热重载调试流程，便于反复修改和验证。
+
 ## GIT PRACTICES
 - Commit messages in **Chinese**, conventional style: `功能：`, `修复：`, `重构：`, `杂项：`
 - Atomic commits (one logical change per commit)
