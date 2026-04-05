@@ -1,11 +1,6 @@
 import type { PrototypeData } from "factorio:common";
-import type {
-  SoundPrototype,
-  ShortcutPrototype,
-  SoundDefinitionStruct,
-  SoundStruct,
-} from "factorio:prototype";
-import { CRAFTING_FINISHED_SOUND, SHORTCUT_NAME } from "./constants";
+import type { SoundPrototype, SoundDefinitionStruct, SoundStruct } from "factorio:prototype";
+import { CRAFTING_FINISHED_SOUND } from "./constants";
 
 declare const data: PrototypeData;
 
@@ -27,14 +22,4 @@ data.extend([
     filename: crafting_finished?.filename ?? "__core__/sound/crafting-finished.ogg",
     volume: crafting_finished?.volume ?? 0.75,
   } satisfies SoundPrototype,
-  {
-    type: "shortcut",
-    name: SHORTCUT_NAME,
-    action: "lua",
-    toggleable: true,
-    icon: "__autocraft-logistics__/graphics/icon/32.png",
-    icon_size: 32,
-    small_icon: "__autocraft-logistics__/graphics/icon/24.png",
-    small_icon_size: 24,
-  } satisfies ShortcutPrototype,
 ]);

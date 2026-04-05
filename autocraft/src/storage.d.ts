@@ -1,4 +1,5 @@
 type PlayerData = {
+  active_item_name?: string;
   active_recipe_name?: string;
 };
 

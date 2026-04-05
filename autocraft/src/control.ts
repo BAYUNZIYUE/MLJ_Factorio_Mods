@@ -1,5 +1,4 @@
 import type {
-  OnLuaShortcutEvent,
   OnPlayerCancelledCraftingEvent,
   OnPlayerControllerChangedEvent,
   OnPlayerCraftedItemEvent,
@@ -7,7 +6,7 @@ import type {
   OnPlayerMainInventoryChangedEvent,
   OnGuiClosedEvent,
 } from "factorio:runtime";
-import { AUTOCRAFT_SOUND_ENABLED, CRAFTING_FINISHED_SOUND, SHORTCUT_NAME } from "./constants";
+import { AUTOCRAFT_SOUND_ENABLED, CRAFTING_FINISHED_SOUND } from "./constants";
 import { add_autocraft_logistics_section, do_crafting, pre_compute_recipes } from "./autocraft";
 
 const enable_player_force_logistics_requests = () => {
@@ -78,11 +77,12 @@ const on_player_crafted_item = (event: OnPlayerCraftedItemEvent) => {
     player.play_sound({ path: CRAFTING_FINISHED_SOUND });
   }
 
-  if (data.active_recipe_name === event.item_stack.name) {
+  if (data.active_item_name === event.item_stack.name) {
+    data.active_item_name = undefined;
     data.active_recipe_name = undefined;
     // last item in queue, immediately queue another
     if (player.crafting_queue.length === 1) {
-      do_crafting(player, false);
+      do_crafting(player, false, event.item_stack.name);
     }
   }
 };
@@ -91,27 +91,11 @@ const on_player_cancelled_crafting = (event: OnPlayerCancelledCraftingEvent) => 
   const data = storage.data?.get(event.player_index);
   if (data?.active_recipe_name !== event.recipe.name) return;
 
+  data.active_item_name = undefined;
   data.active_recipe_name = undefined;
 
   const player = game.get_player(event.player_index);
   if (!player) return;
-
-  player.set_shortcut_toggled(SHORTCUT_NAME, false);
-};
-
-const on_lua_shortcut = (event: OnLuaShortcutEvent) => {
-  if (event.prototype_name !== SHORTCUT_NAME) return;
-
-  enable_player_force_logistics_requests();
-
-  const player = game.get_player(event.player_index);
-  if (!player) return;
-
-  add_autocraft_logistics_section(player);
-
-  player.set_shortcut_toggled(SHORTCUT_NAME, !player.is_shortcut_toggled(SHORTCUT_NAME));
-
-  do_crafting(player);
 };
 
 script.on_init(on_init);
@@ -119,7 +103,6 @@ script.on_configuration_changed(on_configuration_changed);
 
 script.on_event(defines.events.on_player_crafted_item, on_player_crafted_item);
 script.on_event(defines.events.on_player_cancelled_crafting, on_player_cancelled_crafting);
-script.on_event(defines.events.on_lua_shortcut, on_lua_shortcut);
 
 // to avoid an nth_tick trigger, we check after the controller UI is closed
 // in case the player modified their requests
