@@ -42,6 +42,12 @@ local function sync_player_state(event)
   end
 end
 
+local function keep_missing_sections_enabled()
+  for _, player in pairs(game.players) do
+    autocraft.keep_missing_materials_section_enabled(player)
+  end
+end
+
 local function trigger_crafting(event)
   local player = game.get_player(event.player_index)
   if not player then
@@ -98,6 +104,11 @@ end
 local function on_player_cancelled_crafting(event)
   local data = storage.data and storage.data[event.player_index] or nil
   if not data or data.active_recipe_name ~= event.recipe.name then
+    return
+  end
+
+  local player = game.get_player(event.player_index)
+  if not player then
     return
   end
 
@@ -160,3 +171,4 @@ script.on_event(defines.events.on_player_controller_changed, sync_player_state)
 script.on_event(defines.events.on_force_reset, enable_player_force_logistics_requests)
 script.on_event(defines.events.on_forces_merged, enable_player_force_logistics_requests)
 script.on_event(defines.events.on_technology_effects_reset, enable_player_force_logistics_requests)
+script.on_nth_tick(1, keep_missing_sections_enabled)

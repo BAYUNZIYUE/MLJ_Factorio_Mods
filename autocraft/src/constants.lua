@@ -10,6 +10,7 @@ local constants = {
   AUTOCRAFT_MATCH_MODE_PREFIX = "prefix",
   AUTOCRAFT_MATCH_MODE_PLAYER_NAME = "player-name",
   AUTOCRAFT_MATCH_MODE_PREFIX_AND_PLAYER_NAME = "prefix-player-name",
+  AUTOCRAFT_MISSING_SECTION_TAG = "missing-materials",
 }
 
 constants.AUTOCRAFT_DEFAULT_PREFIX_RICH_TEXT = "[virtual-signal=" .. constants.AUTOCRAFT_WRENCH_SIGNAL_NAME .. "]"

@@ -83,6 +83,12 @@ The lower-right shortcut toggles autocrafting on and off. Turning it off cancels
 
 右下角快捷按钮用于开启或关闭自动手搓。关闭时会取消模组建立的手搓队列，并清空当前自动手搓状态。默认状态为启用。
 
+### Missing materials section / 缺失材料编组
+
+When the current hand-craft target is missing ingredients, Autocraft can create a temporary logistics section that requests missing materials recursively. The section is created only when needed, forced to stay enabled while it exists, and deleted immediately once the player inventory has enough materials to continue crafting.
+
+当当前手搓目标缺少原料时，Autocraft 会创建一个临时物流编组，用于递归请求缺失材料。该编组只在需要时创建，存在期间会被强制保持启用；当玩家背包材料已经足够继续手搓时，会立即删除。
+
 # Icons / 图标
 
 This project includes icons from Flaticon, which are licensed under their respective licenses.
