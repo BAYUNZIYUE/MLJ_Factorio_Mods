@@ -20,7 +20,6 @@ local function on_configuration_changed()
   enable_player_force_logistics_requests()
 
   for _, player in pairs(game.players) do
-    autocraft.add_autocraft_logistics_section(player)
     sync_shortcut_state(player)
   end
 end
@@ -30,14 +29,17 @@ local function on_init()
   on_configuration_changed()
 end
 
-local function create_autocraft_logistics_section(event)
+local function sync_player_state(event)
   local player = game.get_player(event.player_index)
   if not player then
     return
   end
 
-  autocraft.add_autocraft_logistics_section(player)
   sync_shortcut_state(player)
+
+  if autocraft.is_enabled(player) then
+    autocraft.do_crafting(player)
+  end
 end
 
 local function trigger_crafting(event)
@@ -73,6 +75,9 @@ local function on_player_crafted_item(event)
 
   local data = storage.data and storage.data[event.player_index] or nil
   if not data or data.active_recipe_name == nil then
+    if player.mod_settings[constants.AUTOCRAFT_SOUND_ENABLED].value then
+      player.play_sound({ path = constants.CRAFTING_FINISHED_SOUND })
+    end
     return
   end
 
@@ -96,8 +101,7 @@ local function on_player_cancelled_crafting(event)
     return
   end
 
-  data.active_item_name = nil
-  data.active_recipe_name = nil
+  autocraft.clear_active_state(player)
 end
 
 local function on_lua_shortcut(event)
@@ -135,7 +139,6 @@ local function on_runtime_mod_setting_changed(event)
     return
   end
 
-  autocraft.add_autocraft_logistics_section(player)
   sync_shortcut_state(player)
 
   if autocraft.is_enabled(player) then
@@ -152,8 +155,8 @@ script.on_event(defines.events.on_lua_shortcut, on_lua_shortcut)
 script.on_event(defines.events.on_runtime_mod_setting_changed, on_runtime_mod_setting_changed)
 script.on_event(defines.events.on_gui_closed, trigger_crafting)
 script.on_event(defines.events.on_player_main_inventory_changed, trigger_crafting)
-script.on_event(defines.events.on_player_controller_changed, create_autocraft_logistics_section)
-script.on_event(defines.events.on_player_joined_game, create_autocraft_logistics_section)
+script.on_event(defines.events.on_player_joined_game, sync_player_state)
+script.on_event(defines.events.on_player_controller_changed, sync_player_state)
 script.on_event(defines.events.on_force_reset, enable_player_force_logistics_requests)
 script.on_event(defines.events.on_forces_merged, enable_player_force_logistics_requests)
 script.on_event(defines.events.on_technology_effects_reset, enable_player_force_logistics_requests)

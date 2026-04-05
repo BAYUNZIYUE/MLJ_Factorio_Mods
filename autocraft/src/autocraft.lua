@@ -10,7 +10,6 @@ local function get_player_data(player)
   storage.data = storage.data or {}
   storage.data[player.index] = storage.data[player.index] or {
     enabled = constants.AUTOCRAFT_DEFAULT_ENABLED,
-    default_section_name = nil,
   }
   return storage.data[player.index]
 end
@@ -21,84 +20,6 @@ end
 
 local function get_match_mode(player)
   return player.mod_settings[constants.AUTOCRAFT_MATCH_MODE_SETTING].value
-end
-
-local function get_default_autocraft_logistics_section_name(player)
-  local configured_prefix = get_configured_prefix(player)
-  local match_mode = get_match_mode(player)
-
-  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PLAYER_NAME then
-    return player.name
-  end
-
-  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX then
-    return configured_prefix
-  end
-
-  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX_AND_PLAYER_NAME then
-    return configured_prefix .. player.name
-  end
-
-  return configured_prefix .. player.name
-end
-
-local function find_autocraft_logistics_section(player)
-  local data = get_player_data(player)
-  local logistic_point = player.get_requester_point()
-  if not logistic_point then
-    return nil
-  end
-
-  local section_name = get_default_autocraft_logistics_section_name(player)
-  if section_name == "" then
-    return nil
-  end
-
-  for _, section in pairs(logistic_point.sections) do
-    if section.is_manual and section.group == section_name then
-      return section
-    end
-  end
-
-  if data.default_section_name and data.default_section_name ~= section_name then
-    for _, section in pairs(logistic_point.sections) do
-      if section.is_manual and section.group == data.default_section_name then
-        return section
-      end
-    end
-  end
-
-  return nil
-end
-
-function autocraft.add_autocraft_logistics_section(player)
-  local data = get_player_data(player)
-  local logistic_point = player.get_requester_point()
-  if not logistic_point then
-    return nil
-  end
-
-  local section_name = get_default_autocraft_logistics_section_name(player)
-  if section_name == "" then
-    return nil
-  end
-
-  local existing_section = find_autocraft_logistics_section(player)
-  if existing_section then
-    if existing_section.group ~= section_name then
-      existing_section.group = section_name
-    end
-    data.default_section_name = section_name
-    return existing_section
-  end
-
-  local section = logistic_point.add_section(section_name)
-  if section then
-    section.active = false
-    data.default_section_name = section_name
-  end
-
-  return section
 end
 
 function autocraft.pre_compute_recipes()
@@ -221,6 +142,16 @@ function autocraft.cancel_active_crafting(player)
   data.active_recipe_name = nil
 end
 
+function autocraft.clear_active_state(player)
+  local data = storage.data and storage.data[player.index] or nil
+  if not data then
+    return
+  end
+
+  data.active_item_name = nil
+  data.active_recipe_name = nil
+end
+
 local function recipe_for_item(player, item_name)
   local recipes = storage.recipes and storage.recipes[item_name]
   if not recipes then
@@ -270,7 +201,13 @@ local function get_item_requests(player, crafting_complete, completed_item_name)
   local item_requests = {}
   local requested_items = get_requested_items(player)
   local logistic_point = player.get_requester_point()
-  local logistic_network = logistic_point and logistic_point.logistic_network or nil
+  local logistic_network = nil
+  if logistic_point and logistic_point.valid then
+    local candidate_network = logistic_point.logistic_network
+    if candidate_network and candidate_network.valid then
+      logistic_network = candidate_network
+    end
+  end
 
   -- 实际手搓缺口要同时扣掉玩家已持有、当前物流网络已有，以及已经排进手搓队列的成品数量。
   for item_name, min in pairs(requested_items) do

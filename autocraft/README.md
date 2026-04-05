@@ -4,10 +4,12 @@ A [Factorio](https://factorio.com/) mod for automatically hand-crafting items ba
 logistics sections. A wrench virtual signal can be used as a configurable prefix, and the match
 mode can be switched between full match, prefix, player name, and prefix+player name. When the
 shortcut is enabled, Autocraft automatically hand-crafts missing items for the current player.
+It does not create any default logistics section automatically.
 
 这是一个 [Factorio](https://factorio.com/) 自动手搓模组。它会根据匹配的物流编组
 自动补做当前玩家缺少的物品。你可以把扳手虚拟信号作为可配置前缀，并在“全匹配 / 前缀 /
 玩家名 / 前缀+玩家名”之间切换匹配模式。开启右下角快捷按钮后，Autocraft 会开始自动手搓。
+模组不会自动创建任何默认物流编组。
 
 Missing amount is calculated from the combined section requests, then reduced by:
 
