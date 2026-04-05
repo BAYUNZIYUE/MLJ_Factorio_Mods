@@ -1,0 +1,43 @@
+---------------------------------------------------------------------------------------------------
+Version: 1.0.4
+Date: 2025-02-15
+  Changes:
+    - 添加标题、模组描述的中文翻译。
+    - Add Chinese translation for title and mod description.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.3
+Date: 2024-12-02
+  Changes:
+    - 从背包中取出物品时不再缩小背包，而是关闭背包页面后再缩小。
+    - 在打开背包页面的情况下向背包内移动物品时，扩容条件从空槽位数等于0改为空槽位数小于设定值的一半，
+      扩容大小从设定值改为设定值的2倍，并且在关闭背包页面后再调整到等于设定值。
+    - 新增一个设置选项，可以调整背包槽位加成的最小值。背包奖励格数目不会少于该设定值。
+    - When removing items from the backpack, the backpack is no longer shrunk, but is shrunk again
+      after closing the backpack page.
+    - When moving items into the backpack with the backpack page open, the expansion condition is
+      changed from the number of empty slots being equal to 0 to the number of empty slots being
+      less than half of the set value, and the expansion size is changed from the set value to
+      twice the set value. The expansion size has been changed from the set value to 2 times
+      the set value, and will be adjusted to equal the set value after closing the backpack page.
+    - Added a new setting option to adjust the minimum value of the backpack slot bonus. The
+      number of backpack bonus slots will not be less than this setting.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.2
+Date: 2024-12-01
+  Bugfixes:
+    - 修复未判断player.get_main_inventory()是否为nil而导致的游戏崩溃问题。
+    - Fix game crash caused by not determining if player.get_main_inventory() is nil.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.1
+Date: 2024-11-29
+  Changes:
+    - 使用shift移动物品时，仅在特定情况下才修改背包大小，以防止点击一次就会连续移动多组物品的情况。
+    - When using shift to move items, the inventory size is only modified in certain circumstances
+      to prevent situations where clicking once will move multiple sets of items in a row.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.0
+Date: 2024-11-29
+  Info:
+    - 初始版本。本模组部分借鉴Infinite Inventory模组的思路，感谢它在1.1版本给予我的帮助。
+    - Initial release. This module partially borrows ideas from the Infinite Inventory module,
+      thanks to the help it gave me in version 1.1.

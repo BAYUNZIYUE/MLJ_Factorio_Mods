@@ -1,0 +1,13 @@
+{
+    "name": "DynamicInventory",
+    "version": "1.0.4",
+    "factorio_version": "2.0",
+    "title": "Dynamic Inventory",
+    "author": "MengLei",
+    "contact": "",
+    "homepage": "",
+    "description": "The size of inventory automatically adjusts to ensure that there is enough empty space.",
+    "dependencies": [
+        "base"
+    ]
+}
