@@ -8,6 +8,7 @@ end
 
 local function get_player_data(player)
   storage.data = storage.data or {}
+  storage.missing_section_players = storage.missing_section_players or {}
   storage.data[player.index] = storage.data[player.index] or {
     enabled = constants.AUTOCRAFT_DEFAULT_ENABLED,
     missing_section_name = nil,
@@ -41,24 +42,17 @@ end
 
 local function find_missing_materials_section(player)
   local logistic_point = player.get_requester_point()
-  if not logistic_point then
+  if not logistic_point or not logistic_point.valid then
     return nil
   end
 
   local data = get_player_data(player)
-  local section_name = get_missing_materials_section_name(player)
+  local current_name = get_missing_materials_section_name(player)
+  local stored_name = data.missing_section_name
 
   for _, section in pairs(logistic_point.sections) do
-    if section.is_manual and section.group == section_name then
+    if section.is_manual and (section.group == current_name or (stored_name and section.group == stored_name)) then
       return section
-    end
-  end
-
-  if data.missing_section_name and data.missing_section_name ~= section_name then
-    for _, section in pairs(logistic_point.sections) do
-      if section.is_manual and section.group == data.missing_section_name then
-        return section
-      end
     end
   end
 
@@ -81,6 +75,7 @@ local function ensure_missing_materials_section(player)
     end
     section.active = true
     data.missing_section_name = section_name
+    storage.missing_section_players[player.index] = true
     return section
   end
 
@@ -88,6 +83,7 @@ local function ensure_missing_materials_section(player)
   if section then
     section.active = true
     data.missing_section_name = section_name
+    storage.missing_section_players[player.index] = true
   end
 
   return section
@@ -107,6 +103,7 @@ local function remove_missing_materials_section(player)
   end
 
   data.missing_section_name = nil
+  storage.missing_section_players[player.index] = nil
 end
 
 local function write_missing_materials_section(player, requests)
@@ -198,13 +195,12 @@ local function section_has_autocraft_ability(player, section)
   return false
 end
 
-local function should_include_section(player, section)
+local function should_include_section(player, section, missing_section_index)
   if not autocraft.is_enabled(player) then
     return false
   end
 
-  local missing_section = find_missing_materials_section(player)
-  if missing_section and missing_section.valid and section.index == missing_section.index then
+  if missing_section_index and section.index == missing_section_index then
     return false
   end
 
@@ -214,13 +210,16 @@ end
 local function get_requested_items(player)
   local requested_items = {}
   local logistic_point = player.get_requester_point()
-  if not logistic_point then
+  if not logistic_point or not logistic_point.valid then
     return requested_items
   end
 
+  local missing_section = find_missing_materials_section(player)
+  local missing_section_index = missing_section and missing_section.valid and missing_section.index or nil
+
   -- 先筛出本次应参与自动手搓的物流分组，再把同类物品的最小保有量汇总成一个总需求。
   for _, section in pairs(logistic_point.sections) do
-    if should_include_section(player, section) then
+    if should_include_section(player, section, missing_section_index) then
       for _, filter in pairs(section.filters) do
         if filter.min and filter.min > 0 then
           local item_name = nil
@@ -386,7 +385,21 @@ local function get_item_requests(player, crafting_complete, completed_item_name)
   return item_requests
 end
 
-local function item_id_to_name(item)
+local item_id_to_name
+
+local function get_hand_item_name(player)
+  if player.cursor_stack and player.cursor_stack.valid_for_read then
+    return player.cursor_stack.name
+  end
+
+  if player.cursor_ghost then
+    return item_id_to_name(player.cursor_ghost.name)
+  end
+
+  return nil
+end
+
+item_id_to_name = function(item)
   if type(item) == "string" then
     return item
   end
@@ -500,12 +513,7 @@ local function update_missing_materials_section(player, target_item_name, target
   write_missing_materials_section(player, missing_requests)
 end
 
-local function pick_recipe(player, crafting_complete, completed_item_name)
-  local item_requests = get_item_requests(player, crafting_complete, completed_item_name)
-  if #item_requests == 0 then
-    return nil
-  end
-
+local function sort_item_requests(item_requests)
   table.sort(item_requests, function(a, b)
     if a.ratio ~= b.ratio then
       return a.ratio < b.ratio
@@ -517,65 +525,13 @@ local function pick_recipe(player, crafting_complete, completed_item_name)
 
     return a.name < b.name
   end)
-
-  local hand_item_name = nil
-  if player.cursor_stack and player.cursor_stack.valid_for_read then
-    hand_item_name = player.cursor_stack.name
-  elseif player.cursor_ghost then
-    hand_item_name = item_id_to_name(player.cursor_ghost.name)
-  end
-
-  if hand_item_name then
-    for _, item_request in pairs(item_requests) do
-      if item_request.name == hand_item_name then
-        local recipe_name = recipe_for_item(player, hand_item_name)
-        if recipe_name then
-          return hand_item_name, recipe_name
-        end
-        break
-      end
-    end
-  end
-
-  for _, item_request in pairs(item_requests) do
-    local recipe_name = recipe_for_item(player, item_request.name)
-    if recipe_name then
-      return item_request.name, recipe_name
-    end
-  end
-
-  return nil
 end
 
-local function pick_target_recipe(player, crafting_complete, completed_item_name)
-  local item_requests = get_item_requests(player, crafting_complete, completed_item_name)
-  if #item_requests == 0 then
-    return nil
-  end
-
-  table.sort(item_requests, function(a, b)
-    if a.ratio ~= b.ratio then
-      return a.ratio < b.ratio
-    end
-
-    if a.missing ~= b.missing then
-      return a.missing > b.missing
-    end
-
-    return a.name < b.name
-  end)
-
-  local hand_item_name = nil
-  if player.cursor_stack and player.cursor_stack.valid_for_read then
-    hand_item_name = player.cursor_stack.name
-  elseif player.cursor_ghost then
-    hand_item_name = item_id_to_name(player.cursor_ghost.name)
-  end
-
+local function pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_picker)
   if hand_item_name then
     for _, item_request in pairs(item_requests) do
       if item_request.name == hand_item_name then
-        local recipe_name = recipe_for_item_any(player, hand_item_name)
+        local recipe_name = recipe_picker(player, hand_item_name)
         if recipe_name then
           return hand_item_name, recipe_name
         end
@@ -585,7 +541,7 @@ local function pick_target_recipe(player, crafting_complete, completed_item_name
   end
 
   for _, item_request in pairs(item_requests) do
-    local recipe_name = recipe_for_item_any(player, item_request.name)
+    local recipe_name = recipe_picker(player, item_request.name)
     if recipe_name then
       return item_request.name, recipe_name
     end
@@ -612,7 +568,17 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
     return
   end
 
-  local target_item_name, target_recipe_name = pick_target_recipe(player, crafting_complete, completed_item_name)
+  local item_requests = get_item_requests(player, crafting_complete, completed_item_name)
+  if #item_requests == 0 then
+    remove_missing_materials_section(player)
+    return
+  end
+
+  sort_item_requests(item_requests)
+
+  local hand_item_name = get_hand_item_name(player)
+  local target_item_name, target_recipe_name =
+    pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_for_item_any)
   update_missing_materials_section(player, target_item_name, target_recipe_name)
 
   local allowed_queue_length = crafting_complete and 0 or 1
@@ -623,7 +589,8 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
   storage.data = storage.data or {}
   local data = storage.data[player.index] or {}
 
-  local item_name, recipe_name = pick_recipe(player, crafting_complete, completed_item_name)
+  local item_name, recipe_name =
+    pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_for_item)
   if recipe_name then
     data.active_item_name = item_name
     data.active_recipe_name = recipe_name

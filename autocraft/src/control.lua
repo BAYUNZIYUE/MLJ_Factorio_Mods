@@ -43,8 +43,17 @@ local function sync_player_state(event)
 end
 
 local function keep_missing_sections_enabled()
-  for _, player in pairs(game.players) do
-    autocraft.keep_missing_materials_section_enabled(player)
+  if not storage.missing_section_players then
+    return
+  end
+
+  for player_index in pairs(storage.missing_section_players) do
+    local player = game.get_player(player_index)
+    if player then
+      autocraft.keep_missing_materials_section_enabled(player)
+    else
+      storage.missing_section_players[player_index] = nil
+    end
   end
 end
 
