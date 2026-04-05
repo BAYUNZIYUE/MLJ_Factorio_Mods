@@ -1,0 +1,32 @@
+---------------------------------------------------------------------------------------------------
+Version: 3.0.2
+Date: 2025-02-14
+  Changes:
+    - 修复了调用方法错误的问题.
+    - Fixed an issue with incorrectly called methods.
+---------------------------------------------------------------------------------------------------
+Version: 3.0.1
+Date: 2024-11-26
+  Changes:
+    - 修复会重复给予物品的bug.
+    - 移除给予的额外物品（机器人除外），因为本身开局就有足够的物品.
+    - Fixed bug that items would be given repeatedly.
+    - Remove the extra items given (except for robots) as there are enough items in the opening itself.
+---------------------------------------------------------------------------------------------------
+Version: 3.0.0
+Date: 2024-11-24
+  Changes:
+    - 适配原版2.0以及py3.0.
+    - 暂时不考虑品质，因为PY不推荐启用品质.
+    - Adapted to stock 2.0 and py3.0.
+    - Don't consider quality for now, because PY doesn't recommend enabling quality.
+---------------------------------------------------------------------------------------------------
+Version: 2.0.0
+Date: 2023-11-24
+  Changes:
+    - 修改装甲为MK2，并在内部添加发电装置及电池.
+    - 修改建筑机器人为py高科技机器人.
+    - 添加py高新科技依赖.
+    - Changed armor to MK2 and added power generator and battery inside.
+    - Changed construction robots to py high tech robots.
+    - Added pyalternativeenergy dependency.

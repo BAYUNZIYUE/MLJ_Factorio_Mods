@@ -1,0 +1,15 @@
+{
+    "name": "py_quick_start",
+    "version": "3.0.2",
+    "factorio_version": "2.0",
+    "title": "Pyanodons Quick Start",
+    "author": "MengLei",
+    "contact": "",
+    "homepage": "",
+    "description": "给予能量装甲MK2和pY建设机器人MK4。\nGives power armor MK2 and pY construction robot MK4.",
+    "dependencies": [
+        "base",
+        "pyalternativeenergy",
+        "? Kux-PersonalTeleport"
+    ]
+}
