@@ -18,4 +18,34 @@ data:extend({
     filename = crafting_finished and crafting_finished.filename or "__core__/sound/crafting-finished.ogg",
     volume = crafting_finished and crafting_finished.volume or 0.75,
   },
+  {
+    type = "virtual-signal",
+    name = constants.AUTOCRAFT_WRENCH_SIGNAL_NAME,
+    icons = {
+      {
+        icon = "__base__/graphics/icons/signal/signal_white.png",
+        icon_size = 64,
+        icon_mipmaps = 4,
+      },
+      {
+        icon = "__autocraft__/graphics/icon/wrench-signal-64.png",
+        icon_size = 64,
+        icon_mipmaps = 1,
+      },
+    },
+    icon_size = 64,
+    icon_mipmaps = 4,
+    subgroup = "virtual-signal-special",
+    order = "a[autocraft]-a[wrench]",
+  },
+  {
+    type = "shortcut",
+    name = constants.AUTOCRAFT_SHORTCUT_NAME,
+    action = "lua",
+    toggleable = true,
+    icon = "__autocraft__/graphics/icon/wrench-shortcut-32.png",
+    icon_size = 32,
+    small_icon = "__autocraft__/graphics/icon/wrench-shortcut-24.png",
+    small_icon_size = 24,
+  },
 })

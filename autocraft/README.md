@@ -1,14 +1,13 @@
 # Autocraft
 
-A [Factorio](https://factorio.com/) mod for automatically hand-crafting items based on
-a logistics section named `Autocraft-<player name>`. When that section is active, Autocraft
-automatically hand-crafts missing items for the current player. It can also include other active
-logistics sections when the `Existing sections use autocraft` runtime-per-user setting is enabled.
+A [Factorio](https://factorio.com/) mod for automatically hand-crafting items based on matching
+logistics sections. A wrench virtual signal can be used as a configurable prefix, and the match
+mode can be switched between full match, prefix, player name, and prefix+player name. When the
+shortcut is enabled, Autocraft automatically hand-crafts missing items for the current player.
 
-这是一个 [Factorio](https://factorio.com/) 自动手搓模组。它会根据名为 `Autocraft-<玩家名>`
-的物流编组，为当前玩家自动补做缺少的物品。当该编组处于激活状态时，Autocraft 会参与自动手搓。
-如果启用了 `Existing sections use autocraft` 这个玩家运行时设置，还会把其他已激活的普通物流编组
-一并纳入自动手搓计算。
+这是一个 [Factorio](https://factorio.com/) 自动手搓模组。它会根据匹配的物流编组
+自动补做当前玩家缺少的物品。你可以把扳手虚拟信号作为可配置前缀，并在“全匹配 / 前缀 /
+玩家名 / 前缀+玩家名”之间切换匹配模式。开启右下角快捷按钮后，Autocraft 会开始自动手搓。
 
 Missing amount is calculated from the combined section requests, then reduced by:
 
@@ -22,7 +21,7 @@ Missing amount is calculated from the combined section requests, then reduced by
 - 当前物流网络里已经有的数量
 - 当前已经排进手搓队列的数量
 
-## Download
+## Download / 下载
 
 Download on the [Factorio mod portal](https://mods.factorio.com/mod/autocraft),
 either on the website or in-game.
@@ -30,11 +29,11 @@ either on the website or in-game.
 可在 [Factorio 模组门户](https://mods.factorio.com/mod/autocraft) 下载，
 也可以直接在游戏内安装。
 
-## Screenshots
+## Screenshots / 截图
 
 TODO: take screenshots
 
-# Development
+# Development / 开发
 
 Autocraft now lives directly as Lua source under `src/`.
 
@@ -58,7 +57,31 @@ before launching the game.
 （也就是压缩包最外层那一层，不是 `src/`）解压到 `%AppData%\Factorio\mods`，
 并在启动游戏前移除同模组的旧 zip 或旧文件夹版本。
 
-# Icons
+### Autocraft prefix / 自动手搓前缀
+
+The prefix is configured with the wrench virtual signal, sourced from
+https://www.svgrepo.com/svg/286868/wrench-repair under a CC0 license.
+
+前缀使用扳手虚拟信号配置，图标来源为
+https://www.svgrepo.com/svg/286868/wrench-repair ，许可为 CC0。
+
+### Match modes / 匹配模式
+
+`Full match / 全匹配`: every section can autocraft.
+
+`Prefix / 前缀`: sections whose names start with the configured prefix can autocraft.
+
+`Player name / 玩家名`: sections whose names start with the current player name can autocraft.
+
+`Prefix + player name / 前缀+玩家名`: sections whose names start with the configured prefix followed by the current player name can autocraft.
+
+### Shortcut / 快捷按钮
+
+The lower-right shortcut toggles autocrafting on and off. Turning it off cancels the module-owned crafting queue and clears active autocraft state. The default state is enabled.
+
+右下角快捷按钮用于开启或关闭自动手搓。关闭时会取消模组建立的手搓队列，并清空当前自动手搓状态。默认状态为启用。
+
+# Icons / 图标
 
 This project includes icons from Flaticon, which are licensed under their respective licenses.
 

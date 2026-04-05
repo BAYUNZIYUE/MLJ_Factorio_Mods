@@ -2,31 +2,69 @@ local constants = require("constants")
 
 local autocraft = {}
 
-local function get_autocraft_logistics_section_name(player)
-  return constants.AUTOCRAFT_LOGISTICS_SECTION_PREFIX .. "-" .. player.name
+local function starts_with(value, prefix)
+  return string.sub(value, 1, #prefix) == prefix
 end
 
-local function is_named_autocraft_section(section)
-  return section.is_manual and (
-    section.group == constants.AUTOCRAFT_LOGISTICS_SECTION_PREFIX
-    or string.sub(section.group, 1, #constants.AUTOCRAFT_LOGISTICS_SECTION_PREFIX + 1)
-      == constants.AUTOCRAFT_LOGISTICS_SECTION_PREFIX .. "-"
-  )
+local function get_player_data(player)
+  storage.data = storage.data or {}
+  storage.data[player.index] = storage.data[player.index] or {
+    enabled = constants.AUTOCRAFT_DEFAULT_ENABLED,
+    default_section_name = nil,
+  }
+  return storage.data[player.index]
 end
 
-local function is_players_autocraft_section(player, section)
-  return section.is_manual and section.group == get_autocraft_logistics_section_name(player)
+local function get_configured_prefix(player)
+  return player.mod_settings[constants.AUTOCRAFT_PREFIX_SETTING].value or ""
+end
+
+local function get_match_mode(player)
+  return player.mod_settings[constants.AUTOCRAFT_MATCH_MODE_SETTING].value
+end
+
+local function get_default_autocraft_logistics_section_name(player)
+  local configured_prefix = get_configured_prefix(player)
+  local match_mode = get_match_mode(player)
+
+  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PLAYER_NAME then
+    return player.name
+  end
+
+  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX then
+    return configured_prefix
+  end
+
+  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX_AND_PLAYER_NAME then
+    return configured_prefix .. player.name
+  end
+
+  return configured_prefix .. player.name
 end
 
 local function find_autocraft_logistics_section(player)
+  local data = get_player_data(player)
   local logistic_point = player.get_requester_point()
   if not logistic_point then
     return nil
   end
 
+  local section_name = get_default_autocraft_logistics_section_name(player)
+  if section_name == "" then
+    return nil
+  end
+
   for _, section in pairs(logistic_point.sections) do
-    if is_players_autocraft_section(player, section) then
+    if section.is_manual and section.group == section_name then
       return section
+    end
+  end
+
+  if data.default_section_name and data.default_section_name ~= section_name then
+    for _, section in pairs(logistic_point.sections) do
+      if section.is_manual and section.group == data.default_section_name then
+        return section
+      end
     end
   end
 
@@ -34,19 +72,30 @@ local function find_autocraft_logistics_section(player)
 end
 
 function autocraft.add_autocraft_logistics_section(player)
+  local data = get_player_data(player)
   local logistic_point = player.get_requester_point()
   if not logistic_point then
     return nil
   end
 
+  local section_name = get_default_autocraft_logistics_section_name(player)
+  if section_name == "" then
+    return nil
+  end
+
   local existing_section = find_autocraft_logistics_section(player)
   if existing_section then
+    if existing_section.group ~= section_name then
+      existing_section.group = section_name
+    end
+    data.default_section_name = section_name
     return existing_section
   end
 
-  local section = logistic_point.add_section(get_autocraft_logistics_section_name(player))
+  local section = logistic_point.add_section(section_name)
   if section then
     section.active = false
+    data.default_section_name = section_name
   end
 
   return section
@@ -70,20 +119,45 @@ function autocraft.pre_compute_recipes()
   return cache
 end
 
-local function should_include_existing_sections(player)
-  return player.mod_settings[constants.AUTOCRAFT_EXISTING_SECTIONS_ENABLED].value
+function autocraft.is_enabled(player)
+  return get_player_data(player).enabled
 end
 
-local function should_include_section(player, section)
-  if not section.active then
-    return false
-  end
+function autocraft.set_enabled(player, enabled)
+  get_player_data(player).enabled = enabled and true or false
+end
 
-  if is_players_autocraft_section(player, section) then
+local function section_has_autocraft_ability(player, section)
+  local section_name = section.group or ""
+  local player_name = player.name
+  local configured_prefix = get_configured_prefix(player)
+  local match_mode = get_match_mode(player)
+
+  if match_mode == constants.AUTOCRAFT_MATCH_MODE_FULL then
     return true
   end
 
-  return should_include_existing_sections(player) and not is_named_autocraft_section(section)
+  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX then
+    return configured_prefix ~= "" and starts_with(section_name, configured_prefix)
+  end
+
+  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PLAYER_NAME then
+    return starts_with(section_name, player_name)
+  end
+
+  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX_AND_PLAYER_NAME then
+    return configured_prefix ~= "" and starts_with(section_name, configured_prefix .. player_name)
+  end
+
+  return false
+end
+
+local function should_include_section(player, section)
+  if not autocraft.is_enabled(player) then
+    return false
+  end
+
+  return section.active and section_has_autocraft_ability(player, section)
 end
 
 local function get_requested_items(player)
@@ -114,6 +188,37 @@ local function get_requested_items(player)
   end
 
   return requested_items
+end
+
+local function get_module_queue_index(player)
+  local data = storage.data and storage.data[player.index] or nil
+  if not data or not data.active_recipe_name or not player.crafting_queue then
+    return nil
+  end
+
+  for index, queue_item in pairs(player.crafting_queue) do
+    local recipe_name = type(queue_item.recipe) == "string" and queue_item.recipe or queue_item.recipe.name
+    if recipe_name == data.active_recipe_name and not queue_item.prerequisite then
+      return index, queue_item
+    end
+  end
+
+  return nil
+end
+
+function autocraft.cancel_active_crafting(player)
+  local data = storage.data and storage.data[player.index] or nil
+  if not data then
+    return
+  end
+
+  local queue_index, queue_item = get_module_queue_index(player)
+  if queue_index and queue_item then
+    player.cancel_crafting({ index = queue_index, count = queue_item.count })
+  end
+
+  data.active_item_name = nil
+  data.active_recipe_name = nil
 end
 
 local function recipe_for_item(player, item_name)
@@ -252,6 +357,10 @@ end
 function autocraft.do_crafting(player, crafting_complete, completed_item_name)
   if crafting_complete == nil then
     crafting_complete = true
+  end
+
+  if not autocraft.is_enabled(player) then
+    return
   end
 
   local is_eligible = player.connected
