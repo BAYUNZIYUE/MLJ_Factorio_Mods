@@ -1,0 +1,11 @@
+{
+  "name": "autocraft-logistics",
+  "version": "1.0.0",
+  "title": "Autocraft",
+  "author": "nmalaguti",
+  "description": "Automatically hand craft items. Similar to HandyHands.",
+  "contact": "https://github.com/nmalaguti/autocraft",
+  "homepage": "https://github.com/nmalaguti/autocraft",
+  "factorio_version": "2.0",
+  "dependencies": ["base", "!HandyHands", "!HandyHandsRefactored"]
+}
