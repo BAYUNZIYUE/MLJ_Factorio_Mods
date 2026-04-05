@@ -72,6 +72,7 @@ python3 pack_mods.py
 - Commit messages in **Chinese**, conventional style: `功能：`, `修复：`, `重构：`, `杂项：`
 - Atomic commits (one logical change per commit)
 - When running `git add` / `git commit` in this workspace, prefer the host Windows Git executable: `'/mnt/c/Program Files/Git/cmd/git.exe'`
+- `git commit` operations must run serially; do not execute multiple commit flows in parallel within the same repository.
 - Do **not** push unless explicitly approved by the user
 
 ## NOTES
