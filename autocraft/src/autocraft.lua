@@ -12,6 +12,7 @@ local function get_player_data(player)
   storage.data[player.index] = storage.data[player.index] or {
     enabled = constants.AUTOCRAFT_DEFAULT_ENABLED,
     missing_section_name = nil,
+    section_status_snapshot = {},
   }
   return storage.data[player.index]
 end
@@ -106,6 +107,14 @@ local function remove_missing_materials_section(player)
   storage.missing_section_players[player.index] = nil
 end
 
+local function build_missing_material_slot(request)
+  -- Factorio 2.0 要求非零 min 的物流请求使用“简单物品”格式，直接传物品名即可。
+  return {
+    value = request.name,
+    min = request.count,
+  }
+end
+
 local function write_missing_materials_section(player, requests)
   local request_list = {}
   for item_name, count in pairs(requests) do
@@ -133,10 +142,7 @@ local function write_missing_materials_section(player, requests)
 
   section.active = true
   for slot_index, request in ipairs(request_list) do
-    section.set_slot(slot_index, {
-      value = { type = "item", name = request.name },
-      min = request.count,
-    })
+    section.set_slot(slot_index, build_missing_material_slot(request))
   end
 
   for slot_index = #request_list + 1, #section.filters do
@@ -206,6 +212,129 @@ local function should_include_section(player, section, missing_section_index)
 
   return section.active and section_has_autocraft_ability(player, section)
 end
+
+local function get_section_message_name(section_name)
+  if section_name and section_name ~= "" then
+    return section_name
+  end
+
+  return { "autocraft-message.autocraft-toggle-status-unnamed-group" }
+end
+
+local function build_section_status_snapshot(player)
+  local snapshot = {}
+  local logistic_point = player.get_requester_point()
+  if not logistic_point or not logistic_point.valid then
+    return snapshot
+  end
+
+  local missing_section = find_missing_materials_section(player)
+  local missing_section_index = missing_section and missing_section.valid and missing_section.index or nil
+
+  -- 这里保存“当前真正生效的自动手搓分组”，后续统一通过快照 diff 决定是否提示。
+  for _, section in pairs(logistic_point.sections) do
+    if should_include_section(player, section, missing_section_index) then
+      snapshot[section.index] = {
+        name = section.group or "",
+      }
+    end
+  end
+
+  return snapshot
+end
+
+local function build_section_status_lines(previous_snapshot, next_snapshot)
+  local changed_sections = {}
+  local indexes = {}
+
+  for section_index in pairs(previous_snapshot) do
+    indexes[section_index] = true
+  end
+  for section_index in pairs(next_snapshot) do
+    indexes[section_index] = true
+  end
+
+  for section_index in pairs(indexes) do
+    local previous_entry = previous_snapshot[section_index]
+    local next_entry = next_snapshot[section_index]
+    local previous_enabled = previous_entry ~= nil
+    local next_enabled = next_entry ~= nil
+
+    if previous_enabled ~= next_enabled then
+      local entry = next_entry or previous_entry
+      changed_sections[#changed_sections + 1] = {
+        name = entry and entry.name or "",
+        enabled = next_enabled,
+      }
+    end
+  end
+
+  table.sort(changed_sections, function(a, b)
+    if a.name ~= b.name then
+      return a.name < b.name
+    end
+
+    if a.enabled ~= b.enabled then
+      return a.enabled and not b.enabled
+    end
+
+    return false
+  end)
+
+  local section_lines = {}
+  for _, change in ipairs(changed_sections) do
+    local action_key = change.enabled and "autocraft-toggle-status-enabled" or "autocraft-toggle-status-disabled"
+    section_lines[#section_lines + 1] = {
+      "autocraft-message.autocraft-toggle-status-line",
+      get_section_message_name(change.name),
+      { "autocraft-message." .. action_key },
+    }
+  end
+
+  return section_lines
+end
+
+local function notify_section_status_lines(player, section_lines)
+  local message = { "" }
+  for index, line in ipairs(section_lines) do
+    if index > 1 then
+      message[#message + 1] = "\n"
+    end
+    message[#message + 1] = line
+  end
+
+  player.print(message)
+end
+
+local function sync_section_status_notifications(player, trigger_mode)
+  local data = get_player_data(player)
+  local previous_snapshot = data.section_status_snapshot or {}
+  local next_snapshot = build_section_status_snapshot(player)
+  data.section_status_snapshot = next_snapshot
+
+  if trigger_mode == nil then
+    return
+  end
+
+  local section_lines = build_section_status_lines(previous_snapshot, next_snapshot)
+  if trigger_mode == "shortcut" then
+    if #section_lines == 0 then
+      player.print({ "autocraft-message.autocraft-toggle-status-empty" })
+      return
+    end
+
+    notify_section_status_lines(player, section_lines)
+    return
+  end
+
+  if trigger_mode == "logistics" then
+    for _, section_line in ipairs(section_lines) do
+      notify_section_status_lines(player, { section_line })
+    end
+  end
+end
+
+autocraft.sync_section_status_notifications = sync_section_status_notifications
 
 local function get_requested_items(player)
   local requested_items = {}
@@ -290,13 +419,23 @@ function autocraft.clear_active_state(player)
   remove_missing_materials_section(player)
 end
 
+local function get_sorted_recipe_names(recipes)
+  local recipe_names = {}
+  for recipe_name in pairs(recipes) do
+    recipe_names[#recipe_names + 1] = recipe_name
+  end
+
+  table.sort(recipe_names)
+  return recipe_names
+end
+
 local function recipe_for_item(player, item_name)
   local recipes = storage.recipes and storage.recipes[item_name]
   if not recipes then
     return nil
   end
 
-  for recipe_name in pairs(recipes) do
+  for _, recipe_name in ipairs(get_sorted_recipe_names(recipes)) do
     local recipe = player.force.recipes[recipe_name]
     local can_craft = recipe and not recipe.hidden and recipe.enabled
       and player.get_craftable_count(recipe_name) > 0
@@ -315,7 +454,7 @@ local function recipe_for_item_any(player, item_name)
     return nil
   end
 
-  for recipe_name in pairs(recipes) do
+  for _, recipe_name in ipairs(get_sorted_recipe_names(recipes)) do
     local recipe = player.force.recipes[recipe_name]
     if recipe and not recipe.hidden and recipe.enabled then
       return recipe_name
@@ -427,15 +566,45 @@ local function get_recipe_output_amount(recipe, item_name)
   return 1
 end
 
-local function accumulate_missing_materials(player, item_name, needed_count, requests, visiting, logistic_network)
-  if needed_count <= 0 then
+local function consume_available_item_count(available_items, item_name, needed_count)
+  local available_count = available_items[item_name] or 0
+  local consumed_count = math.min(available_count, needed_count)
+  available_items[item_name] = available_count - consumed_count
+  return consumed_count
+end
+
+local function accumulate_missing_materials(
+  player,
+  item_name,
+  required_count,
+  requests,
+  visiting,
+  logistic_network,
+  available_inventory_counts,
+  available_network_counts
+)
+  if required_count <= 0 then
     return
   end
 
-  requests[item_name] = (requests[item_name] or 0) + needed_count
+  requests[item_name] = (requests[item_name] or 0) + required_count
 
-  local logistic_network_count = logistic_network and logistic_network.get_item_count(item_name) or 0
-  local unresolved_count = needed_count - logistic_network_count
+  if available_inventory_counts[item_name] == nil then
+    available_inventory_counts[item_name] = player.get_item_count(item_name)
+  end
+
+  local inventory_count = consume_available_item_count(available_inventory_counts, item_name, required_count)
+  local missing_count = required_count - inventory_count
+  if missing_count <= 0 then
+    return
+  end
+
+  if available_network_counts[item_name] == nil then
+    available_network_counts[item_name] = logistic_network and logistic_network.get_item_count(item_name) or 0
+  end
+
+  local logistic_network_count = consume_available_item_count(available_network_counts, item_name, missing_count)
+  local unresolved_count = missing_count - logistic_network_count
   if unresolved_count <= 0 then
     return
   end
@@ -459,10 +628,23 @@ local function accumulate_missing_materials(player, item_name, needed_count, req
 
   for _, ingredient in pairs(recipe.ingredients) do
     if ingredient.type == "item" then
-      local inventory_count = player.get_item_count(ingredient.name)
-      local missing_count = ingredient.amount * crafts_needed - inventory_count
-      if missing_count > 0 then
-        accumulate_missing_materials(player, ingredient.name, missing_count, requests, visiting, logistic_network)
+      if available_inventory_counts[ingredient.name] == nil then
+        available_inventory_counts[ingredient.name] = player.get_item_count(ingredient.name)
+      end
+
+      -- 所有递归分支共享同一份背包库存，避免同一个材料被重复抵扣。
+      local required_count = ingredient.amount * crafts_needed
+      if required_count > 0 then
+        accumulate_missing_materials(
+          player,
+          ingredient.name,
+          required_count,
+          requests,
+          visiting,
+          logistic_network,
+          available_inventory_counts,
+          available_network_counts
+        )
       end
     end
   end
@@ -470,13 +652,13 @@ local function accumulate_missing_materials(player, item_name, needed_count, req
   visiting[item_name] = nil
 end
 
-local function update_missing_materials_section(player, target_item_name, target_recipe_name)
+local function update_missing_materials_section(player, target_item_name, target_recipe_name, target_missing_count)
   if not autocraft.is_enabled(player) then
     remove_missing_materials_section(player)
     return
   end
 
-  if not target_item_name or not target_recipe_name then
+  if not target_item_name or not target_recipe_name or not target_missing_count or target_missing_count <= 0 then
     remove_missing_materials_section(player)
     return
   end
@@ -498,14 +680,25 @@ local function update_missing_materials_section(player, target_item_name, target
 
   local missing_requests = {}
   local has_missing_materials = false
+  local available_inventory_counts = {}
+  local available_network_counts = {}
+  local crafts_needed = math.ceil(target_missing_count / get_recipe_output_amount(recipe, target_item_name))
 
   for _, ingredient in pairs(recipe.ingredients) do
     if ingredient.type == "item" then
-      local inventory_count = player.get_item_count(ingredient.name)
-      local missing_count = ingredient.amount - inventory_count
-      if missing_count > 0 then
+      local required_count = ingredient.amount * crafts_needed
+      if required_count > 0 then
         has_missing_materials = true
-        accumulate_missing_materials(player, ingredient.name, missing_count, missing_requests, {}, logistic_network)
+        accumulate_missing_materials(
+          player,
+          ingredient.name,
+          required_count,
+          missing_requests,
+          {},
+          logistic_network,
+          available_inventory_counts,
+          available_network_counts
+        )
       end
     end
   end
@@ -538,7 +731,7 @@ local function pick_recipe_from_requests(player, item_requests, hand_item_name, 
       if item_request.name == hand_item_name then
         local recipe_name = recipe_picker(player, hand_item_name)
         if recipe_name then
-          return hand_item_name, recipe_name
+          return item_request, recipe_name
         end
         break
       end
@@ -548,7 +741,7 @@ local function pick_recipe_from_requests(player, item_requests, hand_item_name, 
   for _, item_request in pairs(item_requests) do
     local recipe_name = recipe_picker(player, item_request.name)
     if recipe_name then
-      return item_request.name, recipe_name
+      return item_request, recipe_name
     end
   end
 
@@ -582,9 +775,15 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
   sort_item_requests(item_requests)
 
   local hand_item_name = get_hand_item_name(player)
-  local target_item_name, target_recipe_name =
+  local target_item_request, target_recipe_name =
     pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_for_item_any)
-  update_missing_materials_section(player, target_item_name, target_recipe_name)
+  local target_item_name = target_item_request and target_item_request.name or nil
+  update_missing_materials_section(
+    player,
+    target_item_name,
+    target_recipe_name,
+    target_item_request and target_item_request.missing or nil
+  )
 
   local allowed_queue_length = crafting_complete and 0 or 1
   if player.crafting_queue and #player.crafting_queue > allowed_queue_length then
@@ -594,8 +793,9 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
   storage.data = storage.data or {}
   local data = storage.data[player.index] or {}
 
-  local item_name, recipe_name =
+  local item_request, recipe_name =
     pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_for_item)
+  local item_name = item_request and item_request.name or nil
   if recipe_name then
     data.active_item_name = item_name
     data.active_queue_index = player.crafting_queue and (#player.crafting_queue + 1) or 1

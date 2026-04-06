@@ -21,6 +21,7 @@ local function on_configuration_changed()
 
   for _, player in pairs(game.players) do
     sync_shortcut_state(player)
+    autocraft.sync_section_status_notifications(player)
   end
 end
 
@@ -36,6 +37,7 @@ local function sync_player_state(event)
   end
 
   sync_shortcut_state(player)
+  autocraft.sync_section_status_notifications(player)
 
   if autocraft.is_enabled(player) then
     autocraft.do_crafting(player)
@@ -57,6 +59,12 @@ local function keep_missing_sections_enabled()
   end
 end
 
+local function sync_section_status_notifications_for_connected_players()
+  for _, player in pairs(game.connected_players) do
+    autocraft.sync_section_status_notifications(player, "logistics")
+  end
+end
+
 local function trigger_crafting(event)
   local player = game.get_player(event.player_index)
   if not player then
@@ -68,6 +76,10 @@ local function trigger_crafting(event)
     and event.gui_type ~= defines.gui_type.controller
   ) then
     return
+  end
+
+  if event.name == defines.events.on_gui_closed and event.gui_type == defines.gui_type.controller then
+    autocraft.sync_section_status_notifications(player, "logistics")
   end
 
   autocraft.do_crafting(player)
@@ -138,6 +150,7 @@ local function on_lua_shortcut(event)
   local enabled = not autocraft.is_enabled(player)
   autocraft.set_enabled(player, enabled)
   sync_shortcut_state(player)
+  autocraft.sync_section_status_notifications(player, "shortcut")
 
   if enabled then
     autocraft.do_crafting(player)
@@ -161,6 +174,7 @@ local function on_runtime_mod_setting_changed(event)
   end
 
   sync_shortcut_state(player)
+  autocraft.sync_section_status_notifications(player)
 
   if autocraft.is_enabled(player) then
     autocraft.do_crafting(player)
@@ -182,3 +196,4 @@ script.on_event(defines.events.on_force_reset, enable_player_force_logistics_req
 script.on_event(defines.events.on_forces_merged, enable_player_force_logistics_requests)
 script.on_event(defines.events.on_technology_effects_reset, enable_player_force_logistics_requests)
 script.on_nth_tick(1, keep_missing_sections_enabled)
+script.on_nth_tick(30, sync_section_status_notifications_for_connected_players)
