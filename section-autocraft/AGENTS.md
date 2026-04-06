@@ -1,16 +1,16 @@
-# Autocraft Notes
+# Section Autocraft Notes
 
 ## OVERVIEW
 This mod now lives directly as Lua source under `src/*.lua` and can be packaged or deployed without a TS compilation step.
 
 ## WHERE TO LOOK
-- Metadata: `autocraft/src/info.json`
-- Runtime entry: `autocraft/src/control.lua`
-- Data stage: `autocraft/src/data.lua`, `autocraft/src/data-final-fixes.lua`
-- Settings stage: `autocraft/src/settings.lua`
-- Core logic: `autocraft/src/autocraft.lua`
-- Shared constants: `autocraft/src/constants.lua`
-- Build and deployment notes: `autocraft/README.md`
+- Metadata: `section-autocraft/src/info.json`
+- Runtime entry: `section-autocraft/src/control.lua`
+- Data stage: `section-autocraft/src/data.lua`, `section-autocraft/src/data-final-fixes.lua`
+- Settings stage: `section-autocraft/src/settings.lua`
+- Core logic: `section-autocraft/src/autocraft.lua`
+- Shared constants: `section-autocraft/src/constants.lua`
+- Build and deployment notes: `section-autocraft/README.md`
 
 ## CONVENTIONS
 - Treat this directory as a normal Lua Factorio mod.

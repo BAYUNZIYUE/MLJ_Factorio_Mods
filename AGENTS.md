@@ -13,7 +13,7 @@ MLJ_Factorio_Mods/
 ├── pack_mods.py                # discovers `<mod>/src/info.json`, validates, zips into ModZips/
 ├── ModZips/                    # packaged artifacts only; do not edit as source
 ├── MOD编写说明.txt             # local reminder of official Factorio docs and stage order
-├── autocraft/                  # runtime/data/settings mod authored directly in Lua
+├── section-autocraft/          # runtime/data/settings mod authored directly in Lua
 ├── DynamicInventory/           # runtime-only inventory resizing mod
 ├── factorio-todo-list/         # largest mod; todo domain + UI + spec tests
 ├── mythic-quality-fg/          # small prototype/settings-heavy mod
@@ -30,7 +30,7 @@ MLJ_Factorio_Mods/
 | Platform/cargo logic | `ups_saving_quality_ships/` | Event-driven runtime split into script modules |
 | Prototype and quality tuning changes | `mythic-quality-fg/` | `data.lua` forwards into `src/prototypes/`, while `data-updates.lua` tweaks quality behavior |
 | Runtime-only player inventory logic | `DynamicInventory/`, `py_quick_start/` | No `data.lua`; mainly `control.lua` + `settings.lua` |
-| Autocraft runtime/data work | `autocraft/` | Lua sources live directly under `src/` |
+| Section Autocraft runtime/data work | `section-autocraft/` | Lua sources live directly under `src/` |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
@@ -45,7 +45,7 @@ MLJ_Factorio_Mods/
 ## CONVENTIONS
 - Treat the official docs as authority: `https://lua-api.factorio.com/latest/`, especially Data Lifecycle, Runtime, Prototype, Mod Structure, Migrations, and Events.
 - This workspace stores mod metadata at `<mod>/src/info.json`, not at the mod root. `pack_mods.py` only discovers projects with that layout.
-- `pack_mods.py` accepts standard Factorio entrypoint names in `src/` (`control.*`, `data.*`, `settings.*`, update/final-fixes variants); `autocraft` is now authored directly in Lua.
+- `pack_mods.py` accepts standard Factorio entrypoint names in `src/` (`control.*`, `data.*`, `settings.*`, update/final-fixes variants); `section-autocraft` is now authored directly in Lua.
 - Zip outputs must be `{info.name}_{info.version}.zip`, and the archive root must be that directory name rather than loose files.
 - Runtime persistence uses `storage`, not legacy `global`.
 - Locale files stay under `src/locale/<lang>/...`; do not create AGENTS files inside locale trees.
