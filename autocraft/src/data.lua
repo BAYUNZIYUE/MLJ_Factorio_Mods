@@ -21,20 +21,9 @@ data:extend({
   {
     type = "virtual-signal",
     name = constants.AUTOCRAFT_WRENCH_SIGNAL_NAME,
-    icons = {
-      {
-        icon = "__base__/graphics/icons/signal/signal_white.png",
-        icon_size = 64,
-        icon_mipmaps = 4,
-      },
-      {
-        icon = "__autocraft__/graphics/icon/wrench-signal-64.png",
-        icon_size = 64,
-        icon_mipmaps = 1,
-      },
-    },
+    icon = "__autocraft__/graphics/icon/wrench-signal-64.png",
     icon_size = 64,
-    icon_mipmaps = 4,
+    icon_mipmaps = 1,
     subgroup = "virtual-signal-special",
     order = "a[autocraft]-a[wrench]",
   },
