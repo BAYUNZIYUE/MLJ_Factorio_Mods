@@ -36,9 +36,9 @@ end
 local function get_missing_materials_section_name(player)
   local display_prefix = get_display_prefix(player)
   if player.locale and starts_with(player.locale, "zh") then
-    return "[自动]自动手搓" .. display_prefix .. player.name .. "-缺失材料"
+    return "[自动]" .. display_prefix .. player.name .. "-缺失材料"
   end
-  return "[Auto]Autocraft" .. display_prefix .. player.name .. "-Missing materials"
+  return "[Auto]" .. display_prefix .. player.name .. "-Missing materials"
 end
 
 local function find_missing_materials_section(player)
@@ -115,6 +115,57 @@ local function build_missing_material_slot(request)
   }
 end
 
+local function count_item_partial_space(main_inventory, item_name)
+  local partial_space = 0
+  for slot_index = 1, #main_inventory do
+    local stack = main_inventory[slot_index]
+    if stack.valid_for_read and stack.name == item_name then
+      partial_space = partial_space + math.max(0, stack.prototype.stack_size - stack.count)
+    end
+  end
+
+  return partial_space
+end
+
+local function cap_requests_to_main_inventory_capacity(player, request_list)
+  local main_inventory = player.get_main_inventory()
+  if not main_inventory or not main_inventory.valid then
+    return request_list
+  end
+
+  local remaining_empty_stacks = main_inventory.count_empty_stacks(false, false)
+  local capped_requests = {}
+
+  -- 多种缺料会竞争同一批空格，所以这里按当前排序顺序共享分配空栈容量。
+  for _, request in ipairs(request_list) do
+    local prototype = prototypes.item[request.name]
+    if not prototype then
+      capped_requests[#capped_requests + 1] = request
+    else
+      local stack_size = prototype.stack_size
+      local current_count = main_inventory.get_item_count(request.name)
+      local partial_space = count_item_partial_space(main_inventory, request.name)
+      local max_target_count = current_count + partial_space + remaining_empty_stacks * stack_size
+      local capped_count = math.min(request.count, max_target_count)
+      capped_count = math.max(capped_count, current_count)
+
+      if capped_count > 0 then
+        capped_requests[#capped_requests + 1] = {
+          name = request.name,
+          count = capped_count,
+        }
+      end
+
+      local extra_reserved = math.max(0, capped_count - current_count)
+      local extra_from_empty = math.max(0, extra_reserved - partial_space)
+      local empty_stacks_used = stack_size > 0 and math.ceil(extra_from_empty / stack_size) or 0
+      remaining_empty_stacks = math.max(0, remaining_empty_stacks - empty_stacks_used)
+    end
+  end
+
+  return capped_requests
+end
+
 local function write_missing_materials_section(player, requests)
   local request_list = {}
   for item_name, count in pairs(requests) do
@@ -134,6 +185,8 @@ local function write_missing_materials_section(player, requests)
   table.sort(request_list, function(a, b)
     return a.name < b.name
   end)
+
+  request_list = cap_requests_to_main_inventory_capacity(player, request_list)
 
   local section = ensure_missing_materials_section(player)
   if not section or not section.valid then
