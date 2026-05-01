@@ -20,6 +20,7 @@ local function on_configuration_changed()
   enable_player_force_logistics_requests()
 
   for _, player in pairs(game.players) do
+    autocraft.mark_sections_dirty(player)
     sync_shortcut_state(player)
     autocraft.sync_section_status_notifications(player)
   end
@@ -37,6 +38,7 @@ local function sync_player_state(event)
   end
 
   sync_shortcut_state(player)
+  autocraft.mark_sections_dirty(player)
   autocraft.sync_section_status_notifications(player)
 
   if autocraft.is_enabled(player) then
@@ -45,11 +47,15 @@ local function sync_player_state(event)
 end
 
 local function keep_missing_sections_enabled()
+  local profiler = autocraft.start_profile()
   if not storage.missing_section_players then
+    autocraft.record_profile("control.keep_missing_sections_enabled", profiler, { no_players_table = 1 })
     return
   end
 
+  local watched_players = 0
   for player_index in pairs(storage.missing_section_players) do
+    watched_players = watched_players + 1
     local player = game.get_player(player_index)
     if player then
       autocraft.keep_missing_materials_section_enabled(player)
@@ -57,12 +63,17 @@ local function keep_missing_sections_enabled()
       storage.missing_section_players[player_index] = nil
     end
   end
+  autocraft.record_profile("control.keep_missing_sections_enabled", profiler, { watched_players = watched_players })
 end
 
 local function sync_section_status_notifications_for_connected_players()
+  local profiler = autocraft.start_profile()
+  local connected_players = 0
   for _, player in pairs(game.connected_players) do
+    connected_players = connected_players + 1
     autocraft.sync_section_status_notifications(player, "logistics")
   end
+  autocraft.record_profile("control.sync_section_status_notifications", profiler, { connected_players = connected_players })
 end
 
 local function trigger_crafting(event)
@@ -79,6 +90,7 @@ local function trigger_crafting(event)
   end
 
   if event.name == defines.events.on_gui_closed and event.gui_type == defines.gui_type.controller then
+    autocraft.mark_sections_dirty(player)
     autocraft.sync_section_status_notifications(player, "logistics")
   end
 
@@ -174,6 +186,9 @@ local function on_runtime_mod_setting_changed(event)
   end
 
   sync_shortcut_state(player)
+  if event.setting == constants.AUTOCRAFT_PREFIX_SETTING or event.setting == constants.AUTOCRAFT_MATCH_MODE_SETTING then
+    autocraft.mark_sections_dirty(player)
+  end
   autocraft.sync_section_status_notifications(player)
 
   if autocraft.is_enabled(player) then
@@ -181,8 +196,39 @@ local function on_runtime_mod_setting_changed(event)
   end
 end
 
+local function on_performance_profile_command(event)
+  local parameter = event.parameter or ""
+  local enabled = nil
+  if parameter == "" then
+    enabled = not autocraft.is_performance_debug_enabled()
+  elseif parameter == "on" then
+    enabled = true
+  elseif parameter == "off" then
+    enabled = false
+  else
+    local player = event.player_index and game.get_player(event.player_index) or nil
+    if player then
+      player.print("Usage: /section-autocraft-profile on|off")
+    end
+    return
+  end
+
+  autocraft.set_performance_debug_enabled(enabled)
+  local state_text = enabled and "enabled" or "disabled"
+  local player = event.player_index and game.get_player(event.player_index) or nil
+  if player then
+    player.print("Section Autocraft performance profile " .. state_text .. ".")
+  end
+  log("[section-autocraft-profile] " .. state_text .. " at tick " .. game.tick)
+end
+
 script.on_init(on_init)
 script.on_configuration_changed(on_configuration_changed)
+commands.add_command(
+  "section-autocraft-profile",
+  "Toggle Section Autocraft performance profile logging. Usage: /section-autocraft-profile on|off",
+  on_performance_profile_command
+)
 
 script.on_event(defines.events.on_player_crafted_item, on_player_crafted_item)
 script.on_event(defines.events.on_player_cancelled_crafting, on_player_cancelled_crafting)
@@ -195,5 +241,5 @@ script.on_event(defines.events.on_player_controller_changed, sync_player_state)
 script.on_event(defines.events.on_force_reset, enable_player_force_logistics_requests)
 script.on_event(defines.events.on_forces_merged, enable_player_force_logistics_requests)
 script.on_event(defines.events.on_technology_effects_reset, enable_player_force_logistics_requests)
-script.on_nth_tick(1, keep_missing_sections_enabled)
+script.on_nth_tick(60, keep_missing_sections_enabled)
 script.on_nth_tick(30, sync_section_status_notifications_for_connected_players)

@@ -2,19 +2,162 @@ local constants = require("constants")
 
 local autocraft = {}
 
+local performance_profile_state = {
+  next_log_tick = nil,
+  scopes = {},
+}
+
 local function starts_with(value, prefix)
   return string.sub(value, 1, #prefix) == prefix
+end
+
+local function reset_performance_profile_state()
+  performance_profile_state.scopes = {}
+  performance_profile_state.next_log_tick = game and (game.tick + 60) or nil
+end
+
+local function is_performance_debug_enabled()
+  return not storage or storage.autocraft_performance_debug_enabled ~= false
+end
+
+local function build_profile_detail_text(details)
+  if not details then
+    return ""
+  end
+
+  local keys = {}
+  for key in pairs(details) do
+    keys[#keys + 1] = key
+  end
+  table.sort(keys)
+
+  local parts = {}
+  for _, key in ipairs(keys) do
+    parts[#parts + 1] = " " .. key .. "=" .. tostring(details[key])
+  end
+  return table.concat(parts)
+end
+
+local function flush_performance_profile()
+  if not is_performance_debug_enabled() then
+    reset_performance_profile_state()
+    return
+  end
+
+  if not performance_profile_state.next_log_tick then
+    performance_profile_state.next_log_tick = game.tick + 60
+    return
+  end
+
+  if game.tick < performance_profile_state.next_log_tick then
+    return
+  end
+
+  local scope_names = {}
+  for scope_name in pairs(performance_profile_state.scopes) do
+    scope_names[#scope_names + 1] = scope_name
+  end
+  table.sort(scope_names)
+
+  for _, scope_name in ipairs(scope_names) do
+    local scope = performance_profile_state.scopes[scope_name]
+    if scope.calls > 0 then
+      local average = game.create_profiler(true)
+      average.add(scope.total)
+      average.divide(scope.calls)
+      log({
+        "",
+        "[section-autocraft-profile] tick=",
+        tostring(game.tick),
+        " scope=",
+        scope_name,
+        " calls=",
+        tostring(scope.calls),
+        build_profile_detail_text(scope.details),
+        " avg=",
+        average,
+        " total=",
+        scope.total,
+      })
+    end
+  end
+
+  performance_profile_state.scopes = {}
+  performance_profile_state.next_log_tick = game.tick + 60
+end
+
+function autocraft.start_profile()
+  if not is_performance_debug_enabled() then
+    return nil
+  end
+
+  return game.create_profiler()
+end
+
+function autocraft.record_profile(scope_name, profiler, details)
+  if not profiler then
+    return
+  end
+
+  profiler.stop()
+  local scope = performance_profile_state.scopes[scope_name]
+  if not scope then
+    scope = {
+      calls = 0,
+      details = {},
+      total = game.create_profiler(true),
+    }
+    performance_profile_state.scopes[scope_name] = scope
+  end
+
+  scope.calls = scope.calls + 1
+  scope.total.add(profiler)
+  if details then
+    for key, value in pairs(details) do
+      scope.details[key] = (scope.details[key] or 0) + value
+    end
+  end
+
+  flush_performance_profile()
+end
+
+function autocraft.is_performance_debug_enabled()
+  return is_performance_debug_enabled()
+end
+
+function autocraft.set_performance_debug_enabled(enabled)
+  storage.autocraft_performance_debug_enabled = enabled and true or false
+  reset_performance_profile_state()
 end
 
 local function get_player_data(player)
   storage.data = storage.data or {}
   storage.missing_section_players = storage.missing_section_players or {}
-  storage.data[player.index] = storage.data[player.index] or {
+  local data = storage.data[player.index] or {
     enabled = constants.AUTOCRAFT_DEFAULT_ENABLED,
+    missing_section_index = nil,
     missing_section_name = nil,
+    request_cache_dirty = true,
+    requested_items_cache = nil,
+    section_status_dirty = true,
     section_status_snapshot = {},
   }
-  return storage.data[player.index]
+  if data.request_cache_dirty == nil then
+    data.request_cache_dirty = true
+  end
+  if data.section_status_dirty == nil then
+    data.section_status_dirty = true
+  end
+  data.section_status_snapshot = data.section_status_snapshot or {}
+  storage.data[player.index] = data
+  return data
+end
+
+local function mark_sections_dirty(player)
+  local data = get_player_data(player)
+  data.request_cache_dirty = true
+  data.requested_items_cache = nil
+  data.section_status_dirty = true
 end
 
 local function get_configured_prefix(player)
@@ -41,22 +184,63 @@ local function get_missing_materials_section_name(player)
   return "[Auto]" .. display_prefix .. player.name .. "-Missing materials"
 end
 
+local function build_section_match_context(player)
+  local data = get_player_data(player)
+  return {
+    enabled = data.enabled,
+    configured_prefix = get_configured_prefix(player),
+    current_missing_section_name = get_missing_materials_section_name(player),
+    match_mode = get_match_mode(player),
+    player_name = player.name,
+    stored_missing_section_name = data.missing_section_name,
+  }
+end
+
+local function is_missing_materials_section(section, context)
+  return section.is_manual
+    and (
+      section.group == context.current_missing_section_name
+      or (context.stored_missing_section_name and section.group == context.stored_missing_section_name)
+    )
+end
+
 local function find_missing_materials_section(player)
+  local profiler = autocraft.start_profile()
+  local scanned_sections = 0
   local logistic_point = player.get_requester_point()
   if not logistic_point or not logistic_point.valid then
+    autocraft.record_profile("find_missing_materials_section", profiler, { no_logistic_point = 1 })
     return nil
   end
 
+  local context = build_section_match_context(player)
   local data = get_player_data(player)
-  local current_name = get_missing_materials_section_name(player)
-  local stored_name = data.missing_section_name
+  local cached_section = data.missing_section_index and logistic_point.sections[data.missing_section_index] or nil
+  if cached_section and cached_section.valid and is_missing_materials_section(cached_section, context) then
+    autocraft.record_profile("find_missing_materials_section", profiler, {
+      cached = 1,
+      found = 1,
+    })
+    return cached_section
+  end
 
   for _, section in pairs(logistic_point.sections) do
-    if section.is_manual and (section.group == current_name or (stored_name and section.group == stored_name)) then
+    scanned_sections = scanned_sections + 1
+    if is_missing_materials_section(section, context) then
+      data.missing_section_index = section.index
+      autocraft.record_profile("find_missing_materials_section", profiler, {
+        found = 1,
+        scanned_sections = scanned_sections,
+      })
       return section
     end
   end
 
+  autocraft.record_profile("find_missing_materials_section", profiler, {
+    missing = 1,
+    scanned_sections = scanned_sections,
+  })
+  data.missing_section_index = nil
   return nil
 end
 
@@ -75,6 +259,7 @@ local function ensure_missing_materials_section(player)
       section.group = section_name
     end
     section.active = true
+    data.missing_section_index = section.index
     data.missing_section_name = section_name
     storage.missing_section_players[player.index] = true
     return section
@@ -83,6 +268,7 @@ local function ensure_missing_materials_section(player)
   section = logistic_point.add_section(section_name)
   if section then
     section.active = true
+    data.missing_section_index = section.index
     data.missing_section_name = section_name
     storage.missing_section_players[player.index] = true
   end
@@ -93,7 +279,13 @@ end
 local function remove_missing_materials_section(player)
   local logistic_point = player.get_requester_point()
   local data = get_player_data(player)
+  if not data.missing_section_index and not data.missing_section_name then
+    storage.missing_section_players[player.index] = nil
+    return
+  end
+
   if not logistic_point then
+    data.missing_section_index = nil
     data.missing_section_name = nil
     return
   end
@@ -103,6 +295,7 @@ local function remove_missing_materials_section(player)
     logistic_point.remove_section(section.index)
   end
 
+  data.missing_section_index = nil
   data.missing_section_name = nil
   storage.missing_section_players[player.index] = nil
 end
@@ -226,44 +419,50 @@ function autocraft.is_enabled(player)
 end
 
 function autocraft.set_enabled(player, enabled)
-  get_player_data(player).enabled = enabled and true or false
+  local data = get_player_data(player)
+  local next_enabled = enabled and true or false
+  if data.enabled ~= next_enabled then
+    data.enabled = next_enabled
+    data.section_status_dirty = true
+  end
 end
 
-local function section_has_autocraft_ability(player, section)
-  local section_name = section.group or ""
-  local player_name = player.name
-  local configured_prefix = get_configured_prefix(player)
-  local match_mode = get_match_mode(player)
+function autocraft.mark_sections_dirty(player)
+  mark_sections_dirty(player)
+end
 
-  if match_mode == constants.AUTOCRAFT_MATCH_MODE_FULL then
+local function section_has_autocraft_ability(context, section)
+  local section_name = section.group or ""
+
+  if context.match_mode == constants.AUTOCRAFT_MATCH_MODE_FULL then
     return true
   end
 
-  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX then
-    return configured_prefix ~= "" and starts_with(section_name, configured_prefix)
+  if context.match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX then
+    return context.configured_prefix ~= "" and starts_with(section_name, context.configured_prefix)
   end
 
-  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PLAYER_NAME then
-    return starts_with(section_name, player_name)
+  if context.match_mode == constants.AUTOCRAFT_MATCH_MODE_PLAYER_NAME then
+    return starts_with(section_name, context.player_name)
   end
 
-  if match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX_AND_PLAYER_NAME then
-    return configured_prefix ~= "" and starts_with(section_name, configured_prefix .. player_name)
+  if context.match_mode == constants.AUTOCRAFT_MATCH_MODE_PREFIX_AND_PLAYER_NAME then
+    return context.configured_prefix ~= "" and starts_with(section_name, context.configured_prefix .. context.player_name)
   end
 
   return false
 end
 
-local function should_include_section(player, section, missing_section_index)
-  if not autocraft.is_enabled(player) then
+local function should_include_section(context, section)
+  if not context.enabled then
     return false
   end
 
-  if missing_section_index and section.index == missing_section_index then
+  if is_missing_materials_section(section, context) then
     return false
   end
 
-  return section.active and section_has_autocraft_ability(player, section)
+  return section.active and section_has_autocraft_ability(context, section)
 end
 
 local function get_section_message_name(section_name)
@@ -275,24 +474,33 @@ local function get_section_message_name(section_name)
 end
 
 local function build_section_status_snapshot(player)
+  local profiler = autocraft.start_profile()
   local snapshot = {}
+  local included_sections = 0
+  local scanned_sections = 0
   local logistic_point = player.get_requester_point()
   if not logistic_point or not logistic_point.valid then
+    autocraft.record_profile("build_section_status_snapshot", profiler, { no_logistic_point = 1 })
     return snapshot
   end
 
-  local missing_section = find_missing_materials_section(player)
-  local missing_section_index = missing_section and missing_section.valid and missing_section.index or nil
+  local context = build_section_match_context(player)
 
   -- 这里保存“当前真正生效的自动手搓分组”，后续统一通过快照 diff 决定是否提示。
   for _, section in pairs(logistic_point.sections) do
-    if should_include_section(player, section, missing_section_index) then
+    scanned_sections = scanned_sections + 1
+    if should_include_section(context, section) then
+      included_sections = included_sections + 1
       snapshot[section.index] = {
         name = section.group or "",
       }
     end
   end
 
+  autocraft.record_profile("build_section_status_snapshot", profiler, {
+    included_sections = included_sections,
+    scanned_sections = scanned_sections,
+  })
   return snapshot
 end
 
@@ -362,8 +570,14 @@ end
 local function sync_section_status_notifications(player, trigger_mode)
   local data = get_player_data(player)
   local previous_snapshot = data.section_status_snapshot or {}
+  -- 30 tick 兜底只在已知编组状态变化后重建快照，避免全匹配模式反复扫所有编组。
+  if not data.section_status_dirty and trigger_mode ~= "shortcut" then
+    return
+  end
+
   local next_snapshot = build_section_status_snapshot(player)
   data.section_status_snapshot = next_snapshot
+  data.section_status_dirty = false
 
   if trigger_mode == nil then
     return
@@ -389,20 +603,27 @@ end
 
 autocraft.sync_section_status_notifications = sync_section_status_notifications
 
-local function get_requested_items(player)
+local function build_requested_items(player)
+  local profiler = autocraft.start_profile()
   local requested_items = {}
+  local included_sections = 0
+  local scanned_filters = 0
+  local scanned_sections = 0
   local logistic_point = player.get_requester_point()
   if not logistic_point or not logistic_point.valid then
+    autocraft.record_profile("build_requested_items", profiler, { no_logistic_point = 1 })
     return requested_items
   end
 
-  local missing_section = find_missing_materials_section(player)
-  local missing_section_index = missing_section and missing_section.valid and missing_section.index or nil
+  local context = build_section_match_context(player)
 
   -- 先筛出本次应参与自动手搓的物流分组，再把同类物品的最小保有量汇总成一个总需求。
   for _, section in pairs(logistic_point.sections) do
-    if should_include_section(player, section, missing_section_index) then
+    scanned_sections = scanned_sections + 1
+    if should_include_section(context, section) then
+      included_sections = included_sections + 1
       for _, filter in pairs(section.filters) do
+        scanned_filters = scanned_filters + 1
         if filter.min and filter.min > 0 then
           local item_name = nil
           if type(filter.value) == "string" then
@@ -419,6 +640,25 @@ local function get_requested_items(player)
     end
   end
 
+  autocraft.record_profile("build_requested_items", profiler, {
+    included_sections = included_sections,
+    requested_items = table_size(requested_items),
+    scanned_filters = scanned_filters,
+    scanned_sections = scanned_sections,
+  })
+  return requested_items
+end
+
+local function get_requested_items(player)
+  local data = get_player_data(player)
+  -- 物流编组请求只在编组/匹配规则变化时重建；背包变化会频繁触发，只复用这份缓存。
+  if not data.request_cache_dirty and data.requested_items_cache then
+    return data.requested_items_cache
+  end
+
+  local requested_items = build_requested_items(player)
+  data.requested_items_cache = requested_items
+  data.request_cache_dirty = false
   return requested_items
 end
 
@@ -473,25 +713,60 @@ function autocraft.clear_active_state(player)
 end
 
 local function get_sorted_recipe_names(recipes)
+  if recipes.sorted_names then
+    return recipes.sorted_names
+  end
+
   local recipe_names = {}
   for recipe_name in pairs(recipes) do
-    recipe_names[#recipe_names + 1] = recipe_name
+    if recipe_name ~= "sorted_names" then
+      recipe_names[#recipe_names + 1] = recipe_name
+    end
   end
 
   table.sort(recipe_names)
+  recipes.sorted_names = recipe_names
   return recipe_names
 end
 
-local function recipe_for_item(player, item_name)
+local function add_recipe_pick_stat(stats, name, count)
+  if not stats then
+    return
+  end
+
+  stats[name] = (stats[name] or 0) + (count or 1)
+end
+
+local function get_recipe_pick_stats_details(stats, item_request_count, recipe_found)
+  return {
+    cached_pick_attempts = stats.cached_pick_attempts or 0,
+    cached_pick_hits = stats.cached_pick_hits or 0,
+    cached_pick_misses = stats.cached_pick_misses or 0,
+    get_craftable_count_calls = stats.get_craftable_count_calls or 0,
+    item_checks = stats.item_checks or 0,
+    item_requests = item_request_count,
+    recipe_checks = stats.recipe_checks or 0,
+    recipe_found = recipe_found and 1 or 0,
+  }
+end
+
+local function is_recipe_craftable(player, recipe_name, stats)
+  add_recipe_pick_stat(stats, "get_craftable_count_calls")
+  return player.get_craftable_count(recipe_name) > 0
+end
+
+local function recipe_for_item(player, item_name, stats)
+  add_recipe_pick_stat(stats, "item_checks")
   local recipes = storage.recipes and storage.recipes[item_name]
   if not recipes then
     return nil
   end
 
   for _, recipe_name in ipairs(get_sorted_recipe_names(recipes)) do
+    add_recipe_pick_stat(stats, "recipe_checks")
     local recipe = player.force.recipes[recipe_name]
     local can_craft = recipe and not recipe.hidden and recipe.enabled
-      and player.get_craftable_count(recipe_name) > 0
+      and is_recipe_craftable(player, recipe_name, stats)
 
     if can_craft then
       return recipe_name
@@ -517,13 +792,13 @@ local function recipe_for_item_any(player, item_name)
   return nil
 end
 
-local function get_crafting_queue_item_count(player, item_name)
+local function get_crafting_queue_item_counts(player)
   local crafting_queue = player.crafting_queue
   if not crafting_queue then
-    return 0
+    return {}
   end
 
-  local queued_count = 0
+  local queued_counts = {}
   for _, queue_item in pairs(crafting_queue) do
     if not queue_item.prerequisite then
       local recipe_name = type(queue_item.recipe) == "string" and queue_item.recipe or queue_item.recipe.name
@@ -531,40 +806,50 @@ local function get_crafting_queue_item_count(player, item_name)
 
       if recipe then
         for _, product in pairs(recipe.products) do
-          if product.type == "item" and product.name == item_name then
-            queued_count = queued_count + queue_item.count * (product.amount or 1)
-            break
+          if product.type == "item" then
+            queued_counts[product.name] = (queued_counts[product.name] or 0) + queue_item.count * (product.amount or 1)
           end
         end
       end
     end
   end
 
-  return queued_count
+  return queued_counts
 end
 
 local function get_item_requests(player, crafting_complete, completed_item_name)
+  local profiler = autocraft.start_profile()
   local item_requests = {}
   local requested_items = get_requested_items(player)
   local logistic_point = player.get_requester_point()
   local logistic_network = nil
+  local requested_item_count = 0
+  local inventory_checks = 0
+  local network_checks = 0
   if logistic_point and logistic_point.valid then
     local candidate_network = logistic_point.logistic_network
     if candidate_network and candidate_network.valid then
       logistic_network = candidate_network
     end
   end
+  local queued_counts = get_crafting_queue_item_counts(player)
 
   -- 实际手搓缺口要同时扣掉玩家已持有、当前物流网络已有，以及已经排进手搓队列的成品数量。
   for item_name, min in pairs(requested_items) do
+    requested_item_count = requested_item_count + 1
     local recently_completed_count = 0
     if not crafting_complete and completed_item_name == item_name then
       recently_completed_count = 1
     end
 
+    inventory_checks = inventory_checks + 1
     local inventory_count = player.get_item_count(item_name) + recently_completed_count
-    local logistic_network_count = logistic_network and logistic_network.get_item_count(item_name) or 0
-    local queued_count = get_crafting_queue_item_count(player, item_name)
+    local logistic_network_count = 0
+    if logistic_network then
+      network_checks = network_checks + 1
+      logistic_network_count = logistic_network.get_item_count(item_name)
+    end
+    local queued_count = queued_counts[item_name] or 0
     local available = inventory_count + logistic_network_count + queued_count
     local missing = min - available
 
@@ -579,6 +864,12 @@ local function get_item_requests(player, crafting_complete, completed_item_name)
     end
   end
 
+  autocraft.record_profile("get_item_requests", profiler, {
+    inventory_checks = inventory_checks,
+    item_requests = #item_requests,
+    network_checks = network_checks,
+    requested_items = requested_item_count,
+  })
   return item_requests
 end
 
@@ -706,19 +997,23 @@ local function accumulate_missing_materials(
 end
 
 local function update_missing_materials_section(player, target_item_name, target_recipe_name, target_missing_count)
+  local profiler = autocraft.start_profile()
   if not autocraft.is_enabled(player) then
     remove_missing_materials_section(player)
+    autocraft.record_profile("update_missing_materials_section", profiler, { disabled = 1 })
     return
   end
 
   if not target_item_name or not target_recipe_name or not target_missing_count or target_missing_count <= 0 then
     remove_missing_materials_section(player)
+    autocraft.record_profile("update_missing_materials_section", profiler, { no_target = 1 })
     return
   end
 
   local recipe = player.force.recipes[target_recipe_name]
   if not recipe then
     remove_missing_materials_section(player)
+    autocraft.record_profile("update_missing_materials_section", profiler, { no_recipe = 1 })
     return
   end
 
@@ -736,9 +1031,11 @@ local function update_missing_materials_section(player, target_item_name, target
   local available_inventory_counts = {}
   local available_network_counts = {}
   local crafts_needed = math.ceil(target_missing_count / get_recipe_output_amount(recipe, target_item_name))
+  local top_level_ingredients = 0
 
   for _, ingredient in pairs(recipe.ingredients) do
     if ingredient.type == "item" then
+      top_level_ingredients = top_level_ingredients + 1
       local required_count = ingredient.amount * crafts_needed
       if required_count > 0 then
         has_missing_materials = true
@@ -758,10 +1055,18 @@ local function update_missing_materials_section(player, target_item_name, target
 
   if not has_missing_materials then
     remove_missing_materials_section(player)
+    autocraft.record_profile("update_missing_materials_section", profiler, {
+      no_missing_materials = 1,
+      top_level_ingredients = top_level_ingredients,
+    })
     return
   end
 
   write_missing_materials_section(player, missing_requests)
+  autocraft.record_profile("update_missing_materials_section", profiler, {
+    missing_request_kinds = table_size(missing_requests),
+    top_level_ingredients = top_level_ingredients,
+  })
 end
 
 local function sort_item_requests(item_requests)
@@ -778,21 +1083,69 @@ local function sort_item_requests(item_requests)
   end)
 end
 
-local function pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_picker)
-  if hand_item_name then
-    for _, item_request in pairs(item_requests) do
-      if item_request.name == hand_item_name then
-        local recipe_name = recipe_picker(player, hand_item_name)
-        if recipe_name then
-          return item_request, recipe_name
-        end
-        break
-      end
+local function find_item_request(item_requests, item_name)
+  if not item_name then
+    return nil
+  end
+
+  for _, item_request in ipairs(item_requests) do
+    if item_request.name == item_name then
+      return item_request
     end
   end
 
-  for _, item_request in pairs(item_requests) do
-    local recipe_name = recipe_picker(player, item_request.name)
+  return nil
+end
+
+local function pick_recipe_for_item_request(player, item_requests, item_name, recipe_picker, stats)
+  local item_request = find_item_request(item_requests, item_name)
+  if not item_request then
+    return nil
+  end
+
+  local recipe_name = recipe_picker(player, item_name, stats)
+  if recipe_name then
+    return item_request, recipe_name
+  end
+
+  return nil
+end
+
+local function pick_cached_recipe_from_requests(player, item_requests, cached_item_name, cached_recipe_name, stats)
+  if not cached_item_name or not cached_recipe_name then
+    return nil
+  end
+
+  add_recipe_pick_stat(stats, "cached_pick_attempts")
+  local item_request = find_item_request(item_requests, cached_item_name)
+  if not item_request then
+    add_recipe_pick_stat(stats, "cached_pick_misses")
+    return nil
+  end
+
+  local recipes = storage.recipes and storage.recipes[cached_item_name]
+  if not recipes or not recipes[cached_recipe_name] then
+    add_recipe_pick_stat(stats, "cached_pick_misses")
+    return nil
+  end
+
+  add_recipe_pick_stat(stats, "item_checks")
+  add_recipe_pick_stat(stats, "recipe_checks")
+  local recipe = player.force.recipes[cached_recipe_name]
+  local can_craft = recipe and not recipe.hidden and recipe.enabled
+    and is_recipe_craftable(player, cached_recipe_name, stats)
+  if can_craft then
+    add_recipe_pick_stat(stats, "cached_pick_hits")
+    return item_request, cached_recipe_name
+  end
+
+  add_recipe_pick_stat(stats, "cached_pick_misses")
+  return nil
+end
+
+local function pick_recipe_from_requests(player, item_requests, recipe_picker, stats)
+  for _, item_request in ipairs(item_requests) do
+    local recipe_name = recipe_picker(player, item_request.name, stats)
     if recipe_name then
       return item_request, recipe_name
     end
@@ -802,11 +1155,13 @@ local function pick_recipe_from_requests(player, item_requests, hand_item_name, 
 end
 
 function autocraft.do_crafting(player, crafting_complete, completed_item_name)
+  local profiler = autocraft.start_profile()
   if crafting_complete == nil then
     crafting_complete = true
   end
 
   if not autocraft.is_enabled(player) then
+    autocraft.record_profile("do_crafting", profiler, { disabled = 1 })
     return
   end
 
@@ -816,20 +1171,89 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
 
   if not is_eligible then
     remove_missing_materials_section(player)
+    autocraft.record_profile("do_crafting", profiler, { ineligible = 1 })
     return
   end
 
+  local allowed_queue_length = crafting_complete and 0 or 1
+  if player.crafting_queue and #player.crafting_queue > allowed_queue_length then
+    autocraft.record_profile("do_crafting", profiler, {
+      queue_busy = 1,
+      queue_length = #player.crafting_queue,
+    })
+    return
+  end
+
+  local get_requests_profiler = autocraft.start_profile()
   local item_requests = get_item_requests(player, crafting_complete, completed_item_name)
+  autocraft.record_profile("do_crafting.get_item_requests", get_requests_profiler, {
+    item_requests = #item_requests,
+  })
   if #item_requests == 0 then
     remove_missing_materials_section(player)
+    autocraft.record_profile("do_crafting", profiler, { no_item_requests = 1 })
     return
   end
 
+  local sort_profiler = autocraft.start_profile()
   sort_item_requests(item_requests)
+  autocraft.record_profile("do_crafting.sort_item_requests", sort_profiler, {
+    item_requests = #item_requests,
+  })
 
+  storage.data = storage.data or {}
+  local data = storage.data[player.index] or {}
   local hand_item_name = get_hand_item_name(player)
+  local pick_profiler = autocraft.start_profile()
+  local recipe_pick_stats = {}
+  local item_request, recipe_name =
+    pick_recipe_for_item_request(player, item_requests, hand_item_name, recipe_for_item, recipe_pick_stats)
+  if not recipe_name and not crafting_complete and completed_item_name == data.last_craftable_item_name then
+    item_request, recipe_name = pick_cached_recipe_from_requests(
+      player,
+      item_requests,
+      data.last_craftable_item_name,
+      data.last_craftable_recipe_name,
+      recipe_pick_stats
+    )
+  end
+  if not recipe_name then
+    item_request, recipe_name = pick_recipe_from_requests(player, item_requests, recipe_for_item, recipe_pick_stats)
+  end
+  autocraft.record_profile(
+    "do_crafting.pick_craftable_recipe",
+    pick_profiler,
+    get_recipe_pick_stats_details(recipe_pick_stats, #item_requests, recipe_name)
+  )
+  local item_name = item_request and item_request.name or nil
+  if recipe_name then
+    local remove_section_profiler = autocraft.start_profile()
+    remove_missing_materials_section(player)
+    autocraft.record_profile("do_crafting.remove_missing_section", remove_section_profiler)
+    data.active_item_name = item_name
+    data.active_queue_index = player.crafting_queue and (#player.crafting_queue + 1) or 1
+    data.active_recipe_name = recipe_name
+    data.last_craftable_item_name = item_name
+    data.last_craftable_recipe_name = recipe_name
+    storage.data[player.index] = data
+    local begin_crafting_profiler = autocraft.start_profile()
+    player.begin_crafting({ count = 1, recipe = recipe_name, silent = true })
+    autocraft.record_profile("do_crafting.begin_crafting_api", begin_crafting_profiler, {
+      begin_crafting = 1,
+    })
+    autocraft.record_profile("do_crafting", profiler, {
+      begin_crafting = 1,
+      item_requests = #item_requests,
+    })
+    return
+  end
+
   local target_item_request, target_recipe_name =
-    pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_for_item_any)
+    pick_recipe_for_item_request(player, item_requests, hand_item_name, recipe_for_item_any)
+  if not target_recipe_name then
+    target_item_request, target_recipe_name =
+      pick_recipe_from_requests(player, item_requests, recipe_for_item_any)
+  end
   local target_item_name = target_item_request and target_item_request.name or nil
   update_missing_materials_section(
     player,
@@ -838,31 +1262,21 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
     target_item_request and target_item_request.missing or nil
   )
 
-  local allowed_queue_length = crafting_complete and 0 or 1
-  if player.crafting_queue and #player.crafting_queue > allowed_queue_length then
-    return
-  end
-
-  storage.data = storage.data or {}
-  local data = storage.data[player.index] or {}
-
-  local item_request, recipe_name =
-    pick_recipe_from_requests(player, item_requests, hand_item_name, recipe_for_item)
-  local item_name = item_request and item_request.name or nil
-  if recipe_name then
-    data.active_item_name = item_name
-    data.active_queue_index = player.crafting_queue and (#player.crafting_queue + 1) or 1
-    data.active_recipe_name = recipe_name
-    storage.data[player.index] = data
-    player.begin_crafting({ count = 1, recipe = recipe_name, silent = true })
-  end
+  autocraft.record_profile("do_crafting", profiler, {
+    begin_crafting = 0,
+    item_requests = #item_requests,
+  })
 end
 
 function autocraft.keep_missing_materials_section_enabled(player)
+  local profiler = autocraft.start_profile()
   local section = find_missing_materials_section(player)
   if section and section.valid then
     section.active = true
   end
+  autocraft.record_profile("keep_missing_materials_section_enabled", profiler, {
+    found = section and section.valid and 1 or 0,
+  })
 end
 
 return autocraft

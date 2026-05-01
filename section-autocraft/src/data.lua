@@ -21,7 +21,7 @@ data:extend({
   {
     type = "virtual-signal",
     name = constants.AUTOCRAFT_WRENCH_SIGNAL_NAME,
-    icon = "__autocraft__/graphics/icon/wrench-signal-64.png",
+    icon = "__section-autocraft__/graphics/icon/wrench-signal-64.png",
     icon_size = 64,
     icon_mipmaps = 1,
     subgroup = "virtual-signal-special",
@@ -32,9 +32,9 @@ data:extend({
     name = constants.AUTOCRAFT_SHORTCUT_NAME,
     action = "lua",
     toggleable = true,
-    icon = "__autocraft__/graphics/icon/wrench-shortcut-32.png",
+    icon = "__section-autocraft__/graphics/icon/wrench-shortcut-32.png",
     icon_size = 32,
-    small_icon = "__autocraft__/graphics/icon/wrench-shortcut-24.png",
+    small_icon = "__section-autocraft__/graphics/icon/wrench-shortcut-24.png",
     small_icon_size = 24,
   },
 })

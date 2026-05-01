@@ -1,4 +1,16 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.0.2
+Date: 2026-05-01
+  Optimizations:
+    - 优化全匹配模式下高频背包变化触发的自动手搓性能，缓存物流编组请求、缺料编组位置和上一轮可搓配方，并保留持续性能日志。
+    - Optimized full-match autocraft performance for frequent inventory changes by caching logistic section requests, missing-material section lookup, and the previous craftable recipe while keeping continuous performance profiling logs.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.1
+Date: 2026-04-12
+  Bugfixes:
+    - 修复数据阶段图标资源路径仍引用旧模组名，导致模组加载失败的问题。
+    - Fixed the data-stage icon asset paths still referencing the old mod name, which caused the mod to fail to load.
+---------------------------------------------------------------------------------------------------
 Version: 1.0.0
 Date: 2026-04-06
   Features:
