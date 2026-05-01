@@ -29,7 +29,7 @@ data:extend({
   {
     type = "double-setting",
     name = constants.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING,
-    setting_type = "runtime-global",
+    setting_type = "runtime-per-user",
     default_value = 1,
     minimum_value = 1,
     maximum_value = 10000,

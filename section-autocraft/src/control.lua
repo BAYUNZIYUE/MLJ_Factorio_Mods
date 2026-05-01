@@ -13,23 +13,30 @@ local function enable_player_force_logistics_requests()
   player_force.character_logistic_requests = true
 end
 
-local function get_manual_crafting_speed_multiplier()
-  local setting = settings.global[constants.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING]
+local function get_player_crafting_speed_multiplier(player)
+  local setting = player.mod_settings[constants.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING]
   local multiplier = setting and tonumber(setting.value) or 1
   return math.max(multiplier, 1)
 end
 
-local function sync_manual_crafting_speed_modifier()
-  local multiplier = get_manual_crafting_speed_multiplier()
+local function sync_player_crafting_speed_modifier(player)
+  if not player or not player.valid then
+    return
+  end
+
+  local multiplier = get_player_crafting_speed_multiplier(player)
   local modifier = multiplier - 1
-  for _, force in pairs(game.forces) do
-    force.manual_crafting_speed_modifier = modifier
+  player.character_crafting_speed_modifier = modifier
+end
+
+local function sync_all_player_crafting_speed_modifiers()
+  for _, player in pairs(game.players) do
+    sync_player_crafting_speed_modifier(player)
   end
 end
 
 local function sync_force_runtime_state()
   enable_player_force_logistics_requests()
-  sync_manual_crafting_speed_modifier()
 end
 
 local function on_configuration_changed()
@@ -37,6 +44,7 @@ local function on_configuration_changed()
   storage.data = storage.data or {}
 
   sync_force_runtime_state()
+  sync_all_player_crafting_speed_modifiers()
 
   for _, player in pairs(game.players) do
     autocraft.mark_sections_dirty(player)
@@ -56,7 +64,7 @@ local function sync_player_state(event)
     return
   end
 
-  sync_manual_crafting_speed_modifier()
+  sync_player_crafting_speed_modifier(player)
   sync_shortcut_state(player)
   autocraft.mark_sections_dirty(player)
   autocraft.sync_section_status_notifications(player)
@@ -193,7 +201,8 @@ end
 
 local function on_runtime_mod_setting_changed(event)
   if event.setting == constants.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING then
-    sync_manual_crafting_speed_modifier()
+    local player = game.get_player(event.player_index)
+    sync_player_crafting_speed_modifier(player)
     return
   end
 
@@ -221,39 +230,8 @@ local function on_runtime_mod_setting_changed(event)
   end
 end
 
-local function on_performance_profile_command(event)
-  local parameter = event.parameter or ""
-  local enabled = nil
-  if parameter == "" then
-    enabled = not autocraft.is_performance_debug_enabled()
-  elseif parameter == "on" then
-    enabled = true
-  elseif parameter == "off" then
-    enabled = false
-  else
-    local player = event.player_index and game.get_player(event.player_index) or nil
-    if player then
-      player.print("Usage: /section-autocraft-profile on|off")
-    end
-    return
-  end
-
-  autocraft.set_performance_debug_enabled(enabled)
-  local state_text = enabled and "enabled" or "disabled"
-  local player = event.player_index and game.get_player(event.player_index) or nil
-  if player then
-    player.print("Section Autocraft performance profile " .. state_text .. ".")
-  end
-  log("[section-autocraft-profile] " .. state_text .. " at tick " .. game.tick)
-end
-
 script.on_init(on_init)
 script.on_configuration_changed(on_configuration_changed)
-commands.add_command(
-  "section-autocraft-profile",
-  "Toggle Section Autocraft performance profile logging. Usage: /section-autocraft-profile on|off",
-  on_performance_profile_command
-)
 
 script.on_event(defines.events.on_player_crafted_item, on_player_crafted_item)
 script.on_event(defines.events.on_player_cancelled_crafting, on_player_cancelled_crafting)

@@ -25,10 +25,18 @@ def main() -> int:
             "FAIL: autocraft.lua 缺少按需创建 LuaProfiler 的入口。",
         )
         assert_contains(
-            r"storage\.autocraft_performance_debug_enabled ~= false",
+            r"local AUTOCRAFT_PERFORMANCE_PROFILE_ENABLED = true",
             autocraft_text,
-            "FAIL: profile 必须默认持续开启，除非用户显式 off。",
+            "FAIL: autocraft.lua 必须定义源码级性能日志开关，当前调试阶段应为 true。",
         )
+        assert_contains(
+            r"local function is_performance_debug_enabled\(\).*?"
+            r"return AUTOCRAFT_PERFORMANCE_PROFILE_ENABLED",
+            autocraft_text,
+            "FAIL: profile 必须只由源码级 AUTOCRAFT_PERFORMANCE_PROFILE_ENABLED 控制。",
+        )
+        if "storage.autocraft_performance_debug_enabled" in autocraft_text:
+            raise AssertionError("FAIL: profile 不应再使用 storage 运行时开关。")
         assert_contains(
             r"function autocraft\.record_profile\(scope_name, profiler, details\).*?"
             r"profile_state\.scopes|function autocraft\.record_profile\(scope_name, profiler, details\).*?"
@@ -89,11 +97,8 @@ def main() -> int:
             autocraft_text,
             "FAIL: get_item_requests 必须单独记录缺口计算规模。",
         )
-        assert_contains(
-            r"commands\.add_command\(\s*\"section-autocraft-profile\"",
-            control_text,
-            "FAIL: control.lua 必须注册 /section-autocraft-profile 调试命令。",
-        )
+        if "section-autocraft-profile" in control_text:
+            raise AssertionError("FAIL: control.lua 不应再注册 /section-autocraft-profile 调试命令。")
         assert_contains(
             r"local function keep_missing_sections_enabled\(\).*?"
             r"autocraft\.record_profile\(\"control\.keep_missing_sections_enabled\"",

@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.0.3
+Date: 2026-05-01
+  Changes:
+    - 将“手搓速度倍数”改为每玩家设置，只影响设置该值的玩家角色。
+    - 自动手搓现在会按当前缺口、配方产出数量和当前可制作数量动态决定本轮制作次数。
+    - Changed the hand crafting speed multiplier to a per-player setting that only affects that player's character.
+    - Section Autocraft now dynamically chooses each crafting count from the current shortage, recipe output amount, and current craftable count.
+---------------------------------------------------------------------------------------------------
 Version: 1.0.2
 Date: 2026-05-01
   Optimizations:

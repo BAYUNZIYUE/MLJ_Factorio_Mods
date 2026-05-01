@@ -2,6 +2,9 @@ local constants = require("constants")
 
 local autocraft = {}
 
+local AUTOCRAFT_MAX_CRAFT_BATCH_SIZE = 10000
+local AUTOCRAFT_PERFORMANCE_PROFILE_ENABLED = true
+
 local performance_profile_state = {
   next_log_tick = nil,
   scopes = {},
@@ -17,7 +20,7 @@ local function reset_performance_profile_state()
 end
 
 local function is_performance_debug_enabled()
-  return not storage or storage.autocraft_performance_debug_enabled ~= false
+  return AUTOCRAFT_PERFORMANCE_PROFILE_ENABLED
 end
 
 local function build_profile_detail_text(details)
@@ -119,15 +122,6 @@ function autocraft.record_profile(scope_name, profiler, details)
   end
 
   flush_performance_profile()
-end
-
-function autocraft.is_performance_debug_enabled()
-  return is_performance_debug_enabled()
-end
-
-function autocraft.set_performance_debug_enabled(enabled)
-  storage.autocraft_performance_debug_enabled = enabled and true or false
-  reset_performance_profile_state()
 end
 
 local function get_player_data(player)
@@ -910,6 +904,13 @@ local function get_recipe_output_amount(recipe, item_name)
   return 1
 end
 
+local function get_craft_count(player, recipe_name, recipe, item_request)
+  local crafts_needed = math.ceil(item_request.missing / get_recipe_output_amount(recipe, item_request.name))
+  local craftable_count = player.get_craftable_count(recipe_name)
+
+  return math.min(crafts_needed, craftable_count, AUTOCRAFT_MAX_CRAFT_BATCH_SIZE)
+end
+
 local function consume_available_item_count(available_items, item_name, needed_count)
   local available_count = available_items[item_name] or 0
   local consumed_count = math.min(available_count, needed_count)
@@ -1227,6 +1228,16 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
   )
   local item_name = item_request and item_request.name or nil
   if recipe_name then
+    local recipe = player.force.recipes[recipe_name]
+    local craft_count = recipe and get_craft_count(player, recipe_name, recipe, item_request) or 0
+    if craft_count <= 0 then
+      autocraft.record_profile("do_crafting", profiler, {
+        craft_count_zero = 1,
+        item_requests = #item_requests,
+      })
+      return
+    end
+
     local remove_section_profiler = autocraft.start_profile()
     remove_missing_materials_section(player)
     autocraft.record_profile("do_crafting.remove_missing_section", remove_section_profiler)
@@ -1237,12 +1248,12 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
     data.last_craftable_recipe_name = recipe_name
     storage.data[player.index] = data
     local begin_crafting_profiler = autocraft.start_profile()
-    player.begin_crafting({ count = 1, recipe = recipe_name, silent = true })
+    player.begin_crafting({ count = craft_count, recipe = recipe_name, silent = true })
     autocraft.record_profile("do_crafting.begin_crafting_api", begin_crafting_profiler, {
-      begin_crafting = 1,
+      begin_crafting = craft_count,
     })
     autocraft.record_profile("do_crafting", profiler, {
-      begin_crafting = 1,
+      begin_crafting = craft_count,
       item_requests = #item_requests,
     })
     return

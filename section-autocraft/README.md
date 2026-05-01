@@ -2,61 +2,80 @@
 
 Scroll down for the Chinese version.
 
-# Mod Introduction
+# What It Does
 
-Section Autocraft is a Factorio mod that automatically hand-crafts missing items for the current player
-based on matching logistics sections. It supports a configurable wrench virtual signal prefix and
-multiple section matching modes. The mod does not create any default logistics section by itself.
+- Automatically hand-crafts missing items for the current player based on matching logistics sections.
+- Uses a shortcut button to enable or disable autocrafting per player.
+- Supports four section match modes: `Full match`, `Prefix`, `Player name`, and `Prefix + player name`.
+- Can create a temporary missing-materials section when the selected craft target needs ingredients.
+- Lets each player set their own hand crafting speed multiplier.
+- Automatically decides how many crafts to queue from the current shortage and available materials.
 
-# Mod Guide
+The mod does not create any default logistics section by itself.
 
-## How the mod works
+# When A Section Can Autocraft
 
-Section Autocraft combines the requests from the logistics sections that match the current configuration,
-then subtracts:
+A normal logistics section participates only when all conditions below are true.
 
-- items already in the player's inventory
-- items already available in the current logistic network
-- items already queued for hand crafting
+| Condition | Required | If not satisfied |
+| --- | --- | --- |
+| Shortcut | Section Autocraft is enabled for the current player | Nothing is autocrafted |
+| Section state | The logistics section itself is enabled | This section is ignored |
+| Section type | The section is not the temporary missing-materials section | It is handled separately |
+| Name match | The section name matches the current match mode | This section is ignored |
+| Item shortage | The request still has a shortage after inventory, network, and queued crafts are counted | No craft is queued for that item |
+| Recipe | The recipe is unlocked and currently craftable, or its missing ingredients can be requested | The item is skipped until materials or recipes are available |
 
-If the current hand-craft target is missing ingredients, the mod can create a temporary logistics
-section for those missing materials. Once the player has enough materials to continue crafting,
-that temporary section is removed automatically.
+# Examples
 
-## How to use it
+Assume the current player name is `PlayerName`.
 
-1. Decide which logistics sections Section Autocraft is allowed to read by choosing a match mode.
-2. If you use `Prefix` or `Prefix + player name`, set the wrench virtual signal text as your
-   naming prefix first. The default mode is `Prefix + player name`.
-3. Enable the lower-right shortcut to let Section Autocraft keep hand-crafting missing items from the
-   sections that match your current rules.
-4. Disable the shortcut when you want Section Autocraft to stop. Turning it off cancels the mod-owned
-   crafting queue and clears the active autocraft state.
-5. A logistics section is considered active for Section Autocraft only when all of the following
-   are true: Section Autocraft is enabled, the section itself is enabled, and its name matches the current match
-   mode. The temporary missing-materials section is handled separately and is not treated as a
-   normal source section.
+`[wrench]` below means the wrench virtual signal prefix:
+`[virtual-signal=signal-autocraft-wrench]`
 
-### Match modes
+| Match mode | Section name | Section enabled | Name matches | Autocrafts | Why |
+| --- | --- | --- | --- | --- | --- |
+| Full match | `Belts` | Yes | Yes | Yes | Full match accepts any enabled normal section |
+| Full match | `Belts` | No | Yes | No | Disabled sections are ignored |
+| Prefix | `Belts` | Yes | No | No | The name does not start with `[wrench]` |
+| Prefix | `[wrench]Belts` | Yes | Yes | Yes | The name starts with the configured prefix |
+| Player name | `PlayerName-Ore` | Yes | Yes | Yes | The name starts with the current player name |
+| Player name | `OtherPlayer-Ore` | Yes | No | No | The name belongs to another player |
+| Prefix + player name | `[wrench]PlayerName-Modules` | Yes | Yes | Yes | The name starts with both the prefix and current player name |
+| Prefix + player name | `[wrench]OtherPlayer-Modules` | Yes | No | No | The prefix matches, but the player name does not |
 
-- `Full match`: every enabled logistics section participates in Section Autocraft. Use this when your
-  character logistics are already dedicated to hand-crafting support and you do not need to split
-  sections by purpose.
-- `Prefix`: only enabled logistics sections whose names start with the configured prefix
-  participate. Use this when you want to mark a shared set of Section Autocraft sections with one common
-  tag.
-- `Player name`: only enabled logistics sections whose names start with the current player name
-  participate. Use this when multiple players share a save and each player keeps their own
-  personal sections.
-- `Prefix + player name`: only enabled logistics sections whose names start with the configured
-  prefix followed by the current player name participate. Use this when you want both a shared
-  Section Autocraft tag and per-player separation. This is the default mode.
+# Shortage Calculation
 
-Example names:
+For each requested item, Section Autocraft calculates:
 
-- `Prefix`: `[virtual-signal=signal-autocraft-wrench]Belts`
-- `Player name`: `YourName-Rockets`
-- `Prefix + player name`: `[virtual-signal=signal-autocraft-wrench]YourName-Modules`
+```text
+shortage = requested amount
+         - items in the player's inventory
+         - items already available in the current logistic network
+         - items already queued for hand crafting
+```
+
+When crafting starts, the mod automatically chooses the craft count:
+
+```text
+craft count = min(
+  crafts needed to cover the shortage,
+  crafts currently possible with available materials,
+  internal safety cap
+)
+```
+
+This means it does not ask you to set a batch size, and it will not queue more than the logistics
+request still needs.
+
+# Settings
+
+| Setting | Scope | Meaning |
+| --- | --- | --- |
+| Autocraft prefix | Per player | Rich text prefix used by `Prefix` and `Prefix + player name` modes |
+| Autocraft match mode | Per player | Selects which section names are allowed to participate |
+| Play autocraft completion sound | Per player | Plays a sound when a mod-owned craft finishes |
+| Hand crafting speed multiplier | Per player | How many times vanilla hand crafting speed to use for your character |
 
 # Acknowledgements
 
@@ -64,59 +83,95 @@ Special thanks to nmalaguti's Autocraft mod
 ([autocraft-logistics](https://mods.factorio.com/mod/autocraft-logistics)). This mod exists
 because it was inspired by that work.
 
+Special thanks to Meister177's Faster Hand Crafting Speed mod
+([faster-hand-crafting-speed](https://mods.factorio.com/mod/faster-hand-crafting-speed)).
+Section Autocraft's hand crafting speed setting is based on that mod's approach.
+
 Special thanks to BAYUNZIYUE for discussing the implementation logic together and helping test the
 mod.
 
-# 模组简介
+# 模组功能
 
-Section Autocraft 是一个 Factorio 自动手搓模组。它会根据匹配到的物流编组，自动为当前玩家补做缺少
-的物品。模组支持用扳手虚拟信号作为可配置前缀，并提供多种编组匹配模式。模组本身不会自动创建
-任何默认物流编组。
+- 根据匹配到的物流编组，为当前玩家自动手搓缺少的物品。
+- 使用右下角快捷按钮为每个玩家单独开启或关闭自动手搓。
+- 支持四种编组匹配模式：`全匹配`、`前缀`、`玩家名`、`前缀 + 玩家名`。
+- 当前手搓目标缺少原料时，可以创建临时“缺失材料编组”来请求原料。
+- 每个玩家可以单独设置自己的手搓速度倍数。
+- 自动根据当前缺口和可用材料决定本轮制作数量。
 
-# 模组说明
+模组本身不会自动创建任何默认物流编组。
 
-## 模组逻辑
+# 自动手搓什么时候生效
 
-Section Autocraft 会先汇总当前配置下所有匹配物流编组的需求，然后再扣除：
+一个普通物流编组只有同时满足下面所有条件，才会参与自动手搓。
 
-- 玩家背包里已经有的数量
-- 当前物流网络里已经有的数量
-- 当前已经排进手搓队列的数量
+| 条件 | 必须满足 | 不满足时 |
+| --- | --- | --- |
+| 快捷开关 | 当前玩家已开启 Section Autocraft | 不自动手搓 |
+| 编组状态 | 物流编组本身已启用 | 忽略这个编组 |
+| 编组类型 | 不是临时“缺失材料编组” | 由缺料逻辑单独处理 |
+| 名称匹配 | 编组名称符合当前匹配模式 | 忽略这个编组 |
+| 物品缺口 | 扣除背包、物流网络、手搓队列后仍有缺口 | 不为这个物品排队 |
+| 配方状态 | 配方已解锁且当前可制作，或可以请求缺少的原料 | 暂时跳过这个物品 |
 
-如果当前手搓目标缺少原料，模组会临时创建一个“缺失材料编组”来请求这些原料；当玩家背包中的
-材料已经足够继续手搓时，这个临时编组会自动删除。
+# 实际例子
 
-## 如何使用
+假设当前玩家名是 `PlayerName`。
 
-1. 先选择匹配模式，决定 Section Autocraft 允许读取哪些物流编组。
-2. 如果你使用“前缀”或“前缀 + 玩家名”，记得先把扳手虚拟信号文本配置成你的命名前缀。
-   模组默认模式是“前缀 + 玩家名”。
-3. 点击右下角快捷按钮后，Section Autocraft 会持续补做当前规则下匹配到的缺失物品。
-4. 再次关闭快捷按钮时，模组会停止自动手搓，同时取消模组建立的手搓队列并清空当前自动手搓状态。
-5. 一个物流编组要真正参与自动手搓，必须同时满足：Section Autocraft 总开关已开启、该编组本身处于启用状态、
-   编组名称符合当前匹配模式。临时生成的“缺失材料编组”会单独处理，不会当作普通来源编组参与统计。
+下面表格里的 `[扳手]` 表示扳手虚拟信号前缀：
+`[virtual-signal=signal-autocraft-wrench]`
 
-### 匹配模式说明
+| 匹配模式 | 编组名称 | 编组已启用 | 名称匹配 | 会自动手搓 | 原因 |
+| --- | --- | --- | --- | --- | --- |
+| 全匹配 | `Belts` | 是 | 是 | 是 | 全匹配接受所有已启用的普通编组 |
+| 全匹配 | `Belts` | 否 | 是 | 否 | 已禁用的编组会被忽略 |
+| 前缀 | `Belts` | 是 | 否 | 否 | 名称不是以 `[扳手]` 开头 |
+| 前缀 | `[扳手]Belts` | 是 | 是 | 是 | 名称以配置的前缀开头 |
+| 玩家名 | `PlayerName-Ore` | 是 | 是 | 是 | 名称以当前玩家名开头 |
+| 玩家名 | `OtherPlayer-Ore` | 是 | 否 | 否 | 名称属于其他玩家 |
+| 前缀 + 玩家名 | `[扳手]PlayerName-Modules` | 是 | 是 | 是 | 名称同时满足前缀和当前玩家名 |
+| 前缀 + 玩家名 | `[扳手]OtherPlayer-Modules` | 是 | 否 | 否 | 前缀匹配，但玩家名不匹配 |
 
-- `全匹配`：所有已启用的物流编组都会参与自动手搓。适合你的角色物流本来就主要用于手搓补料，
-  不需要再按用途拆分编组的情况。
-- `前缀`：只有名字以已配置前缀开头的已启用物流编组会参与自动手搓。适合你想用一个统一标签
-  标记“这批编组就是给 Section Autocraft 用”的情况。
-- `玩家名`：只有名字以当前玩家名开头的已启用物流编组会参与自动手搓。适合多人联机时，每个
-  玩家维护自己的专属物流编组。
-- `前缀 + 玩家名`：只有名字以“已配置前缀 + 当前玩家名”开头的已启用物流编组会参与自动手搓。
-  适合既想保留统一的 Section Autocraft 标记，又想把不同玩家的编组分开管理的情况。这也是默认模式。
+# 缺口计算方式
 
-命名示例：
+对每一种请求物品，Section Autocraft 会这样计算缺口：
 
-- `前缀`：`[virtual-signal=signal-autocraft-wrench]Belts`
-- `玩家名`：`YourName-Rockets`
-- `前缀 + 玩家名`：`[virtual-signal=signal-autocraft-wrench]YourName-Modules`
+```text
+缺口 = 物流请求数量
+     - 玩家背包里已有的数量
+     - 当前物流网络里已有的数量
+     - 已经排进手搓队列的数量
+```
+
+开始手搓时，模组会自动决定制作次数：
+
+```text
+制作次数 = min(
+  覆盖当前缺口需要的制作次数,
+  当前材料实际能制作的次数,
+  内部安全上限
+)
+```
+
+也就是说，你不需要手动设置批量数量；模组不会排入超过物流请求仍然需要的数量。
+
+# 设置说明
+
+| 设置 | 范围 | 作用 |
+| --- | --- | --- |
+| 自动手搓前缀 | 每玩家 | `前缀` 和 `前缀 + 玩家名` 模式使用的富文本前缀 |
+| 自动手搓匹配模式 | 每玩家 | 选择哪些编组名称允许参与自动手搓 |
+| 播放自动手搓完成音效 | 每玩家 | 模组排入的手搓完成时播放音效 |
+| 手搓速度倍数 | 每玩家 | 当前玩家的手搓速度是原版速度的多少倍 |
 
 # 致谢
 
 特别感谢 nmalaguti 的 Autocraft 模组
 ([autocraft-logistics](https://mods.factorio.com/mod/autocraft-logistics))，正是受到这个模组的启发，
 才有了现在这个模组。
+
+特别感谢 Meister177 的 Faster Hand Crafting Speed 模组
+([faster-hand-crafting-speed](https://mods.factorio.com/mod/faster-hand-crafting-speed))。
+Section Autocraft 的手搓速度设置参考了这个模组的实现思路。
 
 特别感谢 BAYUNZIYUE，与我一起讨论模组实现逻辑，并参与模组测试。

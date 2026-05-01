@@ -33,20 +33,37 @@ def main() -> int:
         assert_contains(
             r'type = "double-setting".*?'
             r"name = constants\.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING.*?"
-            r'setting_type = "runtime-global".*?'
+            r'setting_type = "runtime-per-user".*?'
             r"default_value = 1.*?"
             r"minimum_value = 1.*?"
             r"maximum_value = 10000",
             settings_text,
-            "FAIL: settings.lua 必须定义默认 1、最小 1、最大 10000 的 runtime-global double-setting。",
+            "FAIL: settings.lua 必须定义默认 1、最小 1、最大 10000 的 runtime-per-user double-setting。",
         )
         assert_contains(
-            r"local function sync_manual_crafting_speed_modifier\(\).*?"
-            r"local modifier = multiplier - 1.*?"
-            r"for _, force in pairs\(game\.forces\) do.*?"
-            r"force\.manual_crafting_speed_modifier = modifier",
+            r"local function get_player_crafting_speed_multiplier\(player\).*?"
+            r"player\.mod_settings\[constants\.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING\].*?"
+            r"return math\.max\(multiplier, 1\)",
             control_text,
-            "FAIL: control.lua 必须把倍数转换为 force.manual_crafting_speed_modifier。",
+            "FAIL: control.lua 必须从玩家自己的 mod_settings 读取手搓速度倍数。",
+        )
+        assert_contains(
+            r"local function sync_player_crafting_speed_modifier\(player\).*?"
+            r"local modifier = multiplier - 1.*?"
+            r"player\.character_crafting_speed_modifier = modifier",
+            control_text,
+            "FAIL: control.lua 必须把玩家自己的倍数转换为 player.character_crafting_speed_modifier。",
+        )
+        if "force.manual_crafting_speed_modifier" in control_text:
+            raise AssertionError("FAIL: 手搓速度倍数不能再写 force.manual_crafting_speed_modifier。")
+        if "settings.global[constants.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING]" in control_text:
+            raise AssertionError("FAIL: 手搓速度倍数不能再从 settings.global 读取。")
+        assert_contains(
+            r"local function sync_all_player_crafting_speed_modifiers\(\).*?"
+            r"for _, player in pairs\(game\.players\) do.*?"
+            r"sync_player_crafting_speed_modifier\(player\)",
+            control_text,
+            "FAIL: 配置变更后必须给所有玩家恢复自己的手搓速度倍数。",
         )
         assert_contains(
             r"function on_runtime_mod_setting_changed|local function on_runtime_mod_setting_changed",
@@ -55,20 +72,21 @@ def main() -> int:
         )
         assert_contains(
             r"event\.setting == constants\.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING.*?"
-            r"sync_manual_crafting_speed_modifier\(\).*?"
+            r"local player = game\.get_player\(event\.player_index\).*?"
+            r"sync_player_crafting_speed_modifier\(player\).*?"
             r"return",
             control_text,
-            "FAIL: 手搓速度设置变更时必须立即同步并提前返回。",
+            "FAIL: 手搓速度设置变更时必须只同步触发设置的玩家并提前返回。",
         )
         assert_contains(
             r"local function on_configuration_changed\(\).*?sync_force_runtime_state\(\)",
             control_text,
-            "FAIL: 配置变更后必须恢复手搓速度倍数。",
+            "FAIL: 配置变更后必须恢复运行时状态。",
         )
         assert_contains(
-            r"local function sync_player_state\(event\).*?sync_manual_crafting_speed_modifier\(\)",
+            r"local function sync_player_state\(event\).*?sync_player_crafting_speed_modifier\(player\)",
             control_text,
-            "FAIL: 玩家进入或控制器变化时必须补同步手搓速度倍数。",
+            "FAIL: 玩家进入或控制器变化时必须补同步该玩家的手搓速度倍数。",
         )
 
         for locale_path in LOCALES:
