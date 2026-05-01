@@ -3,7 +3,7 @@ local constants = require("constants")
 local autocraft = {}
 
 local AUTOCRAFT_MAX_CRAFT_BATCH_SIZE = 10000
-local AUTOCRAFT_PERFORMANCE_PROFILE_ENABLED = true
+local AUTOCRAFT_PERFORMANCE_PROFILE_ENABLED = false
 
 local performance_profile_state = {
   next_log_tick = nil,
