@@ -16,9 +16,9 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "ModZips"
-IGNORED_DIRS = {".git", ".idea", ".vscode", ".vs", "__pycache__", "bin", "obj"}
+IGNORED_DIRS = {".git", ".idea", ".vscode", ".vs", "__pycache__", "bin", "obj", "tests"}
 IGNORED_SUFFIXES = {".zip", ".psd"}
-IGNORED_FILES = {".DS_Store", "Thumbs.db"}
+IGNORED_FILES = {".DS_Store", "Thumbs.db", "AGENTS.md", "README.md"}
 
 
 @dataclass(frozen=True)

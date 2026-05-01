@@ -13,7 +13,7 @@ Scroll down for the Chinese version.
 
 The mod does not create any default logistics section by itself.
 
-# When A Section Can Autocraft
+# Autocraft Conditions And Setup Flow
 
 A normal logistics section participates only when all conditions below are true.
 
@@ -26,7 +26,14 @@ A normal logistics section participates only when all conditions below are true.
 | Item shortage | The request still has a shortage after inventory, network, and queued crafts are counted | No craft is queued for that item |
 | Recipe | The recipe is unlocked and currently craftable, or its missing ingredients can be requested | The item is skipped until materials or recipes are available |
 
-# Examples
+Setup flow:
+
+1. Choose an autocraft match mode in the per-player mod settings.
+2. Name and enable the logistics sections that should participate.
+3. Enable Section Autocraft with the shortcut button.
+4. Keep the requested item count higher than inventory, network, and queued crafts.
+
+Examples:
 
 Assume the current player name is `PlayerName`.
 
@@ -35,14 +42,14 @@ Assume the current player name is `PlayerName`.
 
 | Match mode | Section name | Section enabled | Name matches | Autocrafts | Why |
 | --- | --- | --- | --- | --- | --- |
-| Full match | `Belts` | Yes | Yes | Yes | Full match accepts any enabled normal section |
-| Full match | `Belts` | No | Yes | No | Disabled sections are ignored |
-| Prefix | `Belts` | Yes | No | No | The name does not start with `[wrench]` |
-| Prefix | `[wrench]Belts` | Yes | Yes | Yes | The name starts with the configured prefix |
-| Player name | `PlayerName-Ore` | Yes | Yes | Yes | The name starts with the current player name |
-| Player name | `OtherPlayer-Ore` | Yes | No | No | The name belongs to another player |
-| Prefix + player name | `[wrench]PlayerName-Modules` | Yes | Yes | Yes | The name starts with both the prefix and current player name |
-| Prefix + player name | `[wrench]OtherPlayer-Modules` | Yes | No | No | The prefix matches, but the player name does not |
+| Full match | `Belts` | ✅ | ✅ | ✅ | Full match accepts any enabled normal section |
+| Full match | `Belts` | ❌ | ✅ | ❌ | Disabled sections are ignored |
+| Prefix | `Belts` | ✅ | ❌ | ❌ | The name does not start with `[wrench]` |
+| Prefix | `[wrench]Belts` | ✅ | ✅ | ✅ | The name starts with the configured prefix |
+| Player name | `PlayerName-Ore` | ✅ | ✅ | ✅ | The name starts with the current player name |
+| Player name | `OtherPlayer-Ore` | ✅ | ❌ | ❌ | The name belongs to another player |
+| Prefix + player name | `[wrench]PlayerName-Modules` | ✅ | ✅ | ✅ | The name starts with both the prefix and current player name |
+| Prefix + player name | `[wrench]OtherPlayer-Modules` | ✅ | ❌ | ❌ | The prefix matches, but the player name does not |
 
 # Shortage Calculation
 
@@ -101,7 +108,7 @@ mod.
 
 模组本身不会自动创建任何默认物流编组。
 
-# 自动手搓什么时候生效
+# 自动手搓生效条件与设置流程
 
 一个普通物流编组只有同时满足下面所有条件，才会参与自动手搓。
 
@@ -114,7 +121,14 @@ mod.
 | 物品缺口 | 扣除背包、物流网络、手搓队列后仍有缺口 | 不为这个物品排队 |
 | 配方状态 | 配方已解锁且当前可制作，或可以请求缺少的原料 | 暂时跳过这个物品 |
 
-# 实际例子
+设置流程：
+
+1. 在每玩家模组设置里选择自动手搓匹配模式。
+2. 按匹配模式命名并启用需要参与自动手搓的物流编组。
+3. 用右下角快捷按钮开启 Section Autocraft。
+4. 确保请求数量高于背包、物流网络和手搓队列里已有的数量。
+
+下面是同一套生效条件下的实际例子。
 
 假设当前玩家名是 `PlayerName`。
 
@@ -123,14 +137,14 @@ mod.
 
 | 匹配模式 | 编组名称 | 编组已启用 | 名称匹配 | 会自动手搓 | 原因 |
 | --- | --- | --- | --- | --- | --- |
-| 全匹配 | `Belts` | 是 | 是 | 是 | 全匹配接受所有已启用的普通编组 |
-| 全匹配 | `Belts` | 否 | 是 | 否 | 已禁用的编组会被忽略 |
-| 前缀 | `Belts` | 是 | 否 | 否 | 名称不是以 `[扳手]` 开头 |
-| 前缀 | `[扳手]Belts` | 是 | 是 | 是 | 名称以配置的前缀开头 |
-| 玩家名 | `PlayerName-Ore` | 是 | 是 | 是 | 名称以当前玩家名开头 |
-| 玩家名 | `OtherPlayer-Ore` | 是 | 否 | 否 | 名称属于其他玩家 |
-| 前缀 + 玩家名 | `[扳手]PlayerName-Modules` | 是 | 是 | 是 | 名称同时满足前缀和当前玩家名 |
-| 前缀 + 玩家名 | `[扳手]OtherPlayer-Modules` | 是 | 否 | 否 | 前缀匹配，但玩家名不匹配 |
+| 全匹配 | `Belts` | ✅ | ✅ | ✅ | 全匹配接受所有已启用的普通编组 |
+| 全匹配 | `Belts` | ❌ | ✅ | ❌ | 已禁用的编组会被忽略 |
+| 前缀 | `Belts` | ✅ | ❌ | ❌ | 名称不是以 `[扳手]` 开头 |
+| 前缀 | `[扳手]Belts` | ✅ | ✅ | ✅ | 名称以配置的前缀开头 |
+| 玩家名 | `PlayerName-Ore` | ✅ | ✅ | ✅ | 名称以当前玩家名开头 |
+| 玩家名 | `OtherPlayer-Ore` | ✅ | ❌ | ❌ | 名称属于其他玩家 |
+| 前缀 + 玩家名 | `[扳手]PlayerName-Modules` | ✅ | ✅ | ✅ | 名称同时满足前缀和当前玩家名 |
+| 前缀 + 玩家名 | `[扳手]OtherPlayer-Modules` | ✅ | ❌ | ❌ | 前缀匹配，但玩家名不匹配 |
 
 # 缺口计算方式
 
