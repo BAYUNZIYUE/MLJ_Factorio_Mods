@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.1
+Date: 2026-04-12
+  Changes:
+    - 修复飞船仍停留在目标星球上空时，向地面下投会超过当前缺口的问题；已飞走时仍保留倍率下投。
+    - 为额外下投增加返还与缓存回收，避免飞船仍在轨时重复补同一份地面缺口。
+    - Fix the issue where downward delivery could exceed the current destination gap while the ship was still above the target planet; multiplier-based delivery is still kept after the ship has left.
+    - Added return and cache recovery for extra downward cargo so ships still above the target do not overfill the same ground-side gap.
+---------------------------------------------------------------------------------------------------
 Version: 1.1.0
 Date: 2026-03-30
   Changes:

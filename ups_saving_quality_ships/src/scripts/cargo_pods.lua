@@ -16,6 +16,29 @@ function Public.on_init()
     ensure_state()
 end
 
+local function build_item_full_name(name, quality)
+    return name .. "(" .. tostring(quality) .. ")"
+end
+
+local function return_extra_to_hub_or_cache(hub_inventory, item, item_full_name, multiplier, extra_count)
+    if extra_count <= 0 then
+        return
+    end
+
+    local return_count = math.floor(extra_count / multiplier)
+    local cache_count = extra_count - return_count * multiplier
+    if return_count > 0 then
+        local real_insert = hub_inventory.insert({ name = item.name, count = return_count, quality = item.quality })
+        local failed_return = return_count - real_insert
+        if failed_return > 0 then
+            cache_count = cache_count + failed_return * multiplier
+        end
+    end
+    if cache_count > 0 then
+        insert(item_full_name, cache_count)
+    end
+end
+
 local function clear_platform_bucket_if_empty(platform_index)
     local bucket = storage.usqs.tracked_cargo_pods_by_platform[platform_index]
     if bucket == nil then
@@ -285,13 +308,24 @@ examine_cargo_pods = function(platform, cargo_pods)
                 else
                     state = 1
                 end
-                local item_full_name = item.name .. "(" .. tostring(item.quality) .. ")"
-                local total_count = item.count * multiplier + remove(item_full_name)
-                local left_count = total_count - item.count -- 仍需添加进货舱的总数
+                local item_full_name = build_item_full_name(item.name, item.quality)
+                local cached_extra_count = remove(item_full_name)
+                local simulated_extra_count = item.count * (multiplier - 1) + cached_extra_count
+                local extra_delivery_count
+                -- 飞船仍停在目标星球上空时，系统已经按当前真实需求完成下投，模组只负责返还模拟增量。
+                if spaceship_have_surface then
+                    extra_delivery_count = 0
+                else
+                    extra_delivery_count = simulated_extra_count
+                end
+                local left_count = extra_delivery_count
+                local delivered_extra_count = 0
+                local returned_extra_count = 0
                 while left_count > 0 do
                     if state == 1 then
                         local real_insert = pod_inventory.insert({ name = item.name, count = left_count, quality = item.quality })
                         left_count = left_count - real_insert
+                        delivered_extra_count = delivered_extra_count + real_insert
 
                         --local curr_count = pod_inventory.get_item_count({ name = item.name, quality = item.quality })
                         --game.print("↓pod" .. tostring(pod.unit_number) .. " " .. item_full_name .. " x " .. item.count .. " -> " .. curr_count .. "，仍需下投" .. left_count)
@@ -313,6 +347,7 @@ examine_cargo_pods = function(platform, cargo_pods)
                     elseif state == 2 then
                         local real_insert = curr_pod_inventory.insert({ name = item.name, count = left_count, quality = item.quality })
                         left_count = left_count - real_insert
+                        delivered_extra_count = delivered_extra_count + real_insert
 
                         --local curr_count = curr_pod_inventory.get_item_count({ name = item.name, quality = item.quality })
                         --game.print("↓pod" .. tostring(curr_pod.unit_number) .. " " .. item_full_name .. " x 0 -> " .. curr_count .. "，仍需下投" .. left_count)
@@ -330,16 +365,20 @@ examine_cargo_pods = function(platform, cargo_pods)
                             end
                         end
                     elseif state == 3 then
-                        local return_count = math.floor(left_count / multiplier)
-                        if return_count > 0 then
-                            local real_insert = hub_inventory.insert({ name = item.name, count = return_count, quality = item.quality })
-                            if real_insert < return_count then
-                                insert(item_full_name, left_count - (return_count - real_insert) * multiplier)
-                            end
-                        end
+                        return_extra_to_hub_or_cache(hub_inventory, item, item_full_name, multiplier, left_count)
+                        returned_extra_count = returned_extra_count + left_count
                         left_count = 0
                     end
                 end
+                local skipped_extra_count = simulated_extra_count - extra_delivery_count
+                local undelivered_extra_count = math.max(0, extra_delivery_count - delivered_extra_count - returned_extra_count)
+                return_extra_to_hub_or_cache(
+                        hub_inventory,
+                        item,
+                        item_full_name,
+                        multiplier,
+                        skipped_extra_count + undelivered_extra_count
+                )
             end
             if curr_pod ~= nil then
                 curr_pod.cargo_pod_destination = pod_destination

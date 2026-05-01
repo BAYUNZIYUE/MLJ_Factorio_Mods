@@ -27,6 +27,26 @@ local function on_cargo_pod_left_surface(event)
     cargo_pods.untrack_cargo_pod(event.cargo_pod)
 end
 
+local function sync_logistic_locale_from_player(player_index)
+    local player = game.get_player(player_index)
+    if not (player and player.valid) then
+        return
+    end
+    if logistic_section_change.set_locale(player.locale) then
+        local platforms = platform_cache.get_all_platforms()
+        logistic_section_change.reconcile_platforms(platforms)
+        logistic_section_change.on_60th_tick_check_logistic_sections(platforms)
+    end
+end
+
+local function on_player_locale_changed(event)
+    sync_logistic_locale_from_player(event.player_index)
+end
+
+local function on_player_joined_or_created(event)
+    sync_logistic_locale_from_player(event.player_index)
+end
+
 script.on_event(defines.events.on_space_platform_changed_state, request_platform_cache_rebuild)
 script.on_event(defines.events.on_space_platform_built_entity, request_platform_cache_rebuild)
 script.on_event(defines.events.on_space_platform_mined_entity, request_platform_cache_rebuild)
@@ -36,6 +56,9 @@ script.on_event(defines.events.on_cargo_pod_finished_descending, on_cargo_pod_fi
 script.on_event(defines.events.on_cargo_pod_started_ascending, on_cargo_pod_left_surface)
 script.on_event(defines.events.on_cargo_pod_delivered_cargo, on_cargo_pod_left_surface)
 script.on_event(defines.events.on_cargo_pod_finished_ascending, on_cargo_pod_left_surface)
+script.on_event(defines.events.on_player_created, on_player_joined_or_created)
+script.on_event(defines.events.on_player_joined_game, on_player_joined_or_created)
+script.on_event(defines.events.on_player_locale_changed, on_player_locale_changed)
 
 script.on_nth_tick(20, function()
     cargo_pods.on_20th_tick_check_cargo_pods()

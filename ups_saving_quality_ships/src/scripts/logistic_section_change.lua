@@ -1,6 +1,11 @@
 local Public = {}
 local platform_cache = require("scripts/platform_cache")
 
+local AUTO_SECTION_PREFIXES = {
+    en = "[Auto]UPS Saving Quality Ships-",
+    zh = "[自动]UPS友好型品质飞船-",
+}
+
 local function build_filters_signature(filters)
     local signature_parts = {}
     if filters == nil then
@@ -23,26 +28,74 @@ end
 local function ensure_state()
     storage.usqs = storage.usqs or {}
     storage.usqs.logistic_state = storage.usqs.logistic_state or {}
+    storage.usqs.logistic_locale = storage.usqs.logistic_locale or "en"
     return storage.usqs.logistic_state
 end
 
-function Public.on_init()
-    ensure_state()
+local function normalize_locale(locale)
+    if locale ~= nil and string.sub(locale, 1, 2) == "zh" then
+        return "zh"
+    end
+    return "en"
 end
 
-local function clear_auto_section(platform)
+local function build_auto_section_name(platform_index)
+    local locale_key = storage.usqs.logistic_locale or "en"
+    return AUTO_SECTION_PREFIXES[locale_key] .. tostring(platform_index)
+end
+
+local function is_auto_section_name(group_name, platform_index)
+    if group_name == nil then
+        return false
+    end
+    for _, prefix in pairs(AUTO_SECTION_PREFIXES) do
+        if group_name == prefix .. tostring(platform_index) then
+            return true
+        end
+    end
+    return false
+end
+
+local function collect_auto_sections(logistic_sections, platform_index)
+    local auto_sections = {}
+    for _, section in pairs(logistic_sections.sections) do
+        if section.valid and is_auto_section_name(section.group, platform_index) then
+            auto_sections[#auto_sections + 1] = section
+        end
+    end
+    table.sort(auto_sections, function(left, right)
+        return left.index < right.index
+    end)
+    return auto_sections
+end
+
+local function remove_sections_by_index(logistic_sections, section_indexes)
+    table.sort(section_indexes, function(left, right)
+        return left > right
+    end)
+    for _, section_index in ipairs(section_indexes) do
+        logistic_sections.remove_section(section_index)
+    end
+end
+
+local function remove_auto_section(platform)
     if not (platform and platform.valid and platform.hub and platform.hub.valid) then
         return
     end
     local logistic_sections = platform.hub.get_logistic_sections()
-    local section_usqs_name = "[Auto]UPS Saving Quality Ships-" .. tostring(platform.index)
-    for _, section in pairs(logistic_sections.sections) do
-        if section.valid and section.group == section_usqs_name then
-            section.active = false
-            section.filters = {}
-            section.multiplier = 1
-            break
+    local auto_sections = collect_auto_sections(logistic_sections, platform.index)
+    if #auto_sections == 0 then
+        return
+    end
+
+    local section_indexes = {}
+    for _, section in ipairs(auto_sections) do
+        if section.is_manual then
+            section_indexes[#section_indexes + 1] = section.index
         end
+    end
+    if #section_indexes > 0 then
+        remove_sections_by_index(logistic_sections, section_indexes)
     end
 end
 
@@ -57,6 +110,30 @@ local function is_logistic_platform(platform)
             and platform.space_location ~= nil
 end
 
+function Public.on_init()
+    ensure_state()
+    if game == nil or game.players == nil then
+        return
+    end
+    for _, player in pairs(game.players) do
+        if player and player.valid then
+            Public.set_locale(player.locale)
+            break
+        end
+    end
+end
+
+function Public.set_locale(locale)
+    ensure_state()
+    local normalized_locale = normalize_locale(locale)
+    if storage.usqs.logistic_locale == normalized_locale then
+        return false
+    end
+    storage.usqs.logistic_locale = normalized_locale
+    storage.usqs.logistic_state = {}
+    return true
+end
+
 function Public.reconcile_platforms(platforms)
     local logistic_state = ensure_state()
     local seen = {}
@@ -64,7 +141,7 @@ function Public.reconcile_platforms(platforms)
         if platform and platform.valid then
             seen[platform.index] = true
             if not is_logistic_platform(platform) then
-                clear_auto_section(platform)
+                remove_auto_section(platform)
                 logistic_state[platform.index] = nil
             end
         end
@@ -83,7 +160,7 @@ function Public.on_60th_tick_check_logistic_sections(platforms)
         if is_logistic_platform(platform) then
             examine_platform(platform)
         else
-            clear_auto_section(platform)
+            remove_auto_section(platform)
             logistic_state[platform.index] = nil
         end
     end
@@ -94,35 +171,46 @@ function examine_platform(platform)
     local hub = platform.hub
     local multiplier = 1 + math.ceil(hub.quality.level * 0.79)
     local logistic_sections = platform.hub.get_logistic_sections()
+    local section_usqs_name = build_auto_section_name(platform.index)
+    local auto_sections = collect_auto_sections(logistic_sections, platform.index)
     local section_usqs = nil
-    local section_usqs_name = "[Auto]UPS Saving Quality Ships-" .. tostring(platform.index)
+    local duplicate_section_indexes = {}
+    for _, section in ipairs(auto_sections) do
+        if section_usqs == nil or section.group == section_usqs_name then
+            if section_usqs ~= nil then
+                duplicate_section_indexes[#duplicate_section_indexes + 1] = section_usqs.index
+            end
+            section_usqs = section
+        else
+            duplicate_section_indexes[#duplicate_section_indexes + 1] = section.index
+        end
+    end
+    if #duplicate_section_indexes > 0 then
+        remove_sections_by_index(logistic_sections, duplicate_section_indexes)
+    end
+
     local total_need = {}
     for _, section in pairs(logistic_sections.sections) do
         if not section.valid then
             goto continue
         end
-        if section.group == section_usqs_name then
-            section_usqs = section
+        if is_auto_section_name(section.group, platform.index) then
             goto continue
         end
         if not section.active then
             goto continue
         end
-            local is_rmmc_section = section.type == defines.logistic_section_type.request_missing_materials_controlled
-            for _, filter in pairs(section.filters) do
-                if filter.value and filter.min and
-                        (is_rmmc_section or (filter.import_from and filter.import_from.name == platform.space_location.name)) then
-                    add_count(total_need, {
-                        value = filter.value,
-                        min = filter.min * section.multiplier,
-                    })
-                end
+        local is_rmmc_section = section.type == defines.logistic_section_type.request_missing_materials_controlled
+        for _, filter in pairs(section.filters) do
+            if filter.value and filter.min and
+                    (is_rmmc_section or (filter.import_from and filter.import_from.name == platform.space_location.name)) then
+                add_count(total_need, {
+                    value = filter.value,
+                    min = filter.min * section.multiplier,
+                })
             end
+        end
         :: continue ::
-    end
-
-    if section_usqs == nil then
-        section_usqs = logistic_sections.add_section(section_usqs_name)
     end
 
     local hub_inventory = hub.get_inventory(defines.inventory.hub_main)
@@ -147,6 +235,18 @@ function examine_platform(platform)
         end
     end
 
+    if #section_usqs_filters == 0 then
+        remove_auto_section(platform)
+        logistic_state[platform.index] = nil
+        return
+    end
+
+    if section_usqs == nil or not section_usqs.valid then
+        section_usqs = logistic_sections.add_section(section_usqs_name)
+    elseif section_usqs.group ~= section_usqs_name then
+        section_usqs.group = section_usqs_name
+    end
+
     local signature = build_filters_signature(section_usqs_filters)
     local platform_state = logistic_state[platform.index]
     local current_signature = build_filters_signature(section_usqs.filters)
@@ -154,12 +254,14 @@ function examine_platform(platform)
             and platform_state.signature == signature
             and current_signature == signature
             and section_usqs.active
-            and section_usqs.multiplier == 1 then
+            and section_usqs.multiplier == 1
+            and section_usqs.group == section_usqs_name then
         return
     end
 
     section_usqs.active = true
     section_usqs.multiplier = 1
+    section_usqs.group = section_usqs_name
     section_usqs.filters = section_usqs_filters
     logistic_state[platform.index] = {
         signature = signature,
