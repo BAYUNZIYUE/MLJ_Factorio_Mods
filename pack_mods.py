@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -211,10 +212,34 @@ def resolve_changelog(project: ModProject) -> Path | None:
     return None
 
 
+def is_wsl() -> bool:
+    release = platform.uname().release.lower()
+    return "microsoft" in release or "wsl" in release
+
+
+def convert_wsl_path_to_windows(path: Path) -> str:
+    result = subprocess.run(
+        ["wslpath", "-w", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def get_windows_explorer_command(path: Path) -> list[str]:
+    explorer_path = Path("/mnt/c/Windows/explorer.exe")
+    explorer = str(explorer_path) if explorer_path.is_file() else "explorer.exe"
+    windows_path = convert_wsl_path_to_windows(path)
+    return [explorer, windows_path]
+
+
 def open_output_directory(output_dir: Path) -> None:
     try:
         if os.name == "nt":
             os.startfile(output_dir)  # type: ignore[attr-defined]
+        elif is_wsl():
+            subprocess.Popen(get_windows_explorer_command(output_dir))
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(output_dir)])
         else:
