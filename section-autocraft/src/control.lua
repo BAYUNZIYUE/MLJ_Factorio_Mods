@@ -13,11 +13,30 @@ local function enable_player_force_logistics_requests()
   player_force.character_logistic_requests = true
 end
 
+local function get_manual_crafting_speed_multiplier()
+  local setting = settings.global[constants.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING]
+  local multiplier = setting and tonumber(setting.value) or 1
+  return math.max(multiplier, 1)
+end
+
+local function sync_manual_crafting_speed_modifier()
+  local multiplier = get_manual_crafting_speed_multiplier()
+  local modifier = multiplier - 1
+  for _, force in pairs(game.forces) do
+    force.manual_crafting_speed_modifier = modifier
+  end
+end
+
+local function sync_force_runtime_state()
+  enable_player_force_logistics_requests()
+  sync_manual_crafting_speed_modifier()
+end
+
 local function on_configuration_changed()
   storage.recipes = autocraft.pre_compute_recipes()
   storage.data = storage.data or {}
 
-  enable_player_force_logistics_requests()
+  sync_force_runtime_state()
 
   for _, player in pairs(game.players) do
     autocraft.mark_sections_dirty(player)
@@ -37,6 +56,7 @@ local function sync_player_state(event)
     return
   end
 
+  sync_manual_crafting_speed_modifier()
   sync_shortcut_state(player)
   autocraft.mark_sections_dirty(player)
   autocraft.sync_section_status_notifications(player)
@@ -172,6 +192,11 @@ local function on_lua_shortcut(event)
 end
 
 local function on_runtime_mod_setting_changed(event)
+  if event.setting == constants.AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING then
+    sync_manual_crafting_speed_modifier()
+    return
+  end
+
   if not (
     event.setting == constants.AUTOCRAFT_PREFIX_SETTING
     or event.setting == constants.AUTOCRAFT_MATCH_MODE_SETTING
@@ -238,8 +263,8 @@ script.on_event(defines.events.on_gui_closed, trigger_crafting)
 script.on_event(defines.events.on_player_main_inventory_changed, trigger_crafting)
 script.on_event(defines.events.on_player_joined_game, sync_player_state)
 script.on_event(defines.events.on_player_controller_changed, sync_player_state)
-script.on_event(defines.events.on_force_reset, enable_player_force_logistics_requests)
-script.on_event(defines.events.on_forces_merged, enable_player_force_logistics_requests)
-script.on_event(defines.events.on_technology_effects_reset, enable_player_force_logistics_requests)
+script.on_event(defines.events.on_force_reset, sync_force_runtime_state)
+script.on_event(defines.events.on_forces_merged, sync_force_runtime_state)
+script.on_event(defines.events.on_technology_effects_reset, sync_force_runtime_state)
 script.on_nth_tick(60, keep_missing_sections_enabled)
 script.on_nth_tick(30, sync_section_status_notifications_for_connected_players)

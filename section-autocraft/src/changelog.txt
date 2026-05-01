@@ -3,7 +3,9 @@ Version: 1.0.2
 Date: 2026-05-01
   Optimizations:
     - 优化全匹配模式下高频背包变化触发的自动手搓性能，缓存物流编组请求、缺料编组位置和上一轮可搓配方，并保留持续性能日志。
+    - 增加运行时全局设置“手搓速度倍数”，可按倍数调整所有阵营的手搓速度。
     - Optimized full-match autocraft performance for frequent inventory changes by caching logistic section requests, missing-material section lookup, and the previous craftable recipe while keeping continuous performance profiling logs.
+    - Added a runtime-global hand crafting speed multiplier setting that adjusts manual crafting speed for all forces.
 ---------------------------------------------------------------------------------------------------
 Version: 1.0.1
 Date: 2026-04-12

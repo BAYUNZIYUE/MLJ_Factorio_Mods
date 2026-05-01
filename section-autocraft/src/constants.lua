@@ -5,6 +5,7 @@ local constants = {
   AUTOCRAFT_SOUND_ENABLED = "autocraft-sound-enabled",
   AUTOCRAFT_PREFIX_SETTING = "autocraft-wrench-prefix",
   AUTOCRAFT_MATCH_MODE_SETTING = "autocraft-match-mode",
+  AUTOCRAFT_CRAFTING_SPEED_MULTIPLIER_SETTING = "autocraft-crafting-speed-multiplier",
   AUTOCRAFT_DEFAULT_ENABLED = true,
   AUTOCRAFT_MATCH_MODE_FULL = "full-match",
   AUTOCRAFT_MATCH_MODE_PREFIX = "prefix",
