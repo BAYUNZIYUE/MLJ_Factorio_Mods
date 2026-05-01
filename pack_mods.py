@@ -41,6 +41,7 @@ def main() -> int:
         return 1
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    clear_output_directory(OUTPUT_DIR)
     print(f"Found {len(projects)} mod project(s).")
 
     success_count = 0
@@ -61,6 +62,14 @@ def main() -> int:
         open_output_directory(OUTPUT_DIR)
 
     return 0 if failures == 0 else 1
+
+
+def clear_output_directory(output_dir: Path) -> None:
+    for child in output_dir.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
 
 
 def discover_projects(root: Path) -> list[ModProject]:
