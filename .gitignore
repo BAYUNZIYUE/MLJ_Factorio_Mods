@@ -179,5 +179,6 @@ ModZips/
 .DS_Store
 
 docs/
-.codex
+.sisyphus/
 .codex/
+.claude/
