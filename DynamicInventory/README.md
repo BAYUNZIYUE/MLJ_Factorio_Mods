@@ -1,50 +1,61 @@
+> 下拉以查看中文说明。
+
 # Dynamic Inventory
 
-Dynamic Inventory automatically adjusts the player's inventory bonus slots so
-there is enough empty space while playing.
+## Overview
 
-Scroll down for the Chinese version.
+Dynamic Inventory automatically adjusts inventory size so the player keeps enough empty space while playing.
 
-## What It Does
+## Features
 
-- Watches the player's main inventory.
-- Expands the character inventory bonus when free slots are below the configured target.
-- Avoids resizing while the player is interacting with another GUI unless free slots are already low.
-- Rechecks delayed resize requests once per second.
+- Automatically increases the character inventory slot bonus when the main inventory has fewer empty slots than the configured target.
+- Keeps a configurable minimum inventory bonus, so the inventory never shrinks below the player-selected baseline.
+- Delays non-urgent resizing while the player is interacting with another GUI, reducing disruptive inventory changes during normal play.
+- Rechecks delayed resize requests once per second until the player can be resized safely.
 
-## Settings
+## Usage
 
-| Setting | Scope | Default | Meaning |
-| --- | --- | --- | --- |
-| Min inventory slots bonus | Per player | `0` | Minimum number of bonus inventory slots to keep |
-| Empty inventory slots | Per player | `120` | Target number of empty slots to keep available |
+- Configure `Min inventory slots bonus` to set the minimum number of bonus inventory slots your character should keep.
+- Configure `Empty inventory slots` to set how many empty inventory slots the mod should try to keep available.
+- The resize logic works only while the player has a valid character and main inventory.
+- The mod only changes the character inventory slot bonus; it does not add items, remove items, or change stack sizes.
 
-## Notes
+### Example
 
-- The mod only changes the character inventory slot bonus.
-- It does not add items, remove items, or change stack sizes.
-- The resize logic only runs while the player has a character and a main inventory.
+If `Empty inventory slots` is set to `120` and your inventory drops below that target, the mod increases your character inventory bonus until there is enough free space again.
 
-# 动态背包
+## Acknowledgments
 
-Dynamic Inventory 会自动调整玩家背包奖励格子数，让游玩过程中保留足够的空槽位。
+- Thanks to every player who uses this mod.
 
-## 模组功能
+If you have any comments or suggestions, please share them in the [Factorio discussion](http://mods.factorio.com/mod/DynamicInventory/discussion) or on [GitHub](https://github.com/MengLeiFudge/MLJ_Factorio_Mods/tree/master/DynamicInventory).
 
-- 监听玩家主背包变化。
-- 当空槽数量低于配置目标时，自动扩展角色背包奖励格子数。
-- 玩家正在打开其他界面时，不会频繁调整背包；只有空槽已经偏低时才会继续扩容。
-- 延迟调整的玩家会每秒重新检查一次。
+# 中文说明
 
-## 设置
+## 概览
 
-| 设置 | 范围 | 默认值 | 作用 |
-| --- | --- | --- | --- |
-| 最小背包奖励格子数 | 每玩家 | `0` | 背包额外扩容的最低数量 |
-| 背包空槽数 | 每玩家 | `120` | 希望持续保留的空槽数量 |
+动态背包会自动调整背包大小，以确保玩家在游玩过程中保留足够的空槽位。
 
-## 说明
+## 功能简介
 
-- 模组只调整角色背包奖励格子数。
-- 模组不会添加物品、删除物品或修改堆叠大小。
-- 调整逻辑只在玩家拥有角色和主背包时生效。
+- 当主背包空槽数低于设置目标时，自动提高角色背包奖励格子数。
+- 保留可配置的最低背包奖励格子数，避免背包低于玩家设置的基础容量。
+- 玩家正在操作其他界面且空槽尚未过低时，会延后非紧急扩容，减少游玩过程中的突兀变化。
+- 已延后的扩容请求会每秒重新检查一次，直到可以安全调整。
+
+## 使用说明
+
+- 设置 `最小背包奖励格子数`，决定角色至少保留多少额外背包格。
+- 设置 `背包空槽数`，决定模组尽量维持多少空背包格。
+- 调整逻辑只在玩家拥有有效角色和主背包时生效。
+- 模组只修改角色背包奖励格子数，不会添加物品、删除物品或修改堆叠大小。
+
+### 例子
+
+如果 `背包空槽数` 设置为 `120`，而你的背包空槽低于这个目标，模组就会提高角色背包奖励格子数，直到重新拥有足够空位。
+
+## 致谢
+
+- 感谢所有使用此模组的玩家。
+
+如果有任何意见或建议，欢迎在 [Factorio 讨论区](http://mods.factorio.com/mod/DynamicInventory/discussion) 或 [GitHub](https://github.com/MengLeiFudge/MLJ_Factorio_Mods/tree/master/DynamicInventory) 反馈。

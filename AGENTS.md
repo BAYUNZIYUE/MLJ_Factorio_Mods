@@ -79,11 +79,49 @@ copy the contents into the archive root.
 - Every mod root must have both `README.md` and `AGENTS.md`. `README.md` is
   player-facing or maintainer-facing documentation; `AGENTS.md` is the
   execution contract for that mod.
+- Mod `README.md` files are player-facing documents. The goal is not to be
+  short; the goal is that a player can understand what the mod does, how to use
+  it, and how to judge whether behavior is expected. Keep implementation logic
+  practical, but keep examples, tables, and step-by-step explanations when they
+  make the mod easier to understand.
+- Mod `README.md` files must make the Chinese section easy to find. Add a simple
+  portable Markdown line near the top, before the English title:
+  `> 下拉以查看中文说明。`. Do not use GitHub-only alert syntax such as
+  `[!TIP]`.
+- If a mod README has a player-facing slogan, quote, or tagline, keep it at the
+  very top of the file before the Chinese-section hint.
+- Mod `README.md` files must use this bilingual structure after any preserved
+  top slogan and the Chinese-section hint: English section first, then the
+  Chinese section. The fixed section order is `Overview`, `Features`, `Usage`,
+  `Acknowledgments`, then `中文说明`, `概览`, `功能简介`, `使用说明`, `致谢`.
+- The README overview must be short, precise, and aligned with `src/info.json`
+  plus the mod locale description when one exists.
+- README paragraphs, list items, and table cells must not be manually wrapped
+  across multiple lines. Markdown structural line breaks for headings, blank
+  lines, separate list items, tables, code blocks, and nested headings inside
+  `Usage` / `使用说明` are allowed. Use normal heading hierarchy: `##` sections
+  should use `###` for direct child sections, and only use deeper heading levels
+  when the content genuinely needs deeper nesting.
+- Every mod README must include at least one concrete player-facing example.
+  For complex mods, keep or add the tables, examples, and step-by-step
+  explanations needed for players to understand expected behavior; do not remove
+  useful examples merely to make the file shorter or fit the four top-level
+  sections.
+- README acknowledgments may include multiple concrete sources of help such as
+  idea origin, testing help, reference projects, or documentation help. The last
+  acknowledgment bullet in each language must thank all players who use the mod.
+- The final line in each README language section must link to both
+  `http://mods.factorio.com/mod/<info.name>/discussion` and the GitHub mod
+  directory under
+  `https://github.com/MengLeiFudge/MLJ_Factorio_Mods/tree/master/<mod-directory>`.
 - Zip outputs must be `{info.name}_{info.version}.zip`, and the archive root
   must be `{info.name}_{info.version}/` rather than loose files.
 - Runtime persistence uses `storage`, not legacy `global`.
 - Locale files stay under `src/locale/<lang>/...`; do not create AGENTS files
   inside locale trees.
+- Mod changelogs are runtime package files and must live at
+  `<mod>/src/changelog.txt`. Do not keep or add root-level `<mod>/changelog.txt`
+  fallbacks; if a mod does not satisfy the layout, fix the mod layout.
 - Long-lived regression tests belong under the repository root `tests/`, grouped
   by domain or mod name. Do not place test files inside any mod `src/` tree.
 - One-off investigation scripts are temporary. Put them under `.codex/` while
@@ -143,6 +181,13 @@ python3 pack_mods.py
 
 - Read the nearest `AGENTS.md` before editing and obey the most specific file.
 - Inspect the current code and real workspace state before making claims.
+- When a discussion establishes a durable workflow, documentation, packaging,
+  release, README, or authoring convention, record it in the appropriate
+  long-lived repository document before handoff. Use root or nearest
+  `AGENTS.md` for execution contracts and contributor workflow rules; use
+  `README.md` for player-facing or maintainer-facing public documentation.
+  Drafts under `.codex/drafts/` are only discussion notes and must not be the
+  only place where an agreed convention lives.
 - Prefer direct execution for clear requests; ask only when a missing decision is
   risky or cannot be inferred.
 - Before deleting files, moving files, changing system configuration, or doing

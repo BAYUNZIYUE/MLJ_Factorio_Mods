@@ -156,11 +156,6 @@ def pack_project(project: ModProject) -> Path:
     if not any(relative == Path("info.json") for _, relative in files):
         raise ValueError(f"{project.root_dir.name}: src/info.json must be included in package")
 
-    if not any(relative == Path("changelog.txt") for _, relative in files):
-        fallback = resolve_changelog(project)
-        if fallback is not None:
-            files.append((fallback, Path("changelog.txt")))
-
     zip_path = OUTPUT_DIR / f"{project.package_name}.zip"
     if zip_path.exists():
         zip_path.unlink()
@@ -203,14 +198,6 @@ def should_ignore(parts: tuple[str, ...], filename: str) -> bool:
     if filename in IGNORED_FILES:
         return True
     return Path(filename).suffix.lower() in IGNORED_SUFFIXES
-
-
-def resolve_changelog(project: ModProject) -> Path | None:
-    for candidate in (project.src_dir / "changelog.txt", project.root_dir / "changelog.txt"):
-        if candidate.is_file():
-            return candidate
-    return None
-
 
 def is_wsl() -> bool:
     release = platform.uname().release.lower()
