@@ -1,5 +1,6 @@
 local Public = {}
 local platform_cache = require("scripts/platform_cache")
+local quality_multiplier = require("scripts/quality_multiplier")
 local examine_cargo_pods
 
 local function ensure_state()
@@ -222,8 +223,8 @@ end
 
 examine_cargo_pods = function(platform, cargo_pods)
     local hub = platform.hub
-    -- 倍率由太空平台枢纽的品质决定，hub.quality.level=0 1 2 3 5，multiplier=1 2 3 4 5
-    local multiplier = 1 + math.ceil(hub.quality.level * 0.79)
+    -- 倍率由太空平台枢纽品质等级决定，普通品质至少按1倍处理。
+    local multiplier = quality_multiplier.from_quality(hub.quality)
     local hub_inventory = hub.get_inventory(defines.inventory.hub_main)
     for _, pod in pairs(cargo_pods) do
         if storage.usqs.processed_cargo_pods[pod.unit_number] ~= nil then

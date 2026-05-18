@@ -1,3 +1,60 @@
+local function normalize_blueprint_quality(quality)
+    if quality == nil then
+        return "normal"
+    end
+    return quality
+end
+
+local function store_blueprint_quality(quality)
+    if quality == "normal" then
+        return nil
+    end
+    return quality
+end
+
+local function build_next_quality_map()
+    local ordered = {}
+    local next_quality = {}
+
+    for _, quality in pairs(prototypes.quality) do
+        ordered[#ordered + 1] = quality
+        if quality.next then
+            next_quality[quality.name] = quality.next.name
+        end
+    end
+
+    table.sort(ordered, function(left, right)
+        local left_level = left.level or 0
+        local right_level = right.level or 0
+        if left_level ~= right_level then
+            return left_level < right_level
+        end
+        return (left.order or left.name) < (right.order or right.name)
+    end)
+
+    for index = 1, #ordered - 1 do
+        local current = ordered[index].name
+        next_quality[current] = next_quality[current] or ordered[index + 1].name
+    end
+
+    return next_quality
+end
+
+local function upgrade_hub_quality(bp_entity)
+    local next_quality = build_next_quality_map()
+    local current_quality = normalize_blueprint_quality(bp_entity.quality)
+    local target_quality = next_quality[current_quality]
+    if target_quality == nil then
+        -- Boundary control: highest quality stays at highest quality.
+        game.print({ "hub_quality_change.hub_quality_at_max", current_quality })
+        return true
+    end
+
+    bp_entity.quality = store_blueprint_quality(target_quality)
+    game.print({ "hub_quality_change.hub_quality_changed", current_quality, target_quality })
+    return true
+end
+
 local function convert_bp(bp)
     local processed = false
     if bp and bp.is_blueprint_setup() then
@@ -6,23 +63,8 @@ local function convert_bp(bp)
             for _, bp_entity in pairs(blueprint_entities) do
                 -- BlueprintEntity :: table
                 if bp_entity.name == "space-platform-hub" then
-                    -- 修改hub品质 bp_entity.quality是string?，如果为普通品质则为nil
-                    if bp_entity.quality == nil then
-                        bp_entity.quality = "uncommon"
-                        game.print({ "hub_quality_change.hub_quality_1_2" })
-                    elseif bp_entity.quality == "uncommon" then
-                        bp_entity.quality = "rare"
-                        game.print({ "hub_quality_change.hub_quality_2_3" })
-                    elseif bp_entity.quality == "rare" then
-                        bp_entity.quality = "epic"
-                        game.print({ "hub_quality_change.hub_quality_3_4" })
-                    elseif bp_entity.quality == "epic" then
-                        bp_entity.quality = "legendary"
-                        game.print({ "hub_quality_change.hub_quality_4_5" })
-                    elseif bp_entity.quality == "legendary" then
-                        bp_entity.quality = "normal"
-                        game.print({ "hub_quality_change.hub_quality_5_1" })
-                    end
+                    -- 修改hub品质，普通品质在蓝图内通常为nil。
+                    local quality_changed = upgrade_hub_quality(bp_entity)
                     -- 移除所有未命名（sec.group=nil）且为空（sec.filters=nil）的编组
                     local request_filters = bp_entity.request_filters
                     if request_filters and request_filters.sections then
@@ -37,7 +79,7 @@ local function convert_bp(bp)
                         end
                         request_filters.sections = new_sections
                     end
-                    processed = true
+                    processed = processed or quality_changed
                 end
             end
             bp.set_blueprint_entities(blueprint_entities)

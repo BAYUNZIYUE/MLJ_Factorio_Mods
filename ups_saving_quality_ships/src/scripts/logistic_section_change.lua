@@ -1,5 +1,6 @@
 local Public = {}
 local platform_cache = require("scripts/platform_cache")
+local quality_multiplier = require("scripts/quality_multiplier")
 
 local AUTO_SECTION_PREFIXES = {
     en = "[Auto]UPS Saving Quality Ships-",
@@ -169,7 +170,7 @@ end
 function examine_platform(platform)
     local logistic_state = ensure_state()
     local hub = platform.hub
-    local multiplier = 1 + math.ceil(hub.quality.level * 0.79)
+    local multiplier = quality_multiplier.from_quality(hub.quality)
     local logistic_sections = platform.hub.get_logistic_sections()
     local section_usqs_name = build_auto_section_name(platform.index)
     local auto_sections = collect_auto_sections(logistic_sections, platform.index)

@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.2
+Date: 2026-05-11
+  Changes:
+    - 太空平台枢纽品质切换改为动态读取当前启用的品质链，支持扩展品质模组。
+    - 太空平台枢纽达到最高品质后不再回到最低品质。
+    - 飞船模拟倍率改为直接使用“品质等级 + 1”，原版品质倍率为 1/2/3/4/6。
+    - Updated space platform hub quality cycling to read the active quality chain dynamically, supporting extended quality mods.
+    - Space platform hubs no longer wrap back to the lowest quality after reaching the highest quality.
+    - Changed the ship simulation multiplier to "quality level + 1", making vanilla quality multipliers 1/2/3/4/6.
+---------------------------------------------------------------------------------------------------
 Version: 1.1.1
 Date: 2026-04-12
   Changes:
