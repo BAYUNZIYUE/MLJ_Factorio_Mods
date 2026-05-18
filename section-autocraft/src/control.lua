@@ -24,6 +24,11 @@ local function sync_player_crafting_speed_modifier(player)
     return
   end
 
+  if not player.character then
+    -- 新建游戏 tick 0 可能尚未创建角色，直接写角色速度会触发 Factorio 的 "No character"。
+    return
+  end
+
   local multiplier = get_player_crafting_speed_multiplier(player)
   local modifier = multiplier - 1
   player.character_crafting_speed_modifier = modifier
@@ -148,17 +153,22 @@ local function on_player_crafted_item(event)
     return
   end
 
-  if data.active_item_name == event.item_stack.name and player.mod_settings[constants.AUTOCRAFT_SOUND_ENABLED].value then
+  local event_quality_name = event.item_stack.quality.name
+  local is_active_item =
+    data.active_item_name == event.item_stack.name and (data.active_quality_name or "normal") == event_quality_name
+
+  if is_active_item and player.mod_settings[constants.AUTOCRAFT_SOUND_ENABLED].value then
     player.play_sound({ path = constants.CRAFTING_FINISHED_SOUND })
   end
 
-  if data.active_item_name == event.item_stack.name then
+  if is_active_item then
     data.active_item_name = nil
+    data.active_quality_name = nil
     data.active_queue_index = nil
     data.active_recipe_name = nil
 
     if #player.crafting_queue == 1 then
-      autocraft.do_crafting(player, false, event.item_stack.name)
+      autocraft.do_crafting(player, false, event.item_stack.name, event_quality_name)
     end
   end
 end

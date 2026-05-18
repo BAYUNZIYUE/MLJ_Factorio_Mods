@@ -1,4 +1,23 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.0.6
+Date: 2026-05-14
+  Bugfixes:
+    - 修复自动手搓请求、缺料编组和物流网络计数没有按品质区分的问题。
+    - 修复非普通品质物品误进入手搓配方选择，导致实际仍制作普通品质物品的问题。
+    - Fixed autocraft requests, missing-material sections, and logistics network counts not being separated by quality.
+    - Fixed non-normal-quality requests being considered for hand crafting even though hand crafting can only produce normal-quality items.
+---------------------------------------------------------------------------------------------------
+Version: 1.0.5
+Date: 2026-05-02
+  Bugfixes:
+    - 修复新建游戏 tick 0 玩家角色尚未创建时同步手搓速度导致 "No character" 崩溃的问题。
+    - 修复开始自动手搓时缺料编组被删除、随后又重建导致玩家看到编组闪烁的问题。
+    - Fixed a "No character" crash when syncing hand crafting speed before the player's character exists on new game startup.
+    - Fixed visible missing-materials section flicker caused by deleting and recreating the section when autocrafting starts.
+  Optimizations:
+    - 无可搓配方时增加重试间隔，并缓存缺料材料可用量；材料没有变化时跳过缺口统计、配方枚举和缺料编组重写。
+    - Added a retry interval and missing-material availability cache when no recipe is craftable, skipping shortage scans, recipe scans, and missing-material section rewrites while materials are unchanged.
+---------------------------------------------------------------------------------------------------
 Version: 1.0.3
 Date: 2026-05-01
   Changes:

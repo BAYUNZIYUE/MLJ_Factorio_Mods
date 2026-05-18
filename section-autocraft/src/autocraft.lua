@@ -3,7 +3,9 @@ local constants = require("constants")
 local autocraft = {}
 
 local AUTOCRAFT_MAX_CRAFT_BATCH_SIZE = 10000
+local AUTOCRAFT_NO_CRAFTABLE_RETRY_TICKS = 180
 local AUTOCRAFT_PERFORMANCE_PROFILE_ENABLED = false
+local DEFAULT_QUALITY_NAME = "normal"
 
 local performance_profile_state = {
   next_log_tick = nil,
@@ -129,8 +131,11 @@ local function get_player_data(player)
   storage.missing_section_players = storage.missing_section_players or {}
   local data = storage.data[player.index] or {
     enabled = constants.AUTOCRAFT_DEFAULT_ENABLED,
+    last_no_craftable_material_signature = nil,
+    last_no_craftable_missing_requests = nil,
     missing_section_index = nil,
     missing_section_name = nil,
+    next_no_craftable_retry_tick = nil,
     request_cache_dirty = true,
     requested_items_cache = nil,
     section_status_dirty = true,
@@ -147,11 +152,18 @@ local function get_player_data(player)
   return data
 end
 
+local function clear_no_craftable_state(data)
+  data.next_no_craftable_retry_tick = nil
+  data.last_no_craftable_missing_requests = nil
+  data.last_no_craftable_material_signature = nil
+end
+
 local function mark_sections_dirty(player)
   local data = get_player_data(player)
   data.request_cache_dirty = true
   data.requested_items_cache = nil
   data.section_status_dirty = true
+  clear_no_craftable_state(data)
 end
 
 local function get_configured_prefix(player)
@@ -294,19 +306,88 @@ local function remove_missing_materials_section(player)
   storage.missing_section_players[player.index] = nil
 end
 
-local function build_missing_material_slot(request)
-  -- Factorio 2.0 要求非零 min 的物流请求使用“简单物品”格式，直接传物品名即可。
+local function normalise_quality_name(quality)
+  if type(quality) == "string" then
+    return quality
+  end
+
+  if quality and quality.name then
+    return quality.name
+  end
+
+  return DEFAULT_QUALITY_NAME
+end
+
+local function make_item_key(item_name, quality)
+  return item_name .. "\n" .. normalise_quality_name(quality)
+end
+
+local function is_default_quality(quality)
+  return normalise_quality_name(quality) == DEFAULT_QUALITY_NAME
+end
+
+local function item_count_filter(item_name, quality)
   return {
-    value = request.name,
+    name = item_name,
+    quality = normalise_quality_name(quality),
+  }
+end
+
+local function item_with_quality_id(item_name, quality)
+  return {
+    name = item_name,
+    quality = normalise_quality_name(quality),
+  }
+end
+
+local function logistic_signal_filter(item_name, quality)
+  return {
+    type = "item",
+    name = item_name,
+    quality = normalise_quality_name(quality),
+  }
+end
+
+local function parse_logistic_filter_item_request(filter)
+  if not filter.min or filter.min <= 0 then
+    return nil
+  end
+
+  if type(filter.value) == "string" then
+    return {
+      name = filter.value,
+      quality = DEFAULT_QUALITY_NAME,
+      min = filter.min,
+    }
+  end
+
+  if filter.value and filter.value.type == "item" and filter.value.name then
+    return {
+      name = filter.value.name,
+      quality = normalise_quality_name(filter.value.quality),
+      min = filter.min,
+    }
+  end
+
+  return nil
+end
+
+local function build_missing_material_slot(request)
+  return {
+    value = logistic_signal_filter(request.name, request.quality),
     min = request.count,
   }
 end
 
-local function count_item_partial_space(main_inventory, item_name)
+local function count_item_partial_space(main_inventory, item_name, quality_name)
   local partial_space = 0
   for slot_index = 1, #main_inventory do
     local stack = main_inventory[slot_index]
-    if stack.valid_for_read and stack.name == item_name then
+    if (
+      stack.valid_for_read
+      and stack.name == item_name
+      and normalise_quality_name(stack.quality) == quality_name
+    ) then
       partial_space = partial_space + math.max(0, stack.prototype.stack_size - stack.count)
     end
   end
@@ -330,8 +411,9 @@ local function cap_requests_to_main_inventory_capacity(player, request_list)
       capped_requests[#capped_requests + 1] = request
     else
       local stack_size = prototype.stack_size
-      local current_count = main_inventory.get_item_count(request.name)
-      local partial_space = count_item_partial_space(main_inventory, request.name)
+      local quality_name = normalise_quality_name(request.quality)
+      local current_count = main_inventory.get_item_count(item_count_filter(request.name, quality_name))
+      local partial_space = count_item_partial_space(main_inventory, request.name, quality_name)
       local max_target_count = current_count + partial_space + remaining_empty_stacks * stack_size
       local capped_count = math.min(request.count, max_target_count)
       capped_count = math.max(capped_count, current_count)
@@ -339,6 +421,7 @@ local function cap_requests_to_main_inventory_capacity(player, request_list)
       if capped_count > 0 then
         capped_requests[#capped_requests + 1] = {
           name = request.name,
+          quality = quality_name,
           count = capped_count,
         }
       end
@@ -355,11 +438,12 @@ end
 
 local function write_missing_materials_section(player, requests)
   local request_list = {}
-  for item_name, count in pairs(requests) do
-    if count > 0 then
+  for _, request in pairs(requests) do
+    if request.count > 0 then
       request_list[#request_list + 1] = {
-        name = item_name,
-        count = math.ceil(count),
+        name = request.name,
+        quality = normalise_quality_name(request.quality),
+        count = math.ceil(request.count),
       }
     end
   end
@@ -370,6 +454,9 @@ local function write_missing_materials_section(player, requests)
   end
 
   table.sort(request_list, function(a, b)
+    if a.name == b.name then
+      return a.quality < b.quality
+    end
     return a.name < b.name
   end)
 
@@ -418,6 +505,7 @@ function autocraft.set_enabled(player, enabled)
   if data.enabled ~= next_enabled then
     data.enabled = next_enabled
     data.section_status_dirty = true
+    clear_no_craftable_state(data)
   end
 end
 
@@ -619,15 +707,15 @@ local function build_requested_items(player)
       for _, filter in pairs(section.filters) do
         scanned_filters = scanned_filters + 1
         if filter.min and filter.min > 0 then
-          local item_name = nil
-          if type(filter.value) == "string" then
-            item_name = filter.value
-          elseif filter.value and filter.value.type == "item" then
-            item_name = filter.value.name
-          end
-
-          if item_name then
-            requested_items[item_name] = (requested_items[item_name] or 0) + filter.min
+          local item_request = parse_logistic_filter_item_request(filter)
+          if item_request then
+            local item_key = make_item_key(item_request.name, item_request.quality)
+            local existing_request = requested_items[item_key]
+            if existing_request then
+              existing_request.min = existing_request.min + item_request.min
+            else
+              requested_items[item_key] = item_request
+            end
           end
         end
       end
@@ -744,12 +832,69 @@ local function get_recipe_pick_stats_details(stats, item_request_count, recipe_f
   }
 end
 
-local function is_recipe_craftable(player, recipe_name, stats)
+local function is_recipe_craftable(player, recipe_name, quality_name, stats)
+  if not is_default_quality(quality_name) then
+    return false
+  end
+
   add_recipe_pick_stat(stats, "get_craftable_count_calls")
   return player.get_craftable_count(recipe_name) > 0
 end
 
-local function recipe_for_item(player, item_name, stats)
+local function recipe_has_only_item_inputs_and_outputs(recipe)
+  for _, ingredient in pairs(recipe.ingredients) do
+    if ingredient.type ~= "item" then
+      return false
+    end
+  end
+
+  for _, product in pairs(recipe.products) do
+    if product.type ~= "item" then
+      return false
+    end
+  end
+
+  return true
+end
+
+local function recipe_matches_player_hand_crafting_category(player, recipe)
+  local character = player.character
+  local character_prototype = character and character.prototype
+  local crafting_categories = character_prototype and character_prototype.crafting_categories
+  if not crafting_categories then
+    return false
+  end
+
+  for category in pairs(crafting_categories) do
+    if recipe.has_category(category) then
+      return true
+    end
+  end
+
+  return false
+end
+
+local function is_recipe_hand_craftable_without_materials(player, recipe)
+  if not recipe or recipe.hidden or not recipe.enabled then
+    return false
+  end
+
+  if recipe.prototype and recipe.prototype.hidden_from_player_crafting then
+    return false
+  end
+
+  if player.force.get_hand_crafting_disabled_for_recipe(recipe.name) then
+    return false
+  end
+
+  if not recipe_has_only_item_inputs_and_outputs(recipe) then
+    return false
+  end
+
+  return recipe_matches_player_hand_crafting_category(player, recipe)
+end
+
+local function recipe_for_item(player, item_name, quality_name, stats)
   add_recipe_pick_stat(stats, "item_checks")
   local recipes = storage.recipes and storage.recipes[item_name]
   if not recipes then
@@ -760,7 +905,7 @@ local function recipe_for_item(player, item_name, stats)
     add_recipe_pick_stat(stats, "recipe_checks")
     local recipe = player.force.recipes[recipe_name]
     local can_craft = recipe and not recipe.hidden and recipe.enabled
-      and is_recipe_craftable(player, recipe_name, stats)
+      and is_recipe_craftable(player, recipe_name, quality_name, stats)
 
     if can_craft then
       return recipe_name
@@ -770,7 +915,11 @@ local function recipe_for_item(player, item_name, stats)
   return nil
 end
 
-local function recipe_for_item_any(player, item_name)
+local function recipe_for_hand_craftable_item(player, item_name, quality_name)
+  if not is_default_quality(quality_name) then
+    return nil
+  end
+
   local recipes = storage.recipes and storage.recipes[item_name]
   if not recipes then
     return nil
@@ -778,7 +927,7 @@ local function recipe_for_item_any(player, item_name)
 
   for _, recipe_name in ipairs(get_sorted_recipe_names(recipes)) do
     local recipe = player.force.recipes[recipe_name]
-    if recipe and not recipe.hidden and recipe.enabled then
+    if is_recipe_hand_craftable_without_materials(player, recipe) then
       return recipe_name
     end
   end
@@ -801,7 +950,9 @@ local function get_crafting_queue_item_counts(player)
       if recipe then
         for _, product in pairs(recipe.products) do
           if product.type == "item" then
-            queued_counts[product.name] = (queued_counts[product.name] or 0) + queue_item.count * (product.amount or 1)
+            local recipe_quality_name = normalise_quality_name(queue_item.quality)
+            local item_key = make_item_key(product.name, recipe_quality_name)
+            queued_counts[item_key] = (queued_counts[item_key] or 0) + queue_item.count * (product.amount or 1)
           end
         end
       end
@@ -811,7 +962,40 @@ local function get_crafting_queue_item_counts(player)
   return queued_counts
 end
 
-local function get_item_requests(player, crafting_complete, completed_item_name)
+local function build_missing_material_availability_signature(player, missing_requests)
+  if not missing_requests then
+    return nil
+  end
+
+  local logistic_point = player.get_requester_point()
+  local logistic_network = nil
+  if logistic_point and logistic_point.valid then
+    local candidate_network = logistic_point.logistic_network
+    if candidate_network and candidate_network.valid then
+      logistic_network = candidate_network
+    end
+  end
+
+  local request_keys = {}
+  for item_key in pairs(missing_requests) do
+    request_keys[#request_keys + 1] = item_key
+  end
+  table.sort(request_keys)
+
+  local parts = {}
+  for _, item_key in ipairs(request_keys) do
+    local request = missing_requests[item_key]
+    local quality_name = normalise_quality_name(request.quality)
+    local inventory_count = player.get_item_count(item_count_filter(request.name, quality_name))
+    local network_count = logistic_network
+      and logistic_network.get_item_count(item_with_quality_id(request.name, quality_name))
+      or 0
+    parts[#parts + 1] = item_key .. "=" .. tostring(inventory_count + network_count)
+  end
+  return table.concat(parts, ";")
+end
+
+local function get_item_requests(player, crafting_complete, completed_item_name, completed_quality_name)
   local profiler = autocraft.start_profile()
   local item_requests = {}
   local requested_items = get_requested_items(player)
@@ -829,27 +1013,35 @@ local function get_item_requests(player, crafting_complete, completed_item_name)
   local queued_counts = get_crafting_queue_item_counts(player)
 
   -- 实际手搓缺口要同时扣掉玩家已持有、当前物流网络已有，以及已经排进手搓队列的成品数量。
-  for item_name, min in pairs(requested_items) do
+  for item_key, request in pairs(requested_items) do
     requested_item_count = requested_item_count + 1
+    local item_name = request.name
+    local quality_name = normalise_quality_name(request.quality)
+    local min = request.min
     local recently_completed_count = 0
-    if not crafting_complete and completed_item_name == item_name then
+    if (
+      not crafting_complete
+      and completed_item_name == item_name
+      and normalise_quality_name(completed_quality_name) == quality_name
+    ) then
       recently_completed_count = 1
     end
 
     inventory_checks = inventory_checks + 1
-    local inventory_count = player.get_item_count(item_name) + recently_completed_count
+    local inventory_count = player.get_item_count(item_count_filter(item_name, quality_name)) + recently_completed_count
     local logistic_network_count = 0
     if logistic_network then
       network_checks = network_checks + 1
-      logistic_network_count = logistic_network.get_item_count(item_name)
+      logistic_network_count = logistic_network.get_item_count(item_with_quality_id(item_name, quality_name))
     end
-    local queued_count = queued_counts[item_name] or 0
+    local queued_count = queued_counts[item_key] or 0
     local available = inventory_count + logistic_network_count + queued_count
     local missing = min - available
 
     if missing > 0 then
       item_requests[#item_requests + 1] = {
         name = item_name,
+        quality = quality_name,
         min = min,
         available = available,
         missing = missing,
@@ -881,6 +1073,18 @@ local function get_hand_item_name(player)
   return nil
 end
 
+local function get_hand_quality_name(player)
+  if player.cursor_stack and player.cursor_stack.valid_for_read then
+    return normalise_quality_name(player.cursor_stack.quality)
+  end
+
+  if player.cursor_ghost and player.cursor_ghost.quality then
+    return normalise_quality_name(player.cursor_ghost.quality)
+  end
+
+  return DEFAULT_QUALITY_NAME
+end
+
 item_id_to_name = function(item)
   if type(item) == "string" then
     return item
@@ -906,21 +1110,26 @@ end
 
 local function get_craft_count(player, recipe_name, recipe, item_request)
   local crafts_needed = math.ceil(item_request.missing / get_recipe_output_amount(recipe, item_request.name))
+  if not is_default_quality(item_request.quality) then
+    return 0
+  end
+
   local craftable_count = player.get_craftable_count(recipe_name)
 
   return math.min(crafts_needed, craftable_count, AUTOCRAFT_MAX_CRAFT_BATCH_SIZE)
 end
 
-local function consume_available_item_count(available_items, item_name, needed_count)
-  local available_count = available_items[item_name] or 0
+local function consume_available_item_count(available_items, item_key, needed_count)
+  local available_count = available_items[item_key] or 0
   local consumed_count = math.min(available_count, needed_count)
-  available_items[item_name] = available_count - consumed_count
+  available_items[item_key] = available_count - consumed_count
   return consumed_count
 end
 
 local function accumulate_missing_materials(
   player,
   item_name,
+  quality_name,
   required_count,
   requests,
   visiting,
@@ -932,33 +1141,44 @@ local function accumulate_missing_materials(
     return
   end
 
-  requests[item_name] = (requests[item_name] or 0) + required_count
-
-  if available_inventory_counts[item_name] == nil then
-    available_inventory_counts[item_name] = player.get_item_count(item_name)
+  quality_name = normalise_quality_name(quality_name)
+  local item_key = make_item_key(item_name, quality_name)
+  local request = requests[item_key]
+  if request then
+    request.count = request.count + required_count
+  else
+    requests[item_key] = {
+      name = item_name,
+      quality = quality_name,
+      count = required_count,
+    }
   end
 
-  local inventory_count = consume_available_item_count(available_inventory_counts, item_name, required_count)
+  if available_inventory_counts[item_key] == nil then
+    available_inventory_counts[item_key] = player.get_item_count(item_count_filter(item_name, quality_name))
+  end
+
+  local inventory_count = consume_available_item_count(available_inventory_counts, item_key, required_count)
   local missing_count = required_count - inventory_count
   if missing_count <= 0 then
     return
   end
 
-  if available_network_counts[item_name] == nil then
-    available_network_counts[item_name] = logistic_network and logistic_network.get_item_count(item_name) or 0
+  if available_network_counts[item_key] == nil then
+    available_network_counts[item_key] = logistic_network and logistic_network.get_item_count(item_with_quality_id(item_name, quality_name)) or 0
   end
 
-  local logistic_network_count = consume_available_item_count(available_network_counts, item_name, missing_count)
+  local logistic_network_count = consume_available_item_count(available_network_counts, item_key, missing_count)
   local unresolved_count = missing_count - logistic_network_count
   if unresolved_count <= 0 then
     return
   end
 
-  if visiting[item_name] then
+  if visiting[item_key] then
     return
   end
 
-  local recipe_name = recipe_for_item_any(player, item_name)
+  local recipe_name = recipe_for_hand_craftable_item(player, item_name, quality_name)
   if not recipe_name then
     return
   end
@@ -968,13 +1188,14 @@ local function accumulate_missing_materials(
     return
   end
 
-  visiting[item_name] = true
+  visiting[item_key] = true
   local crafts_needed = math.ceil(unresolved_count / get_recipe_output_amount(recipe, item_name))
 
   for _, ingredient in pairs(recipe.ingredients) do
     if ingredient.type == "item" then
-      if available_inventory_counts[ingredient.name] == nil then
-        available_inventory_counts[ingredient.name] = player.get_item_count(ingredient.name)
+      local ingredient_key = make_item_key(ingredient.name, quality_name)
+      if available_inventory_counts[ingredient_key] == nil then
+        available_inventory_counts[ingredient_key] = player.get_item_count(item_count_filter(ingredient.name, quality_name))
       end
 
       -- 所有递归分支共享同一份背包库存，避免同一个材料被重复抵扣。
@@ -983,6 +1204,7 @@ local function accumulate_missing_materials(
         accumulate_missing_materials(
           player,
           ingredient.name,
+          quality_name,
           required_count,
           requests,
           visiting,
@@ -994,28 +1216,28 @@ local function accumulate_missing_materials(
     end
   end
 
-  visiting[item_name] = nil
+  visiting[item_key] = nil
 end
 
-local function update_missing_materials_section(player, target_item_name, target_recipe_name, target_missing_count)
+local function update_missing_materials_section(player, target_item_name, target_quality_name, target_recipe_name, target_missing_count)
   local profiler = autocraft.start_profile()
   if not autocraft.is_enabled(player) then
     remove_missing_materials_section(player)
     autocraft.record_profile("update_missing_materials_section", profiler, { disabled = 1 })
-    return
+    return nil
   end
 
   if not target_item_name or not target_recipe_name or not target_missing_count or target_missing_count <= 0 then
     remove_missing_materials_section(player)
     autocraft.record_profile("update_missing_materials_section", profiler, { no_target = 1 })
-    return
+    return nil
   end
 
   local recipe = player.force.recipes[target_recipe_name]
   if not recipe then
     remove_missing_materials_section(player)
     autocraft.record_profile("update_missing_materials_section", profiler, { no_recipe = 1 })
-    return
+    return nil
   end
 
   local logistic_point = player.get_requester_point()
@@ -1031,6 +1253,7 @@ local function update_missing_materials_section(player, target_item_name, target
   local has_missing_materials = false
   local available_inventory_counts = {}
   local available_network_counts = {}
+  target_quality_name = normalise_quality_name(target_quality_name)
   local crafts_needed = math.ceil(target_missing_count / get_recipe_output_amount(recipe, target_item_name))
   local top_level_ingredients = 0
 
@@ -1043,6 +1266,7 @@ local function update_missing_materials_section(player, target_item_name, target
         accumulate_missing_materials(
           player,
           ingredient.name,
+          target_quality_name,
           required_count,
           missing_requests,
           {},
@@ -1060,7 +1284,7 @@ local function update_missing_materials_section(player, target_item_name, target
       no_missing_materials = 1,
       top_level_ingredients = top_level_ingredients,
     })
-    return
+    return nil
   end
 
   write_missing_materials_section(player, missing_requests)
@@ -1068,6 +1292,7 @@ local function update_missing_materials_section(player, target_item_name, target
     missing_request_kinds = table_size(missing_requests),
     top_level_ingredients = top_level_ingredients,
   })
+  return missing_requests
 end
 
 local function sort_item_requests(item_requests)
@@ -1084,13 +1309,14 @@ local function sort_item_requests(item_requests)
   end)
 end
 
-local function find_item_request(item_requests, item_name)
+local function find_item_request(item_requests, item_name, quality_name)
   if not item_name then
     return nil
   end
 
+  quality_name = normalise_quality_name(quality_name)
   for _, item_request in ipairs(item_requests) do
-    if item_request.name == item_name then
+    if item_request.name == item_name and normalise_quality_name(item_request.quality) == quality_name then
       return item_request
     end
   end
@@ -1098,13 +1324,13 @@ local function find_item_request(item_requests, item_name)
   return nil
 end
 
-local function pick_recipe_for_item_request(player, item_requests, item_name, recipe_picker, stats)
-  local item_request = find_item_request(item_requests, item_name)
+local function pick_recipe_for_item_request(player, item_requests, item_name, quality_name, recipe_picker, stats)
+  local item_request = find_item_request(item_requests, item_name, quality_name)
   if not item_request then
     return nil
   end
 
-  local recipe_name = recipe_picker(player, item_name, stats)
+  local recipe_name = recipe_picker(player, item_name, item_request.quality, stats)
   if recipe_name then
     return item_request, recipe_name
   end
@@ -1112,13 +1338,13 @@ local function pick_recipe_for_item_request(player, item_requests, item_name, re
   return nil
 end
 
-local function pick_cached_recipe_from_requests(player, item_requests, cached_item_name, cached_recipe_name, stats)
-  if not cached_item_name or not cached_recipe_name then
+local function pick_cached_recipe_from_requests(player, item_requests, cached_item_name, cached_quality_name, cached_recipe_name, stats)
+  if not cached_item_name or not cached_quality_name or not cached_recipe_name then
     return nil
   end
 
   add_recipe_pick_stat(stats, "cached_pick_attempts")
-  local item_request = find_item_request(item_requests, cached_item_name)
+  local item_request = find_item_request(item_requests, cached_item_name, cached_quality_name)
   if not item_request then
     add_recipe_pick_stat(stats, "cached_pick_misses")
     return nil
@@ -1134,7 +1360,7 @@ local function pick_cached_recipe_from_requests(player, item_requests, cached_it
   add_recipe_pick_stat(stats, "recipe_checks")
   local recipe = player.force.recipes[cached_recipe_name]
   local can_craft = recipe and not recipe.hidden and recipe.enabled
-    and is_recipe_craftable(player, cached_recipe_name, stats)
+    and is_recipe_craftable(player, cached_recipe_name, cached_quality_name, stats)
   if can_craft then
     add_recipe_pick_stat(stats, "cached_pick_hits")
     return item_request, cached_recipe_name
@@ -1146,7 +1372,7 @@ end
 
 local function pick_recipe_from_requests(player, item_requests, recipe_picker, stats)
   for _, item_request in ipairs(item_requests) do
-    local recipe_name = recipe_picker(player, item_request.name, stats)
+    local recipe_name = recipe_picker(player, item_request.name, item_request.quality, stats)
     if recipe_name then
       return item_request, recipe_name
     end
@@ -1155,7 +1381,7 @@ local function pick_recipe_from_requests(player, item_requests, recipe_picker, s
   return nil
 end
 
-function autocraft.do_crafting(player, crafting_complete, completed_item_name)
+function autocraft.do_crafting(player, crafting_complete, completed_item_name, completed_quality_name)
   local profiler = autocraft.start_profile()
   if crafting_complete == nil then
     crafting_complete = true
@@ -1185,12 +1411,44 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
     return
   end
 
+  local data = get_player_data(player)
+  if (
+    crafting_complete
+    and data.next_no_craftable_retry_tick
+    and game.tick < data.next_no_craftable_retry_tick
+  ) then
+    autocraft.record_profile("do_crafting", profiler, {
+      no_craftable_retry_wait = 1,
+      retry_ticks_remaining = data.next_no_craftable_retry_tick - game.tick,
+    })
+    return
+  end
+  data.next_no_craftable_retry_tick = nil
+
+  if (
+    crafting_complete
+    and data.last_no_craftable_missing_requests
+    and data.last_no_craftable_material_signature
+  ) then
+    local material_signature =
+      build_missing_material_availability_signature(player, data.last_no_craftable_missing_requests)
+    if material_signature == data.last_no_craftable_material_signature then
+      data.next_no_craftable_retry_tick = game.tick + AUTOCRAFT_NO_CRAFTABLE_RETRY_TICKS
+      autocraft.record_profile("do_crafting", profiler, {
+        no_craftable_materials_unchanged = 1,
+      })
+      return
+    end
+  end
+
+  local completed_quality_name = normalise_quality_name(completed_quality_name)
   local get_requests_profiler = autocraft.start_profile()
-  local item_requests = get_item_requests(player, crafting_complete, completed_item_name)
+  local item_requests = get_item_requests(player, crafting_complete, completed_item_name, completed_quality_name)
   autocraft.record_profile("do_crafting.get_item_requests", get_requests_profiler, {
     item_requests = #item_requests,
   })
   if #item_requests == 0 then
+    clear_no_craftable_state(data)
     remove_missing_materials_section(player)
     autocraft.record_profile("do_crafting", profiler, { no_item_requests = 1 })
     return
@@ -1202,18 +1460,23 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
     item_requests = #item_requests,
   })
 
-  storage.data = storage.data or {}
-  local data = storage.data[player.index] or {}
   local hand_item_name = get_hand_item_name(player)
+  local hand_quality_name = get_hand_quality_name(player)
   local pick_profiler = autocraft.start_profile()
   local recipe_pick_stats = {}
   local item_request, recipe_name =
-    pick_recipe_for_item_request(player, item_requests, hand_item_name, recipe_for_item, recipe_pick_stats)
-  if not recipe_name and not crafting_complete and completed_item_name == data.last_craftable_item_name then
+    pick_recipe_for_item_request(player, item_requests, hand_item_name, hand_quality_name, recipe_for_item, recipe_pick_stats)
+  if (
+    not recipe_name
+    and not crafting_complete
+    and completed_item_name == data.last_craftable_item_name
+    and completed_quality_name == data.last_craftable_quality_name
+  ) then
     item_request, recipe_name = pick_cached_recipe_from_requests(
       player,
       item_requests,
       data.last_craftable_item_name,
+      data.last_craftable_quality_name,
       data.last_craftable_recipe_name,
       recipe_pick_stats
     )
@@ -1227,7 +1490,11 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
     get_recipe_pick_stats_details(recipe_pick_stats, #item_requests, recipe_name)
   )
   local item_name = item_request and item_request.name or nil
+  local quality_name = item_request and normalise_quality_name(item_request.quality) or DEFAULT_QUALITY_NAME
   if recipe_name then
+    data.next_no_craftable_retry_tick = nil
+    data.last_no_craftable_missing_requests = nil
+    data.last_no_craftable_material_signature = nil
     local recipe = player.force.recipes[recipe_name]
     local craft_count = recipe and get_craft_count(player, recipe_name, recipe, item_request) or 0
     if craft_count <= 0 then
@@ -1238,13 +1505,12 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
       return
     end
 
-    local remove_section_profiler = autocraft.start_profile()
-    remove_missing_materials_section(player)
-    autocraft.record_profile("do_crafting.remove_missing_section", remove_section_profiler)
     data.active_item_name = item_name
+    data.active_quality_name = quality_name
     data.active_queue_index = player.crafting_queue and (#player.crafting_queue + 1) or 1
     data.active_recipe_name = recipe_name
     data.last_craftable_item_name = item_name
+    data.last_craftable_quality_name = quality_name
     data.last_craftable_recipe_name = recipe_name
     storage.data[player.index] = data
     local begin_crafting_profiler = autocraft.start_profile()
@@ -1260,17 +1526,25 @@ function autocraft.do_crafting(player, crafting_complete, completed_item_name)
   end
 
   local target_item_request, target_recipe_name =
-    pick_recipe_for_item_request(player, item_requests, hand_item_name, recipe_for_item_any)
+    pick_recipe_for_item_request(player, item_requests, hand_item_name, hand_quality_name, recipe_for_hand_craftable_item)
   if not target_recipe_name then
     target_item_request, target_recipe_name =
-      pick_recipe_from_requests(player, item_requests, recipe_for_item_any)
+      pick_recipe_from_requests(player, item_requests, recipe_for_hand_craftable_item)
   end
+  data.next_no_craftable_retry_tick = game.tick + AUTOCRAFT_NO_CRAFTABLE_RETRY_TICKS
   local target_item_name = target_item_request and target_item_request.name or nil
-  update_missing_materials_section(
+  local target_quality_name = target_item_request and target_item_request.quality or DEFAULT_QUALITY_NAME
+  local missing_requests = update_missing_materials_section(
     player,
     target_item_name,
+    target_quality_name,
     target_recipe_name,
     target_item_request and target_item_request.missing or nil
+  )
+  data.last_no_craftable_missing_requests = missing_requests
+  data.last_no_craftable_material_signature = build_missing_material_availability_signature(
+    player,
+    missing_requests
   )
 
   autocraft.record_profile("do_crafting", profiler, {
