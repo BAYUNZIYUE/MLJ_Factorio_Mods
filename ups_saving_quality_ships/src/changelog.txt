@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.3
+Date: 2026-05-22
+  Changes:
+    - 修复删除太空平台后，物流编组轮询访问已失效飞船缓存导致的不可恢复错误。
+    - 当缓存批次发现已删除飞船时会跳过该对象并请求重建缓存，避免后续 tick 继续访问失效平台。
+    - Fixed an unrecoverable error caused by logistic-section polling accessing cached space platforms after they were deleted.
+    - Stale platform entries found during cache batching are now skipped and trigger a cache rebuild, preventing later ticks from touching invalid platforms.
+---------------------------------------------------------------------------------------------------
 Version: 1.1.2
 Date: 2026-05-11
   Changes:

@@ -97,6 +97,33 @@ local function get_active_quota(cache, quota_key, limit)
     return math.max(1, math.floor(limit / 2))
 end
 
+local function collect_valid_platform_batch(cache, candidates, seen, limit, is_eligible)
+    local batch = {}
+    for _, platform in ipairs(candidates) do
+        if #batch >= limit then
+            break
+        end
+        if is_valid_platform(platform) then
+            local platform_index = platform.index
+            if seen[platform_index] == nil and is_eligible(platform) then
+                batch[#batch + 1] = platform
+                seen[platform_index] = true
+            end
+        else
+            cache.dirty = true
+        end
+    end
+    return batch
+end
+
+local function is_cargo_platform(platform)
+    return platform.hub.quality.level > 0
+end
+
+local function is_logistic_platform(platform)
+    return platform.hub.quality.level > 0 and platform.space_location ~= nil
+end
+
 function Public.on_init()
     ensure_state()
 end
@@ -195,13 +222,9 @@ function Public.get_cargo_batch()
         return batch
     end
     local fallback = get_batch(cache.cargo, "cargo_cursor", CARGO_SHARDS)
-    for _, platform in ipairs(fallback) do
-        if #batch >= limit then
-            break
-        end
-        if not seen[platform.index] then
-            batch[#batch + 1] = platform
-        end
+    local valid_fallback = collect_valid_platform_batch(cache, fallback, seen, limit - #batch, is_cargo_platform)
+    for _, platform in ipairs(valid_fallback) do
+        batch[#batch + 1] = platform
     end
     return batch
 end
@@ -222,13 +245,9 @@ function Public.get_logistic_batch()
         return batch
     end
     local fallback = get_batch(cache.logistic, "logistic_cursor", LOGISTIC_SHARDS)
-    for _, platform in ipairs(fallback) do
-        if #batch >= limit then
-            break
-        end
-        if not seen[platform.index] then
-            batch[#batch + 1] = platform
-        end
+    local valid_fallback = collect_valid_platform_batch(cache, fallback, seen, limit - #batch, is_logistic_platform)
+    for _, platform in ipairs(valid_fallback) do
+        batch[#batch + 1] = platform
     end
     return batch
 end

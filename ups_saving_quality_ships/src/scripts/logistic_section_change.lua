@@ -111,6 +111,12 @@ local function is_logistic_platform(platform)
             and platform.space_location ~= nil
 end
 
+local function clear_logistic_state(logistic_state, platform)
+    if platform and platform.valid then
+        logistic_state[platform.index] = nil
+    end
+end
+
 function Public.on_init()
     ensure_state()
     if game == nil or game.players == nil then
@@ -143,7 +149,7 @@ function Public.reconcile_platforms(platforms)
             seen[platform.index] = true
             if not is_logistic_platform(platform) then
                 remove_auto_section(platform)
-                logistic_state[platform.index] = nil
+                clear_logistic_state(logistic_state, platform)
             end
         end
     end
@@ -162,7 +168,7 @@ function Public.on_60th_tick_check_logistic_sections(platforms)
             examine_platform(platform)
         else
             remove_auto_section(platform)
-            logistic_state[platform.index] = nil
+            clear_logistic_state(logistic_state, platform)
         end
     end
 end
@@ -238,7 +244,7 @@ function examine_platform(platform)
 
     if #section_usqs_filters == 0 then
         remove_auto_section(platform)
-        logistic_state[platform.index] = nil
+        clear_logistic_state(logistic_state, platform)
         return
     end
 
