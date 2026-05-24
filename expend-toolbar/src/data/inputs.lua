@@ -1,4 +1,4 @@
-require("Toolbars")
+require("core.Toolbars")
 
 data:extend {
     {

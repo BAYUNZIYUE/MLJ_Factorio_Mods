@@ -1,3 +1,3 @@
 require("lang.Object")
-require("Toolbars")
+require("core.Toolbars")
 require("settings._package")

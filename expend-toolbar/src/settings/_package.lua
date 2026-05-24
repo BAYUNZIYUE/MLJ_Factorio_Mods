@@ -1,4 +1,4 @@
-require("src.factorio.RichText")
-require("src.factorio.LocalisedText")
+require("factorio.RichText")
+require("factorio.LocalisedText")
 
 require("settings.settings")
