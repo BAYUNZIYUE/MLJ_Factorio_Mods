@@ -1,0 +1,604 @@
+---------------------------------------------------------------------------------------------------
+Version: 2.38.3
+Date: 05. 12. 2025
+  Changes:
+    - collapse/expand Toolbar only on a Drag double left-click
+    - collapse/expand Section only on a Header double left-click when it is locked
+  Bugfixes:
+    - fixed crash when fast left-click delete a toolbar button and a confirm deletion button
+    - fixed not keeping width of just created toolbar on collapsing
+
+---------------------------------------------------------------------------------------------------
+Version: 2.38.2
+Date: 03. 07. 2025
+  Bugfixes:
+    - fixed crash when picking an item with a full main inventory and an item in the cursor not from inventory or trash
+
+---------------------------------------------------------------------------------------------------
+Version: 2.38.1
+Date: 04. 06. 2025
+  Bugfixes:
+    - character nil in CharacterMainInventory
+
+---------------------------------------------------------------------------------------------------
+Version: 2.38.0
+Date: 30. 04. 2025
+  Features:
+    - spidertron remote support
+
+---------------------------------------------------------------------------------------------------
+Version: 2.37.0
+Date: 25. 04. 2025
+  Features:
+    - factoriopedia support
+
+---------------------------------------------------------------------------------------------------
+Version: 2.36.1
+Date: 16. 04. 2025
+  Bugfixes:
+    - fixed crash when a setting was not changed by a player
+
+---------------------------------------------------------------------------------------------------
+Version: 2.36.0
+Date: 11. 04. 2025
+  Features:
+    - an option to turn off crafting feature
+    - configurable crafting controls
+  Changes:
+    - show biggest crafting recipe in the item tooltip only when crafting feature is on
+    - show trash content only when contains the item
+
+---------------------------------------------------------------------------------------------------
+Version: 2.35.0
+Date: 05. 04. 2025
+  Features:
+    - God inventory support
+  Bugfixes:
+    - fixed crash of CharacterTrashInventory when inventory is not available
+
+---------------------------------------------------------------------------------------------------
+Version: 2.34.0
+Date: 04. 04. 2025
+  Features:
+    - Editor inventory support
+    - Car/Tank/Spidertron inventory support
+    - Space Platform Hub trash inventory support
+  Changes:
+    - include the cursor content to the main inventory
+    - custom character trash icon
+    - changed settings names
+    - added Tooltip refresh interval setting
+    - better item tooltip columns alignment
+  Bugfixes:
+    - fixed not refreshing logistic content in the character item tooltip when the tooltip delay is smaller than the logistic inventory refresh interval
+    - fixed showing not fresh logistic content immediately after the tooltip appearance
+
+---------------------------------------------------------------------------------------------------
+Version: 2.33.0
+Date: 21. 03. 2025
+  Optimization:
+    - limit inventories updates/calculations to the necessary minimum
+
+---------------------------------------------------------------------------------------------------
+Version: 2.32.1
+Date: 21. 03. 2025
+  Bugfixes:
+    - fixed not clearing counts in remote view when 'Show logistic network content' is off
+
+---------------------------------------------------------------------------------------------------
+Version: 2.32.0
+Date: 20. 03. 2025
+  Features:
+    - add configurable item tooltip delay
+    - play gui sound on collapsing/expanding with a double click on a header
+  Optimization:
+    - update logistic networks content in the character view only when the item tooltip is visible
+    - calculate visible count difference only when any inventory was updated
+  Bugfixes:
+    - fixed the item tooltip inventory count rounding decimal place up in opposite to rounding down by Factorio
+
+---------------------------------------------------------------------------------------------------
+Version: 2.31.1
+Date: 19. 03. 2025
+  Bugfixes:
+    - quality rows in the item tooltip inventory are misaligned
+
+---------------------------------------------------------------------------------------------------
+Version: 2.31.0
+Date: 19. 03. 2025
+  Features:
+    - show logistic networks content in the character view item tooltip
+
+---------------------------------------------------------------------------------------------------
+Version: 2.30.0
+Date: 18. 03. 2025
+  Features:
+    - show an icon selector in a section name
+  Changes:
+    - don't focus on a section name when a section is created
+
+---------------------------------------------------------------------------------------------------
+Version: 2.29.0
+Date: 13. 03. 2025
+  Features:
+    - in character view the item tooltip shows main inventory, trash and hand content
+    - in the item tooltip show inventory count for a product
+  Changes:
+    - in the item tooltip not present qualities are not shown in an inventory cell
+    - don't allow crafting in the remote view
+    - in the item tooltip show 2 decimal places for fractions
+  Optimization:
+    - separate refresh intervals for character inventory and logistic network content
+    - in the character view the item tooltip doesn't show logistic networks content
+    - in the remote view the item tooltip doesn't show character inventory content and a crafting plan
+    - invalidate character inventory on picking items only when it influences counts
+  Bugfixes:
+    - fixed crafting more items than requested when recipe product amount is greater than 1
+    - fixed not updating the item tooltip logistic count when items are picked from the character inventory
+
+---------------------------------------------------------------------------------------------------
+Version: 2.28.1
+Date: 02. 03. 2025
+  Bugfixes:
+    - fixed crash on slot hover caused by invalid order function for sorting crafting plans
+
+---------------------------------------------------------------------------------------------------
+Version: 2.28.0
+Date: 02. 03. 2025
+  Features:
+    - show the Expected Value for recipes with probability
+  Changes:
+    - show product amount even if it is 1
+    - add "x" after ingredients recipe amount
+  Optimization:
+    - cache item and fluid prototypes
+
+---------------------------------------------------------------------------------------------------
+Version: 2.27.1
+Date: 01. 03. 2025
+  Changes:
+    - recipe is not red when it is possible to craft even if craft count is 0
+    - products are red if craft count is 0
+  Bugfixes:
+    - fixed lack of one section mode icon
+    - probably fixed crash on slot hover caused by recipes which specify amount_min/max instead of amount
+
+---------------------------------------------------------------------------------------------------
+Version: 2.27.0
+Date: 28. 02. 2025
+  Features:
+    - show recipe count in the item tooltip
+    - show all products in the item tooltip
+    - show product's recipe amount in the item tooltip
+  Changes:
+    - change color of technology icon to red used in the item tooltip when recipe is not researched
+  Bugfixes:
+    - fixed crafting with right-click
+
+---------------------------------------------------------------------------------------------------
+Version: 2.26.0
+Date: 25. 02. 2025
+  Features:
+    - expand the toolbar by double-clicking the header
+    - expand the section by double-clicking the header
+
+---------------------------------------------------------------------------------------------------
+Version: 2.25.0
+Date: 25. 02. 2025
+  Features:
+    - show a recipe's product count in the tooltip
+    - prioritize recipes for crafting and showing in the tooltip by the amount of products they can produce in a given moment
+  Changes:
+    - slight increase in saturation of a not present item's slot
+  Optimization:
+    - caching of recipes and technologies
+    - added 'Inventory refresh interval' setting (set to 5 ticks, previously 1 tick) to allow a player to find own tradeoff between inventory refresh cost, responsiveness and slot's count change cost
+  Bugfixes:
+    - fixed showing a recipe count instead of a product count in the tooltip
+    - fixed craftable count formating
+    - fixed character craftable recognition
+    - on the item tooltip hover update only on count change in craftable recipes ingredients
+    - remove Character Inventory update optimization because observed events are not published in remote view
+
+---------------------------------------------------------------------------------------------------
+Version: 2.24.2
+Date: 20. 02. 2025
+  Bugfixes:
+    - fixed hang on save load caused by traversing circular recipes in search of all ingredients
+    - fixed deleting slots with removed items
+
+---------------------------------------------------------------------------------------------------
+Version: 2.24.1
+Date: 20. 02. 2025
+  Optimization:
+    - limit the Item Tooltip updates to maximally one per tick
+  Bugfixes:
+    - fixed dimming a picked item slot
+
+---------------------------------------------------------------------------------------------------
+Version: 2.24.0
+Date: 20. 02. 2025
+  Features:
+    - the item tooltip shows if an ingredient can be crafted
+    - the item tooltip shows how many ingredients can be crafted
+    - the item tooltip shows required technology
+    - the item tooltip is updated on count change of any ingredient in a production chain
+  Changed:
+    - in the item tooltip used symbols to indicate crafting status
+    - used light orange color in the item tooltip ingredients to indicate that it is lacking but can be crafted
+  Optimization:
+    - update Character Inventory count not in every tick but only when it was changed
+    - added 'Show logistic network content' setting
+  Bugfixes:
+    - fixed hiding controls in the item tooltip when the setting was changed
+
+---------------------------------------------------------------------------------------------------
+Version: 2.23.2
+Date: 17. 02. 2025
+  Changes:
+    - heavier font for the item tooltip count table
+    - back to zero in the item tooltip count table instead of '-'
+  Bugfixes:
+    - fixed misalignment in the item tooltip count table in some localisations
+
+---------------------------------------------------------------------------------------------------
+Version: 2.23.1
+Date: 13. 02. 2025
+  Changes:
+    - decrease saturation of not present items' slots
+  Bugfixes:
+    - fixed showing a recipe in the item tooltip hidden from player crafting menu
+
+---------------------------------------------------------------------------------------------------
+Version: 2.23.0
+Date: 13. 02. 2025
+  Features:
+    - show increase/decrease quality key bindings in the item tooltip
+    - show lacking ingredient in red in the item tooltip
+    - show count of ingredients in the item tooltip
+    - in the character view dim an item when it is not available in a character inventory
+    - in the remote view dim an item when it is not available in a construction area of a logistic network
+  Changes:
+    - update craftable count in the item tooltip instantly after crafting request
+    - exclude character logistic network item count from logistic network count
+    - replace storage chest icon with construction-robot icon in the item tooltip
+
+---------------------------------------------------------------------------------------------------
+Version: 2.22.0
+Date: 11. 02. 2025
+  Features:
+    - update personal item counts in the item tooltip while in the remote view
+    - update item counts in the item tooltip while hovered on
+  Changes:
+    - present crafting information on the bottom of the item tooltip
+    - present counts in the item tooltip in a compact table
+  Bugfixes:
+    - fixed flickering of the item tooltip on changing quality
+    - fixed not updating tooltip craftable count after item was crafted
+    - fixed not updating personal inventory item count on switching to editor
+
+---------------------------------------------------------------------------------------------------
+Version: 2.21.2
+Date: 10. 02. 2025
+  Bugfixes:
+    - fixed error when installing/uninstalling mod removes an item set in a toolbar
+
+---------------------------------------------------------------------------------------------------
+Version: 2.21.1
+Date: 07. 02. 2025
+  Bugfixes:
+    - fixed missing crafting messages
+
+---------------------------------------------------------------------------------------------------
+Version: 2.21.0
+Date: 07. 02. 2025
+  Features:
+    - show a recipe in the item tooltip
+    - show personal inventory qualities count in the item tooltip
+    - show logistic network qualities count in the item tooltip
+    - dim not present items
+  Bugfixes:
+    - draw a quality icon under item count
+
+---------------------------------------------------------------------------------------------------
+Version: 2.20.0
+Date: 03. 02. 2025
+  Features:
+    - show craftable count in the item tooltip
+  Bugfixes:
+    - fixed not refreshing the item tooltip when an item was researched
+
+---------------------------------------------------------------------------------------------------
+Version: 2.19.0
+Date: 31. 01. 2025
+  Features:
+    - option to keep only a single section expanded
+  Changes:
+    - add alignment button to old toolbars
+
+---------------------------------------------------------------------------------------------------
+Version: 2.18.1
+Date: 29. 01. 2025
+  Bugfixes:
+    - fixed error when Factory Search is not installed
+
+---------------------------------------------------------------------------------------------------
+Version: 2.18.0
+Date: 29. 01. 2025
+  Features:
+    - support for Factory Search mod
+
+---------------------------------------------------------------------------------------------------
+Version: 2.17.0
+Date: 27. 01. 2025
+  Features:
+    - show crafting time in the item tooltip
+  Bugfixes:
+    - improved crafting logic which may help for inability to craft with some mods
+
+---------------------------------------------------------------------------------------------------
+Version: 2.16.1
+Date: 24. 01. 2025
+  Bugfixes:
+    - keep at least one slot in the locked mode
+
+---------------------------------------------------------------------------------------------------
+Version: 2.16.0
+Date: 22. 01. 2025
+  Changes:
+    - when a Toolbar is wider or higher than the screen keep the header within the screen
+    - adjust Toolbar collapse button to alignment
+
+---------------------------------------------------------------------------------------------------
+Version: 2.15.4
+Date: 22. 01. 2025
+  Optimization:
+    - big performance improvement of deleting a toolbar
+
+---------------------------------------------------------------------------------------------------
+Version: 2.15.3
+Date: 20. 01. 2025
+  Bugfixes:
+    - fixed count flickering when picking an item
+    - fixed hiding toolbar's header while hovering over toolbar's drag
+  Optimization:
+    - big performance improvement of deleting a toolbar
+    - huge performance improvement of picking and releasing an item
+    - huge performance improvement of updating item count
+
+---------------------------------------------------------------------------------------------------
+Version: 2.15.2
+Date: 15. 01. 2025
+  Bugfixes:
+    - fixed Toolbar resizing
+
+---------------------------------------------------------------------------------------------------
+Version: 2.15.1
+Date: 15. 01. 2025
+  Bugfixes:
+    - _eventBus field missing in an Inventory
+
+---------------------------------------------------------------------------------------------------
+Version: 2.14.0
+Date: 13. 01. 2025
+  Features:
+    - toggle a toolbar's header with a custom control while hovering over the toolbar
+  Optimization:
+    - great improvement of moving mouse over filled slots
+    - big improvement of dragging a toolbar
+
+---------------------------------------------------------------------------------------------------
+Version: 2.13.0
+Date: 09. 01. 2025
+  Changes:
+    - strut (empty widget) to keep size of a toolbar on children collapse
+  Optimizations:
+    - visual components sizes caching
+    - display scale and resolution caching
+
+---------------------------------------------------------------------------------------------------
+Version: 2.12.0
+Date: 03. 01. 2025
+  Features:
+    - toggle to change toolbar alignment (header position)
+  Changes:
+    - changed expand/collapse toolbar icons to specific for it
+
+---------------------------------------------------------------------------------------------------
+Version: 2.11.0
+Date: 02. 01. 2025
+  Features:
+    - keep toolbars within the screen
+    - dock toolbars to right and bottom edge
+  Changes:
+    - the expand arrow changed to horizontal arrow
+    - turn on toolbars and locked toolbars headers shortcuts on player creation
+
+---------------------------------------------------------------------------------------------------
+Version: 2.10.0
+Date: 30. 12. 2024
+  Features:
+    - clear slot with standard game control
+
+---------------------------------------------------------------------------------------------------
+Version: 2.9.0
+Date: 18. 12. 2024
+  Features:
+    - increase/decrease quality with standard game controls
+
+---------------------------------------------------------------------------------------------------
+Version: 2.8.2
+Date: 03. 12. 2024
+  Bugfixes:
+    - mitigate the error occurring while picking an item which is not present in inventories
+
+---------------------------------------------------------------------------------------------------
+Version: 2.8.1
+Date: 02. 12. 2024
+  Bugfixes:
+    - fixed collapsing whole toolbar when a header is hidden
+
+---------------------------------------------------------------------------------------------------
+Version: 2.8.0
+Date: 01. 12. 2024
+  Features:
+    - add a toggle to hide/show toolbars
+    - add a toggle to hide/show locked headers
+
+---------------------------------------------------------------------------------------------------
+Version: 2.7.3
+Date: 30. 11. 2024
+  Bugfixes:
+    - fixed not updating item count on cursor stack change
+
+---------------------------------------------------------------------------------------------------
+Version: 2.7.2
+Date: 25. 11. 2024
+  Bugfixes:
+    - added support for custom qualities which uses icons property
+
+---------------------------------------------------------------------------------------------------
+Version: 2.7.1
+Date: 21. 11. 2024
+  Changes:
+    - adjust shortcut icon size
+  Bugfixes:
+    - fixed an error on requesting crafting with unknown key sequence
+    - fixed showing not craftable message even if item is a product of recycling
+
+---------------------------------------------------------------------------------------------------
+Version: 2.7.0
+Date: 12. 11. 2024
+  Features:
+    - picking with the pipette
+
+---------------------------------------------------------------------------------------------------
+Version: 2.6.0
+Date: 07. 11. 2024
+  Features:
+    - hide Section's header when Toolbar is locked only if it has no name
+  Changes:
+    - increased top margin for content to do not overlap with shadows of toolbar header buttons
+    - decreased top margin of the 'Add section' button
+    - refactoring of width calculation
+
+---------------------------------------------------------------------------------------------------
+Version: 2.5.0
+Date: 06. 11. 2024
+  Features:
+    - keep width of a toolbar after collapsing
+
+---------------------------------------------------------------------------------------------------
+Version: 2.4.0
+Date: 06. 11. 2024
+  Features:
+    - support for remotes: artillery, discharge, spidertron (only creating)
+  Bugfixes:
+    - highlighting simple tool when picked
+  Changes:
+    - refactoring of inventory refreshing
+
+---------------------------------------------------------------------------------------------------
+Version: 2.3.0
+Date: 05. 11. 2024
+  Features:
+    - add shortcut button for creating a toolbar
+
+---------------------------------------------------------------------------------------------------
+Version: 2.2.0
+Date: 04. 11. 2024
+  Features:
+    - in remote view show content of a platform's hub
+
+---------------------------------------------------------------------------------------------------
+Version: 2.1.0
+Date: 04. 11. 2024
+  Features:
+    - in remote view show content of logistic networks in the current position (center of the screen)
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.12
+Date: 02. 11. 2024
+  Bugfixes:
+    - fixed changelog format
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.11
+Date: 02. 11. 2024
+  Bugfixes:
+    - fixed crash when picking an Item in Remote view connected to remote server
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.10
+Date: 01. 11. 2024
+  Bugfixes:
+    - fixed crash when creating ItemSlot in Editor mode
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.9
+Date: 01. 11. 2024
+  Bugfixes:
+    - fixed displaying elem_tooltip for items with quality
+    - removed workaround for not persisting LuaGuiElement.elem_tooltip.quality and migrate slots to the proper approach
+    - fixed crash on stack crafting
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.8
+Date: 30. 10. 2024
+  Bugfixes:
+    - hide toolbars when locomotive gui is opened
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.7
+Date: 30. 10. 2024
+  Bugfixes:
+    - support for abstract wires
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.6
+Date: 29. 10. 2024
+  Bugfixes:
+    - fixed slot highlighting when an item is in the cursor
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.5
+Date: 29. 10. 2024
+  Bugfixes:
+    - fixed failure when loading data-final-fixes.lua with pypostprocessing
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.4
+Date: 29. 10. 2024
+  Bugfixes:
+    - fixed failure when settings were changed not by a player
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.3
+Date: 28. 10. 2024
+  Bugfixes:
+    - show count of items in character render mode in editor
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.2
+Date: 28. 10. 2024
+  Bugfixes:
+    - fix picking an item in the remote view
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.1
+Date: 28. 10. 2024
+  Bugfixes:
+    - workaround for not persisting LuaGuiElement.elem_tooltip.quality
+    - update count on_player_cursor_stack_changed (update when a player builds)
+
+---------------------------------------------------------------------------------------------------
+Version: 2.0.0
+Date: 28. 10. 2024
+  Features:
+    - Factorio 2 support with quality
+
+---------------------------------------------------------------------------------------------------
+Version: 1.0.0
+Date: 07. 10. 2024
+  Features:
+    - initial release

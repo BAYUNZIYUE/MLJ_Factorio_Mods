@@ -14,7 +14,9 @@ mlj_factorio_mods/
 ├── ModZips/                    # packaged artifacts only; do not edit as source
 ├── tests/                      # long-lived regression guards, when present
 ├── DynamicInventory/           # runtime/settings inventory resizing mod
+├── expend-toolbar/             # runtime/data/settings custom toolbar mod
 ├── py_quick_start/             # runtime/settings starter-items mod
+├── quality-cycler/             # runtime/settings blueprint and upgrade planner quality cycling mod
 ├── section-autocraft/          # runtime/data/settings logistics-section autocraft mod
 └── ups_saving_quality_ships/   # runtime/data Space Age platform quality mod
 ```
@@ -25,7 +27,9 @@ mlj_factorio_mods/
 |------|----------|-------|
 | Pack or validate all mods | `pack_mods.py` | Source of truth for discovery, ignored dirs, entrypoint names, zip naming, and opening `ModZips/` |
 | Runtime inventory logic | `DynamicInventory/` | Runtime/settings mod; no `data.lua` |
+| Custom toolbar logic | `expend-toolbar/` | Runtime/data/settings mod; GUI under `src/src/gui/`, inventory refresh under `src/src/player/inventory/` |
 | Starter item logic | `py_quick_start/` | Runtime/settings mod; no `data.lua` |
+| Blueprint quality cycling | `quality-cycler/` | Runtime/settings mod; blueprint, blueprint book, and upgrade planner quality controls |
 | Section Autocraft logic | `section-autocraft/` | Lua source directly under `src/` |
 | Platform/cargo quality logic | `ups_saving_quality_ships/` | Event-driven runtime modules under `src/scripts/` |
 

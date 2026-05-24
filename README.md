@@ -8,7 +8,9 @@
 | 目录 | 模组 | 说明 |
 |------|------|------|
 | `DynamicInventory/` | DynamicInventory | 按玩家设置动态调整背包容量的运行时模组 |
+| `expend-toolbar/` | expend-toolbar | 创建可移动自定义工具栏，并显示当前视图的物品数量 |
 | `py_quick_start/` | py_quick_start | 给 Pyanodons 开局提供装备和机器人等物品的运行时模组 |
+| `quality-cycler/` | quality-cycler | 调整蓝图、蓝图册和绿图中品质的运行时模组 |
 | `section-autocraft/` | section-autocraft | 根据物流编组自动安排手搓的模组 |
 | `ups_saving_quality_ships/` | ups_saving_quality_ships | 用品质枢纽模拟多艘同款飞船以降低 UPS 压力的 Space Age 模组 |
 
@@ -77,7 +79,7 @@ python3 pack_mods.py
 ```
 
 守卫测试会确认测试目录和仓库文档不会进入打包产物。打包命令输出
-`Completed. Success: 4, Failed: 0` 时，表示当前 4 个模组都已成功生成 zip。
+`Completed. Success: 6, Failed: 0` 时，表示当前 6 个模组都已成功生成 zip。
 
 ## Factorio 资料
 
