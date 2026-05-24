@@ -1,40 +1,14 @@
 data:extend({
                 {
                     order = "a1",
-                    name = Toolbars.settings.crafting,
-                    localised_name = "Crafting (controls reconfiguration required)",
-                    localised_description = LocalisedText.new()
-                                                         :append("Due to modding limitations (mod controls same as game controls are not triggered over GUI) following game controls are reused:"):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append({ "controls.craft" }):append(RichText.fontEnd()):append(" ("):append({ "controls.craft" }):append(")"):append(RichText.fontSemibold(": ")):append({ "key-sequences.craft" }):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append({ "controls.craft-5" }):append(RichText.fontEnd()):append(" ("):append({ "controls.craft-5" }):append(")"):append(RichText.fontSemibold(": ")):append({ "key-sequences.craft-5" }):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append({ "controls.stack-transfer" }):append(RichText.fontEnd()):append(" ("):append({ "gui-permissions-names.Craft" }):append(" "):append({ "description.stack-size" }):append(")"):append(RichText.fontSemibold(": ")):append({ "key-sequences.stack-transfer" }):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append({ "controls.stack-split" }):append(RichText.fontEnd()):append(" ("):append({ "gui-permissions-names.Craft" }):append(" "):append({ "description.stack-size" }):append("/2"):append(")"):append(RichText.fontSemibold(": ")):append({ "key-sequences.stack-split" }):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append({ "controls.craft-all" }):append(RichText.fontEnd()):append(" ("):append({ "controls.craft-all" }):append(")"):append(RichText.fontSemibold(": ")):append({ "key-sequences.craft-all" }):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append({ "controls.inventory-split" }):append(RichText.fontEnd()):append(" ("):append({ "controls.craft-all" }):append("/2"):append(")"):append(RichText.fontSemibold(": ")):append({ "key-sequences.inventory-split" }):appendNewLine()
-
-                                                         :appendNewLine()
-                                                         :append("Example configuration:"):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append("*"):append({ "controls.craft" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Left-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append("*"):append({ "controls.craft-5" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Right-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append("*"):append({ "controls.craft-all" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Shift + Left-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append(" "):append({ "controls.cancel-craft" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Left-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append(" "):append({ "controls.cancel-craft-5" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Right-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append(" "):append({ "controls.cancel-craft-all" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Shift + Left-click")):appendNewLine()
-
-                                                         :append(RichText.fontSemiboldStart()):append("*"):append({ "controls.stack-transfer" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Alt + Left-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append(" "):append({ "controls.inventory-transfer" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Shift + Left-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append(" "):append({ "controls.fast-entity-transfer" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Alt + Left-click")):appendNewLine()
-
-                                                         :append(RichText.fontSemiboldStart()):append(" "):append({ "controls.cursor-split" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Right-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append("*"):append({ "controls.stack-split" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Alt + Right-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append("*"):append({ "controls.inventory-split" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Shift + Right-click")):appendNewLine()
-                                                         :append(RichText.fontSemiboldStart()):append(" "):append({ "controls.fast-entity-split" }):append(": "):append(RichText.fontEnd()):append(RichText.keySequence("Control + Alt + Right-click")):appendNewLine()
-
-                                                         :append(RichText.fontSemibold("*")):append(" - required")
-                                                         :localisedString(),
+                    name = Toolbars.settings.columns,
+                    localised_name = "Toolbar columns",
+                    localised_description = "Horizontal slot count for every toolbar page. Rows still expand and shrink automatically.",
                     setting_type = "runtime-per-user",
-                    type = "bool-setting",
-                    default_value = false,
+                    type = "int-setting",
+                    default_value = 10,
+                    minimum_value = 1,
+                    maximum_value = 100,
                 },
                 {
                     order = "a2",

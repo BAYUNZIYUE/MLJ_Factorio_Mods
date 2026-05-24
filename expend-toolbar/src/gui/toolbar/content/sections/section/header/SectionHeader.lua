@@ -4,8 +4,6 @@ import("gui.toolbar.Toolbar")
 import("gui.toolbar.content.sections.section.Section")
 import("gui.toolbar.content.sections.section.header.MoveDown")
 import("gui.toolbar.content.sections.section.header.MoveUp")
-import("gui.toolbar.content.sections.section.header.ExpandSection")
-import("gui.toolbar.content.sections.section.header.CollapseSection")
 import("gui.toolbar.content.sections.section.header.DeleteSection")
 import("gui.toolbar.content.sections.section.header.CancelDeleteSection")
 import("gui.toolbar.content.sections.section.header.ConfirmDeleteSection")
@@ -29,7 +27,6 @@ function SectionHeader.create(parent)
                 MoveDown.create(instance)
                 MoveUp.create(instance)
                 SectionNameUnlocked.create(instance)
-                CollapseSection.create(instance)
                 DeleteSection.create(instance)
             end
     )
@@ -38,7 +35,6 @@ end
 function SectionHeader.new(parent, element)
     return SectionHeader:super(HorizontalContainer.new(parent, element, {
         MoveDown, MoveUp,
-        CollapseSection, ExpandSection,
         SectionNameUnlocked, SectionNameLocked, ToRemoveSectionName,
         DeleteSection, ConfirmDeleteSection, CancelDeleteSection }))
 end
@@ -58,7 +54,13 @@ end
 function SectionHeader:onDoubleLeftClick()
     if self:isLocked() then
         self:luaPlayer().play_sound { path = "utility/gui_click" }
-        self:ancestor(Section):toggle()
+        self:ancestor(Section):expand()
+    end
+end
+
+function SectionHeader:onClick(click)
+    if click:isLeft() and self:isLocked() then
+        self:ancestor(Section):expand()
     end
 end
 

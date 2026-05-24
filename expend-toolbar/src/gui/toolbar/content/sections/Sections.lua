@@ -25,12 +25,12 @@ end
 
 ---@public
 function Sections:addSectionOntoStart()
-    Section.create(self, true)
+    return Section.create(self, true)
 end
 
 ---@public
 function Sections:addSectionOntoEnd()
-    Section.create(self, false)
+    return Section.create(self, false)
 end
 
 ---@public
@@ -40,18 +40,18 @@ function Sections:count()
 end
 
 function Sections:freshWidth()
-    local firstSection = self:sections()[1]
-    if firstSection then
-        return firstSection:width()
+    local activeSection = self:activeSection()
+    if activeSection then
+        return activeSection:width()
     else
         return 4 * Slot:size()
     end
 end
 
 function Sections:freshDisplayWidth()
-    local firstSection = self:sections()[1]
-    if firstSection then
-        return firstSection:displayWidth()
+    local activeSection = self:activeSection()
+    if activeSection then
+        return activeSection:displayWidth()
     else
         return 4 * self:scale(Slot:size())
     end
@@ -67,4 +67,38 @@ end
 ---@return Section[]
 function Sections:sections()
     return self:children(Section)
+end
+
+---@public
+---@return Section|nil
+function Sections:activeSection()
+    for _, section in ipairs(self:sections()) do
+        if section:isActive() then
+            return section
+        end
+    end
+    return nil
+end
+
+---@public
+---@param activeSection Section
+function Sections:activate(activeSection)
+    for _, section in ipairs(self:sections()) do
+        if section == activeSection then
+            section:activate()
+        else
+            section:deactivate()
+        end
+    end
+    self:fireSizeChange()
+end
+
+---@public
+function Sections:ensureActiveSection()
+    local activeSection = self:activeSection()
+    if activeSection then
+        self:activate(activeSection)
+    elseif self:sections()[1] then
+        self:activate(self:sections()[1])
+    end
 end

@@ -7,10 +7,10 @@ import("gui.toolbar.content.ToolbarContent")
 import("gui.toolbar.content.sections.Sections")
 import("gui.toolbar.content.sections.section.Section")
 import("gui.toolbar.content.sections.section.content.table.Table")
+import("factorio.events.settings.PlayerSettingChanged")
 import("player.events.ToolbarsToggled")
 
 ---@class Toolbar : Window
----@field private _lastOccupiedColumnIndex number
 Toolbar = Window:extendAs("gui.toolbar.Toolbar")
 
 function Toolbar.create(parent)
@@ -36,8 +36,11 @@ function Toolbar:initilize()
 
     self:setControls({ [ToggleToolbarHeader] = function() self:header():toggle() end })
     self:player():eventBus():subscribeTo(ToolbarsToggled, self, function(event) self:refresh(event) end)
+    self:player():eventBus():subscribeTo(PlayerSettingChanged.new(Toolbars.settings.columns), self, function()
+        self:tableChanged()
+    end)
 
-    self._lastOccupiedColumnIndex = self:lastOccupiedColumnIndex()
+    self:ensureActiveSection()
     self:freezeWidth()
 end
 
@@ -69,16 +72,6 @@ function Toolbar:expand()
 end
 
 ---@public
----@param sectionToExclude Section
-function Toolbar:collapseAllSectionsExcluding(sectionToExclude)
-    for _, section in ipairs(self:content():sections():sections()) do
-        if section ~= sectionToExclude then
-            section:collapse()
-        end
-    end
-end
-
----@public
 function Toolbar:collapseAllSections()
     for _, section in ipairs(self:content():sections():sections()) do
         section:collapse()
@@ -87,14 +80,13 @@ end
 
 ---@public
 function Toolbar:addSection()
-    if self:header():child(OneSectionMode):toggled() then
-        self:collapseAllSections()
-    end
+    local section
     if self:isAlignedTop() then
-        self:content():sections():addSectionOntoEnd()
+        section = self:content():sections():addSectionOntoEnd()
     else
-        self:content():sections():addSectionOntoStart()
+        section = self:content():sections():addSectionOntoStart()
     end
+    self:activateSection(section)
     self:adjustGrids()
 end
 
@@ -106,9 +98,9 @@ end
 
 ---@public
 function Toolbar:tableChanged()
-    self._lastOccupiedColumnIndex = self:lastOccupiedColumnIndex()
     self:adjustGrids()
     self:freezeWidth()
+    self:keepWithinTheScreen()
 end
 
 ---@public
@@ -118,6 +110,26 @@ function Toolbar:adjustGrids()
             table:adjustUnlocked()
         end
     end
+end
+
+---@public
+---@param section Section
+function Toolbar:activateSection(section)
+    self:content():sections():activate(section)
+    self:adjustGrids()
+    self:freezeWidth()
+    self:keepWithinTheScreen()
+end
+
+---@public
+function Toolbar:ensureActiveSection()
+    self:content():sections():ensureActiveSection()
+end
+
+---@public
+---@return number
+function Toolbar:columns()
+    return self:player():settings():columns()
 end
 
 function Toolbar:lock()
@@ -176,16 +188,6 @@ end
 ---@return boolean
 function Toolbar:isLocked()
     return self:child(ToolbarHeader):isLocked()
-end
-
----@public
----@return number
-function Toolbar:lastOccupiedColumnIndex()
-    local lastOccupiedColumnIndex = 0
-    for _, table in ipairs(self:tables()) do
-        lastOccupiedColumnIndex = math.max(lastOccupiedColumnIndex, table:lastOccupiedColumnIndex())
-    end
-    return lastOccupiedColumnIndex
 end
 
 ---@public

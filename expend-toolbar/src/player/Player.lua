@@ -6,7 +6,6 @@ import("gui.Gui")
 import("player.Cursor")
 import("player.Display")
 import("player.PlayerSettings")
-import("player.Recipes")
 import("player.events.CharacterControllerActivated")
 import("player.events.Picked")
 import("player.events.Released")
@@ -31,7 +30,6 @@ import("player.inventory.remote.space_platform.SpacePlatformViewInventory")
 ---@field private _cursor Cursor
 ---@field private _gui Gui
 ---@field private _viewInventory ViewInventory
----@field private _recipes Recipes
 Player = Object:extendAs("player.Player")
 Player.__instances = {}
 
@@ -84,7 +82,6 @@ function Player.new(luaPlayer)
     this._display = Display.new(Resolution.new(resolution.width, resolution.height), luaPlayer.display_scale)
     this._cursor = Cursor.new(this._luaPlayer)
     this._settings = PlayerSettings.new(this._luaPlayer, this._eventBus)
-    this._recipes = Recipes.new(this._luaPlayer)
     this._viewInventory = EmptyViewInventory.new(this, Content.new())
 
     this:resetViewInventory()
@@ -296,12 +293,6 @@ end
 ---@return Display
 function Player:display()
     return self._display
-end
-
----@public
----@return Recipes
-function Player:recipes()
-    return self._recipes
 end
 
 ---@public

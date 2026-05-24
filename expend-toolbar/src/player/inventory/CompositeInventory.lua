@@ -71,18 +71,6 @@ function CompositeInventory:pick(item)
     return false
 end
 
-function CompositeInventory:craftingPlansInDescendingCountOrderForAnItem(itemName)
-    ---@type CraftingPlan[]
-    local plans = {}
-    for _, subinventory in ipairs(self._subinventories) do
-        for _, plan in ipairs(subinventory:craftingPlansInDescendingCountOrderForAnItem(itemName)) do
-            table.insert(plans, plan)
-        end
-    end
-    table.sort(plans, function(first, second) return first:compareTo(second) end)
-    return plans
-end
-
 ---@public
 ---@return Inventory[]
 function CompositeInventory:subinventories()

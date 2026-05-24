@@ -1,4 +1,3 @@
-require("data.fonts")
 require("data.icons")
 require("data.inputs")
 require("data.shortcuts")

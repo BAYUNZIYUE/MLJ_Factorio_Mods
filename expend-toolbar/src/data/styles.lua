@@ -150,12 +150,6 @@ styles.toolbar_header_align_bottom = {
     parent = "toolbar_button_icon_black"
 }
 
-styles.toolbar_header_one_section_mode = {
-    type = "button_style",
-    parent = "toolbar_button_icon_black",
-    right_margin = 1
-}
-
 styles.toolbar_header_collapse = {
     type = "button_style",
     parent = "toolbar_button_icon_black"

@@ -35,7 +35,7 @@ end
 ---@public
 function Table:trim()
     self:trimRowsTo(math.max(1, self:lastOccupiedRowIndex()))
-    self:trimColumnsToMinimum(math.max(1, self._toolbar:lastOccupiedColumnIndex()))
+    self:trimColumnsToMinimum(self:columnsCount())
     self:fireSizeChange()
 end
 
@@ -45,16 +45,16 @@ end
 
 ---@public
 function Table:adjustUnlocked()
-    self:adjustUnlockedRows()
+    self:ensureRowsMinimum(1)
     self:adjustUnlockedColumns()
+    self:adjustUnlockedRows()
     self:fireSizeChange()
 end
 
 ---@private
 function Table:adjustUnlockedRows()
-    self:ensureRowsMinimum(1)
-    self:trimRowsTo(self:lastOccupiedRowIndex() + 1)
-    self:ensureRowsMargin()
+    self:expandRowsWhenLastSlotIsOccupied()
+    self:trimUnusedTrailingRows()
 end
 
 ---@private
@@ -81,13 +81,6 @@ function Table:trimRowsTo(lastRowToLeaveIndex)
 end
 
 ---@private
-function Table:ensureRowsMargin()
-    if self:rowsCount() == self:lastOccupiedRowIndex() then
-        Row.create(self)
-    end
-end
-
----@private
 ---@return number
 function Table:lastOccupiedRowIndex()
     local lastOccupiedRowIndex = 0
@@ -101,15 +94,14 @@ end
 
 ---@private
 function Table:adjustUnlockedColumns()
-    self:ensureColumnsMinimum(self:minimumColumns())
-    self:trimColumnsToMinimum(self:minimumColumns())
-    self:ensureColumnsMargin()
+    self:ensureColumnsMinimum(self:columnsCount())
+    self:trimColumnsToMinimum(self:columnsCount())
 end
 
 ---@private
 ---@return number
-function Table:minimumColumns()
-    return math.max(4, self._toolbar:lastOccupiedColumnIndex() + 1)
+function Table:columnsCount()
+    return math.max(self._toolbar:columns(), self:lastOccupiedColumnIndex())
 end
 
 ---@private
@@ -129,9 +121,18 @@ function Table:trimColumnsToMinimum(minimum)
 end
 
 ---@private
-function Table:ensureColumnsMargin()
-    for _, row in ipairs(self:rows()) do
-        row:ensureColumnsMargin()
+function Table:expandRowsWhenLastSlotIsOccupied()
+    while self:rows()[self:rowsCount()]:lastSlotIsOccupied() do
+        local row = Row.create(self)
+        row:ensureColumnsMinimum(self:columnsCount())
+    end
+end
+
+---@private
+function Table:trimUnusedTrailingRows()
+    while self:rowsCount() > 1 and not self:rows()[self:rowsCount()]:isOccupied()
+            and not self:rows()[self:rowsCount() - 1]:lastSlotIsOccupied() do
+        self:rows()[self:rowsCount()]:delete()
     end
 end
 
@@ -149,23 +150,13 @@ end
 ---@public
 ---@return number
 function Table:freshWidth()
-    local firstRow = self:rows()[1]
-    if firstRow then
-        return firstRow:columnsCount() * Slot:size()
-    else
-        return 4 * Slot:size()
-    end
+    return self:columnsCount() * Slot:size()
 end
 
 ---@public
 ---@return number
 function Table:freshDisplayWidth()
-    local firstRow = self:rows()[1]
-    if firstRow then
-        return firstRow:columnsCount() * self:scale(Slot:size())
-    else
-        return 4 * self:scale(Slot:size())
-    end
+    return self:columnsCount() * self:scale(Slot:size())
 end
 
 ---@public

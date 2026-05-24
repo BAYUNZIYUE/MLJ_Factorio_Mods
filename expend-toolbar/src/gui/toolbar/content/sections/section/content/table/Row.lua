@@ -53,10 +53,10 @@ function Row:ensureColumnsMinimum(minimum)
 end
 
 ---@public
-function Row:ensureColumnsMargin()
-    if self:columnsCount() == self:lastOccupiedColumnIndex() then
-        EmptySlot.create(self)
-    end
+---@return boolean
+function Row:lastSlotIsOccupied()
+    local lastSlot = self:children()[self:columnsCount()]
+    return lastSlot and not lastSlot:isInstanceOf(EmptySlot) or false
 end
 
 ---@public

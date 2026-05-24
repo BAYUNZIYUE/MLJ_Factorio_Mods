@@ -5,7 +5,6 @@ import("gui.Box")
 ---@field public loaded boolean
 ---@field public name string
 ---@field public controls table<string, string>
----@field public fonts table<string, string>
 ---@field public icons table<string, string>
 ---@field public styles table<string, table>
 Toolbars = {}
@@ -28,18 +27,6 @@ Toolbars.controls = {
     createToolbar = Toolbars.prefix("create-toolbar"),
     toggleToolbars = Toolbars.prefix("toggle-toolbars"),
     toggleToolbarHeader = Toolbars.prefix("toggle-toolbar-header"),
-
-    craftOne = Toolbars.prefix("craft-1"),
-    craftFive = Toolbars.prefix("craft-5"),
-    craftStackHalf = Toolbars.prefix("craft-stack-half"),
-    craftStack = Toolbars.prefix("craft-stack"),
-    craftAllHalf = Toolbars.prefix("craft-all-half"),
-    craftAll = Toolbars.prefix("craft-all"),
-}
-
-Toolbars.fonts = {
-    monospaced = "toolbars-mono-regular-normal",
-    monospacedIcon3Spaces = "toolbars-mono-regular-icon-3-spaces",
 }
 
 Toolbars.icons = {
@@ -56,8 +43,6 @@ Toolbars.icons = {
     padlockClosed = Toolbars.prefix("padlock-closed"),
     padlockOpen = Toolbars.prefix("padlock-open"),
 
-    notManuallyCraftable = Toolbars.prefix("not-manually-craftable"),
-    technologyRed = Toolbars.prefix("technology-red"),
     empty = Toolbars.prefix("empty"),
 
     characterTrash = Toolbars.prefix("character-trash"),
@@ -68,7 +53,7 @@ Toolbars.icons = {
 }
 
 Toolbars.settings = {
-    crafting = "crafting",
+    columns = "columns",
     tooltipDelay = "tooltip-delay",
     tooltipRefreshInterval = "tooltip-refresh-interval",
     showControlsInTheTooltip = "show-controls-in-the-tooltip",

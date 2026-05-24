@@ -131,18 +131,6 @@ function ViewInventory:pick(item)
     self._player:cursor():pickGhost(item)
 end
 
-function ViewInventory:craftingPlansInDescendingCountOrderForAnItem(itemName)
-    ---@type CraftingPlan[]
-    local plans = {}
-    for _, main in ipairs(self._mains) do
-        for _, plan in ipairs(main:craftingPlansInDescendingCountOrderForAnItem(itemName)) do
-            table.insert(plans, plan)
-        end
-    end
-    table.sort(plans, function(first, second) return first:compareTo(second) end)
-    return plans
-end
-
 ---@public
 ---@return Inventory[]
 function ViewInventory:mains()

@@ -8,7 +8,6 @@ import("gui.toolbar.header.ConfirmDeleteToolbar")
 import("gui.toolbar.header.DeleteToolbar")
 import("gui.toolbar.header.ExpandToolbar")
 import("gui.toolbar.header.Lock")
-import("gui.toolbar.header.OneSectionMode")
 import("gui.toolbar.header.ToolbarDrag")
 import("gui.toolbar.header.Unlock")
 
@@ -27,7 +26,6 @@ function ToolbarHeader.create(parent)
                 Lock.create(instance)
                 AlignBottom.create(instance)
                 ToolbarDrag.create(instance)
-                OneSectionMode.create(instance)
                 CollapseToolbar.create(instance)
                 DeleteToolbar.create(instance)
             end
@@ -41,7 +39,6 @@ function ToolbarHeader.new(parent, root)
             { Lock, Unlock,
               AlignBottom, AlignTop,
               ToolbarDrag,
-              OneSectionMode,
               CollapseToolbar, ExpandToolbar,
               DeleteToolbar, CancelDeleteToolbar, ConfirmDeleteToolbar
             }))
@@ -49,7 +46,7 @@ end
 
 function ToolbarHeader:initilize()
     self:migrateTo_2_12_0()
-    self:migrateTo_2_19_0()
+    self:migrateToTabMode()
 end
 
 ---@private
@@ -63,11 +60,11 @@ function ToolbarHeader:migrateTo_2_12_0()
 end
 
 ---@private
-function ToolbarHeader:migrateTo_2_19_0()
-    if not self:child(OneSectionMode) then
-        OneSectionMode.create(self, 4)
-        if self:isLocked() then
-            self:child(OneSectionMode):lock()
+function ToolbarHeader:migrateToTabMode()
+    for _, child in ipairs(self:element().children) do
+        if child.tags and child.tags.className == "gui.toolbar.header.OneSectionMode" then
+            child.destroy()
+            break
         end
     end
 end

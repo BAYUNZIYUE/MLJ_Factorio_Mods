@@ -47,36 +47,6 @@ script.on_event(Toolbars.controls.decreaseQuality, function(event)
     Player.get(event.player_index):eventBus():publish(DecreaseQuality)
 end)
 
----@param event EventData
-script.on_event(Toolbars.controls.craftOne, function(event)
-    Player.get(event.player_index):eventBus():publish(Craft:one())
-end)
-
----@param event EventData
-script.on_event(Toolbars.controls.craftFive, function(event)
-    Player.get(event.player_index):eventBus():publish(Craft:five())
-end)
-
----@param event EventData
-script.on_event(Toolbars.controls.craftStack, function(event)
-    Player.get(event.player_index):eventBus():publish(Craft:stack())
-end)
-
----@param event EventData
-script.on_event(Toolbars.controls.craftStackHalf, function(event)
-    Player.get(event.player_index):eventBus():publish(Craft:stackHalf())
-end)
-
----@param event EventData
-script.on_event(Toolbars.controls.craftAll, function(event)
-    Player.get(event.player_index):eventBus():publish(Craft:all())
-end)
-
----@param event EventData
-script.on_event(Toolbars.controls.craftAllHalf, function(event)
-    Player.get(event.player_index):eventBus():publish(Craft:allHalf())
-end)
-
 if script.active_mods["FactorySearch"] then
     ---@param event EventData
     script.on_event("open-search-prototype", function(event)

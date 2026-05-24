@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-This mod is a Lua-first Factorio 2.0 mod that lets players create movable custom toolbars for items, tools, crafting shortcuts, inventory counts, and remote-view access.
+This mod is a Lua-first Factorio 2.0 mod that lets players create movable custom toolbars for items, tools, inventory counts, and remote-view access.
 
 ## WHERE TO LOOK
 
@@ -26,6 +26,8 @@ This mod is a Lua-first Factorio 2.0 mod that lets players create movable custom
 - Keep authored files under `src/`; root `README.md` and `AGENTS.md` are documentation and must not be copied into runtime package contents.
 - Keep the `src/` package root reserved for Factorio entry files, metadata, changelog, thumbnail, and packaged resource directories. Custom runtime Lua belongs in domain subpackages such as `src/core/`, `src/model/`, `src/control/`, `src/gui/`, `src/player/`, and `src/factorio/`; prototype and sprite registration belongs under `src/data*.lua` or `src/data/`; settings definitions belong under `src/settings*.lua` or `src/settings/`.
 - Toolbar slot counts are based on `ViewInventory` main inventories. Personal-view logistic networks are side inventories for tooltip/detail refresh, not part of the slot count overlay.
+- Toolbar sections are tab-style pages. Keep the existing `Toolbar -> Sections -> Section` save shape, but only the active section content should be visible.
+- Toolbar pages use the per-user `Toolbars.settings.columns` value as their configured width. Preserve occupied slots beyond the configured width instead of deleting them; shrink back only after those right-side slots are empty.
 - Inventory refresh methods should return `true` only when their visible content actually changed. Do not publish `InventoryChanged` merely because a polling interval elapsed.
 - Guard quality reads from `prototypes.quality[...]` because old saves, removed quality mods, or stale GUI tags can contain quality names that no longer exist.
 - Keep player-facing behavior documented in this directory's `README.md` when controls, settings, visible counts, remote view, or tooltip behavior changes.

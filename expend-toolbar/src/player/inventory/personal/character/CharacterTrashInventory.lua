@@ -7,7 +7,6 @@ import("player.inventory.Inventory")
 ---@field private __icon Icon
 ---@field private _player Player
 ---@field private _upToDate boolean
----@field private _craftingCategories table<string, boolean>
 CharacterTrashInventory = Inventory:extendAs("player.inventory.personal.CharacterTrashInventory")
 CharacterTrashInventory.__icon = Icon.new("img", Toolbars.icons.characterTrash)
 

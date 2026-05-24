@@ -1,6 +1,5 @@
 import("factorio.LocalisedText")
 import("factorio.RichText")
-import("factorio.TechnologyPrototypes")
 import("factorio.QualityLevels")
 import("player.inventory.InventoryChanged")
 
@@ -91,7 +90,6 @@ function Tooltip:localisedString()
     if #self._player:viewInventory():mains() > 0 or #self._player:viewInventory():sides() > 0 then
         return LocalisedText.new()
                             :concat(self:createInventory())
-                            :concat(self:createBiggestCraftingPlan())
                             :concat(self:createControls())
                             :localisedString()
     else
@@ -259,30 +257,11 @@ function Tooltip:createCell(qualityName, qualityCount)
     end
 end
 
----@private
----@return LocalisedText
-function Tooltip:createBiggestCraftingPlan()
-    if self._player:settings():crafting() then
-        local biggestCraftingPlan = self._player:viewInventory():craftingPlansInDescendingCountOrderForAnItem(self._slot:item():name())[1]
-        if biggestCraftingPlan then
-            return biggestCraftingPlan:fullDescription()
-        else
-            return LocalisedText.empty()
-        end
-    else
-        return LocalisedText.empty()
-    end
-end
-
 ---@protected
 ---@return LocalisedText
 function Tooltip:createControls()
     if self._player:settings():showControlsInTheTooltip() then
-        if self._player:settings():crafting() then
-            return Tooltip._.controls.withCrafting
-        else
-            return Tooltip._.controls.withoutCrafting
-        end
+        return Tooltip._.controls.withoutCrafting
     else
         return LocalisedText.empty()
     end
@@ -317,55 +296,9 @@ Tooltip._.controls.common = LocalisedText
         :append(RichText.keySequence(": "))
         :append({ "controls.cycle-quality-down" })
 
-Tooltip._.controls.crafting = LocalisedText
-        .new()
-        :append({ "key-sequences.craft" })
-        :append(RichText.keySequence(": "))
-        :append({ "controls.craft" })
-        :appendNewLine()
-
-        :append({ "key-sequences.craft-5" })
-        :append(RichText.keySequence(": "))
-        :append({ "controls.craft-5" })
-        :appendNewLine()
-
-        :append({ "key-sequences.stack-transfer" })
-        :append(RichText.keySequence(": "))
-        :append({ "gui-permissions-names.Craft" })
-        :append(" ")
-        :append({ "description.stack-size" })
-        :appendNewLine()
-
-        :append({ "key-sequences.stack-split" })
-        :append(RichText.keySequence(": "))
-        :append({ "gui-permissions-names.Craft" })
-        :append(" ")
-        :append({ "description.stack-size" })
-        :append("/2")
-        :appendNewLine()
-
-        :append({ "key-sequences.craft-all" })
-        :append(RichText.keySequence(": "))
-        :append({ "controls.craft-all" })
-        :appendNewLine()
-
-        :append({ "key-sequences.inventory-split" })
-        :append(RichText.keySequence(": "))
-        :append({ "controls.craft-all" })
-        :append("/2")
-
 Tooltip._.controls.settingsHint = LocalisedText
         .new()
         :append(RichText.fontSmall("(hide controls in settings)"))
-
-Tooltip._.controls.withCrafting = LocalisedText
-        .new()
-        :concat(Tooltip._.controls.common)
-        :appendNewLine()
-        :appendNewLine()
-        :concat(Tooltip._.controls.crafting)
-        :appendNewLine()
-        :concat(Tooltip._.controls.settingsHint)
 
 Tooltip._.controls.withoutCrafting = LocalisedText
         .new()

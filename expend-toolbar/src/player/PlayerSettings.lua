@@ -5,7 +5,7 @@ import("player.events.settings.ShowLogisticNetworksContentSettingChanged")
 ---@class PlayerSettings : Object
 ---@field private _luaPlayer LuaPlayer
 ---@field private _eventBus EventBus
----@field private _crafting boolean
+---@field private _columns number
 ---@field private _tooltipDelay number
 ---@field private _tooltipRefreshInterval number
 ---@field private _showControlsInTheTooltip boolean
@@ -24,7 +24,7 @@ function PlayerSettings.new(luaPlayer, eventBus)
     this._luaPlayer = luaPlayer
     this._eventBus = eventBus
 
-    this:updateCrafting()
+    this:updateColumns()
     this:updateTooltipDelay()
     this:updateTooltipRefreshInterval()
     this:updateShowControlsInTheTooltip()
@@ -37,8 +37,8 @@ function PlayerSettings.new(luaPlayer, eventBus)
     this:updateShowLogisticNetworksContent()
     this:updateLogisticNetworksContentRefreshInterval()
 
-    eventBus:subscribeTo(PlayerSettingChanged.new(Toolbars.settings.crafting), this, function()
-        this:updateCrafting()
+    eventBus:subscribeTo(PlayerSettingChanged.new(Toolbars.settings.columns), this, function()
+        this:updateColumns()
     end)
     eventBus:subscribeTo(PlayerSettingChanged.new(Toolbars.settings.tooltipDelay), this, function()
         this:updateTooltipDelay()
@@ -73,14 +73,14 @@ function PlayerSettings.new(luaPlayer, eventBus)
 end
 
 ---@public
----@return boolean
-function PlayerSettings:crafting()
-    return self._crafting
+---@return number
+function PlayerSettings:columns()
+    return self._columns
 end
 
 ---@private
-function PlayerSettings:updateCrafting()
-    self._crafting = self._luaPlayer.mod_settings[Toolbars.settings.crafting].value
+function PlayerSettings:updateColumns()
+    self._columns = math.max(1, self._luaPlayer.mod_settings[Toolbars.settings.columns].value)
 end
 
 ---@public

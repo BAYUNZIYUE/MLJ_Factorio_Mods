@@ -1,9 +1,7 @@
 ---@class Inventory : Object
----@field private __emptyPlans CraftingPlan[]
 ---@field private _player Player
 ---@field private _content Content
 Inventory = Object:extendAs("player.inventory.Inventory")
-Inventory.__emptyPlans = {}
 
 ---@protected
 ---@return Inventory
@@ -48,13 +46,6 @@ end
 ---@return boolean picked
 function Inventory:pick(item)
     return false
-end
-
----@public
----@param itemName string
----@return CraftingPlan[]
-function Inventory:craftingPlansInDescendingCountOrderForAnItem(itemName)
-    return Inventory.__emptyPlans
 end
 
 ---@public

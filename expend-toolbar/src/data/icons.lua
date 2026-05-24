@@ -116,36 +116,6 @@ data:extend {
 
     {
         type = "sprite",
-        name = Toolbars.icons.notManuallyCraftable,
-        layers = {
-            {
-                filename = "__core__/graphics/icons/mip/slot-item-in-hand.png",
-                priority = "extra-high-no-scale",
-                size = 64,
-                scale = 1.2,
-                tint = { 0.9, 0.9, 0.9 }
-            },
-            {
-                filename = "__core__/graphics/no-recipe.png",
-                priority = "extra-high-no-scale",
-                size = 101,
-                tint = { 0.8, 0.8, 0.8 }
-            },
-        },
-        flags = { "icon" }
-    },
-    {
-        type = "sprite",
-        name = Toolbars.icons.technologyRed,
-        filename = "__core__/graphics/icons/mip/technology-white.png",
-        priority = "extra-high-no-scale",
-        size = 64,
-        tint = { 255, 136, 136 },
-        flags = { "icon" }
-    },
-
-    {
-        type = "sprite",
         name = Toolbars.icons.empty,
         filename = "__expend-toolbar__/_graphics/icons/empty.png",
         priority = "extra-high-no-scale",

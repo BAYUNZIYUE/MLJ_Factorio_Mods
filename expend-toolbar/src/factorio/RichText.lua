@@ -141,7 +141,7 @@ end
 function RichText.fontMonospacedStart()
     return RichText._.fontMonospacedStart
 end
-RichText._.fontMonospacedStart = "[font=" .. Toolbars.fonts.monospaced .. "]"
+RichText._.fontMonospacedStart = "[font=default]"
 RichText._.fontMonospacedFormat = RichText._.fontMonospacedStart .. "%s" .. RichText._.fontEnd
 
 ---@public
@@ -163,7 +163,7 @@ end
 function RichText.fontMonospacedIcon3SpacesStart()
     return RichText._.fontMonospacedIcon3SpacesStart
 end
-RichText._.fontMonospacedIcon3SpacesStart = "[font=" .. Toolbars.fonts.monospacedIcon3Spaces .. "]"
+RichText._.fontMonospacedIcon3SpacesStart = "[font=default]"
 RichText._.fontMonospacedIcon3SpacesFormat = RichText._.fontMonospacedIcon3SpacesStart .. "%s" .. RichText._.fontEnd
 
 ---@public

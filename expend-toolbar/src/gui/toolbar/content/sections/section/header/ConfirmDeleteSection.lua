@@ -1,4 +1,5 @@
 import("gui.toolbar.content.sections.section.header.SectionHeaderButton")
+import("gui.toolbar.Toolbar")
 
 ---@class ConfirmDeleteSection : SectionHeaderButton
 ConfirmDeleteSection = SectionHeaderButton:extendAs("gui.toolbar.content.sections.section.header.ConfirmDelete")
@@ -21,6 +22,10 @@ end
 
 function ConfirmDeleteSection:onClick(click)
     if click:isLeft() then
-        self:section():delete()
+        local section = self:section()
+        local toolbar = section:ancestor(Toolbar)
+        section:delete()
+        toolbar:ensureActiveSection()
+        toolbar:tableChanged()
     end
 end

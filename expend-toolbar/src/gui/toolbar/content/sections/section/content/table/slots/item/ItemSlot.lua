@@ -7,7 +7,6 @@ import("player.inventory.ViewInventoryItemCountChanged")
 import("player.events.Picked")
 import("player.events.Released")
 import("factorio.events.controls.Clear")
-import("factorio.events.controls.Craft")
 import("factorio.events.controls.DecreaseQuality")
 import("factorio.events.controls.IncreaseQuality")
 import("factorio.events.controls.OpenFactoriopedia")
@@ -95,7 +94,6 @@ function ItemSlot:initilize()
                 [Pick] = function() self:handlePick() end,
                 [Clear] = function() self:handleClear() end,
                 [OpenFactoriopedia] = function() self:openInFactoriopedia() end,
-                [Craft] = function(craft) self:handleCraft(craft) end,
                 [IncreaseQuality] = function() self:increaseQuality() end,
                 [DecreaseQuality] = function() self:decreaseQuality() end,
                 [SearchFactory] = function() self:searchFactory() end,
@@ -150,7 +148,7 @@ end
 ---@return boolean
 function ItemSlot:deleteIfTheItemIsUnknown()
     if ItemFluidPrototypes.instance():findItemFluidPrototype(self._item:name()) == nil then
-        Log.log("Unknown item slot deleted: " .. self._item:name())
+        log("Unknown item slot deleted: " .. self._item:name())
         self:replaceWith(EmptySlot.create(self:parent()))
         return true
     else
@@ -195,46 +193,6 @@ end
 ---@private
 function ItemSlot:openInFactoriopedia()
     self:player():luaPlayer().open_factoriopedia_gui(ItemFluidPrototypes.instance():findItemFluidPrototype(self:item():name()))
-end
-
----@private
----@param craft Craft
-function ItemSlot:handleCraft(craft)
-    if self:player():settings():crafting() and self:player():inCharacterView() then
-        local biggestCraftingPlan = self:player():viewInventory():craftingPlansInDescendingCountOrderForAnItem(self._item:name())[1]
-        if biggestCraftingPlan then
-            local startedCraftingCount = biggestCraftingPlan:execute(self:calculateCraftCount(craft,
-                                                                                              biggestCraftingPlan))
-            if startedCraftingCount > 0 then
-                self:presentSuccess(startedCraftingCount)
-            else
-                self:presentFailure(startedCraftingCount)
-            end
-        else
-            self:presentFailure("-")
-        end
-    end
-end
-
----@private
----@param craft Craft
----@param craftingPlan CraftingPlan
-function ItemSlot:calculateCraftCount(craft, craftingPlan)
-    if craft:isOne() then
-        return 1
-    elseif craft:isFive() then
-        return 5
-    elseif craft:isStackHalf() then
-        return self:itemPrototype().stack_size / 2
-    elseif craft:isStack() then
-        return self:itemPrototype().stack_size
-    elseif craft:isAllHalf() then
-        return craftingPlan:craftableCountOf(self._item:name()) / 2
-    elseif craft:isAll() then
-        return craftingPlan:craftableCountOf(self._item:name())
-    else
-        error("Unknown craft request")
-    end
 end
 
 ---@private

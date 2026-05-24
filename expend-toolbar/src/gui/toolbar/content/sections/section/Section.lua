@@ -1,10 +1,7 @@
 import("gui.VerticalContainer")
 import("gui.Box")
 import("gui.toolbar.Toolbar")
-import("gui.toolbar.header.OneSectionMode")
 import("gui.toolbar.content.sections.section.header.SectionHeader")
-import("gui.toolbar.content.sections.section.header.CollapseSection")
-import("gui.toolbar.content.sections.section.header.ExpandSection")
 import("gui.toolbar.content.sections.section.content.SectionContent")
 
 ---@class Section : VerticalContainer
@@ -32,6 +29,7 @@ end
 
 function Section:initilize()
     self:setBox(Toolbars.styles.toolbar.content.sections.section.box)
+    self:migrateToTabMode()
 end
 
 function Section:moveDown()
@@ -48,31 +46,43 @@ end
 
 ---@public
 function Section:toggle()
-    if self:content():isVisible() then
-        self:collapse()
-    else
-        self:expand()
-    end
+    self:expand()
 end
 
 ---@public
 function Section:collapse()
-    self:content():hide()
-    local collapseSection = self:header():child(CollapseSection)
-    if collapseSection then
-        collapseSection:collapsed()
-    end
+    self:deactivate()
 end
 
 ---@public
 function Section:expand()
+    self:ancestor(Toolbar):activateSection(self)
+end
+
+---@public
+---@return boolean
+function Section:isActive()
+    return self:content():isVisible()
+end
+
+---@public
+function Section:activate()
     self:content():show()
-    local expandSection = self:header():child(ExpandSection)
-    if expandSection then
-        expandSection:replaceWithCollapse()
-    end
-    if self:ancestor(Toolbar):header():child(OneSectionMode):toggled() then
-        self:ancestor(Toolbar):collapseAllSectionsExcluding(self)
+end
+
+---@public
+function Section:deactivate()
+    self:content():hide()
+end
+
+---@private
+function Section:migrateToTabMode()
+    for _, child in ipairs(self:header():element().children) do
+        if child.tags and (child.tags.className == "gui.toolbar.content.sections.section.header.Collapse"
+                or child.tags.className == "gui.toolbar.content.sections.section.header.Expand") then
+            child.destroy()
+            break
+        end
     end
 end
 

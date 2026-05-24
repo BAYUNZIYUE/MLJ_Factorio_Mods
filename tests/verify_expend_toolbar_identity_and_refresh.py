@@ -46,6 +46,20 @@ def main() -> int:
     if (SRC / "src").exists():
         raise AssertionError("expend-toolbar runtime modules must not be nested under src/src")
 
+    removed_files = [
+        SRC / "locale/en/AzeretMono-Regular.ttf",
+        SRC / "locale/en/OFL.txt",
+        SRC / "data/fonts.lua",
+        SRC / "control/remote.lua",
+        SRC / "factorio/events/controls/Craft.lua",
+        SRC / "gui/toolbar/header/OneSectionMode.lua",
+        SRC / "_graphics/icons/padlock-closed-black.png",
+        SRC / "_graphics/icons/padlock-open-black.png",
+    ]
+    for path in removed_files:
+        if path.exists():
+            raise AssertionError(f"{path.relative_to(ROOT)} should stay removed")
+
     root_files = {path.name for path in SRC.iterdir() if path.is_file()}
     unexpected_root_files = root_files - ALLOWED_SRC_ROOT_FILES
     if unexpected_root_files:
@@ -60,11 +74,19 @@ def main() -> int:
             assert_not_contains(path, "require('src.")
 
     assert_contains(SRC / "core/Toolbars.lua", 'Toolbars.name = "expend-toolbar"')
+    assert_contains(SRC / "core/Toolbars.lua", 'columns = "columns"')
+    assert_not_contains(SRC / "core/Toolbars.lua", "Toolbars.fonts")
+    assert_not_contains(SRC / "core/Toolbars.lua", "craftOne")
     assert_contains(SRC / "lang/import.lua", "require(module)")
     assert_contains(SRC / "player/inventory/ViewInventory.lua", "return sideChanged")
     assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/slots/item/QualitySprite.lua", "if quality and quality.draw_sprite_by_default then")
+    assert_contains(SRC / "settings/settings.lua", "default_value = 10")
+    assert_contains(SRC / "gui/toolbar/content/sections/Sections.lua", "function Sections:activate(activeSection)")
+    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Table.lua", "function Table:expandRowsWhenLastSlotIsOccupied()")
+    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Table.lua", "function Table:trimUnusedTrailingRows()")
+    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Row.lua", "function Row:lastSlotIsOccupied()")
 
-    print("PASS: expend-toolbar identity, layout, docs, quality guard, and side refresh are consistent.")
+    print("PASS: expend-toolbar identity, layout, docs, quality guard, side refresh, tabs, columns, and cleanup are consistent.")
     return 0
 
 

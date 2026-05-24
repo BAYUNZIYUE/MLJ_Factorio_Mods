@@ -5,7 +5,6 @@ import("player.inventory.Inventory")
 ---@class NonPersonalLogisticNetworksInventory : Inventory
 ---@field private __icon Icon
 ---@field private _player Player
----@field private _craftingCategories table<string, boolean>
 NonPersonalLogisticNetworksInventory = Inventory:extendAs("player.inventory.personal.character.NonPersonalLogisticNetworksInventory")
 NonPersonalLogisticNetworksInventory.__icon = Icon.new("item", "construction-robot")
 
