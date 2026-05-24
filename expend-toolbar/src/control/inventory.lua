@@ -1,5 +1,4 @@
-import("factorio.events.inventory.PlayerMainInventoryChanged")
-import("factorio.events.inventory.PlayerTrashInventoryChanged")
+import("factorio.events.events")
 import("player.Player")
 
 ---@param event EventData

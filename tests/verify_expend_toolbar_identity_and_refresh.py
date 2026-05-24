@@ -52,7 +52,15 @@ def main() -> int:
         SRC / "data/fonts.lua",
         SRC / "control/remote.lua",
         SRC / "factorio/events/controls/Craft.lua",
+        SRC / "factorio/events/controls/Pick.lua",
+        SRC / "factorio/events/general/Tick.lua",
+        SRC / "factorio/events/gui/Click.lua",
+        SRC / "factorio/events/settings/PlayerSettingChanged.lua",
+        SRC / "gui/toolbar/header/Lock.lua",
+        SRC / "gui/toolbar/header/ToolbarHeaderButton.lua",
         SRC / "gui/toolbar/header/OneSectionMode.lua",
+        SRC / "gui/toolbar/content/sections/section/header/DeleteSection.lua",
+        SRC / "gui/toolbar/content/sections/section/header/SectionHeaderButton.lua",
         SRC / "_graphics/icons/padlock-closed-black.png",
         SRC / "_graphics/icons/padlock-open-black.png",
     ]
@@ -81,12 +89,15 @@ def main() -> int:
     assert_contains(SRC / "player/inventory/ViewInventory.lua", "return sideChanged")
     assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/slots/item/QualitySprite.lua", "if quality and quality.draw_sprite_by_default then")
     assert_contains(SRC / "settings/settings.lua", "default_value = 10")
-    assert_contains(SRC / "gui/toolbar/content/sections/Sections.lua", "function Sections:activate(activeSection)")
-    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Table.lua", "function Table:expandRowsWhenLastSlotIsOccupied()")
-    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Table.lua", "function Table:trimUnusedTrailingRows()")
-    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Row.lua", "function Row:lastSlotIsOccupied()")
+    assert_contains(SRC / "factorio/events/events.lua", "Tick = Event:extendAs")
+    assert_contains(SRC / "gui/toolbar/header/ToolbarHeaderButtons.lua", "Lock = ToolbarHeaderButton:extendAs")
+    assert_contains(SRC / "gui/toolbar/content/sections/section/header/SectionHeaderControls.lua", "DeleteSection = SectionHeaderButton:extendAs")
+    assert_contains(SRC / "gui/toolbar/content/sections/Sections.lua", "function Sections:select(activeSection)")
+    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Table.lua", "function Table:addRowWhenTailFilled()")
+    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Table.lua", "function Table:removeIdleTailRows()")
+    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Row.lua", "function Row:tailHasThing()")
 
-    print("PASS: expend-toolbar identity, layout, docs, quality guard, side refresh, tabs, columns, and cleanup are consistent.")
+    print("PASS: expend-toolbar identity, layout, docs, quality guard, side refresh, tabs, columns, cleanup, and merged modules are consistent.")
     return 0
 
 

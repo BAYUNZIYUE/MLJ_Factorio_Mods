@@ -1,6 +1,5 @@
 import("model.SpidertronRemote")
-import("factorio.events.controls.Pick")
-import("factorio.events.entities.SpidertronDeleted")
+import("factorio.events.events")
 import("gui.toolbar.content.sections.section.content.table.Slot")
 import("gui.toolbar.content.sections.section.content.table.slots.spidertron_remote.SpidertronRemoteButton")
 import("gui.toolbar.content.sections.section.content.table.slots.spidertron_remote.SpidertronRemoteCountOverlay")

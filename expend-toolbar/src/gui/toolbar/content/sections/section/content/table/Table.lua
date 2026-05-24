@@ -53,8 +53,8 @@ end
 
 ---@private
 function Table:adjustUnlockedRows()
-    self:expandRowsWhenLastSlotIsOccupied()
-    self:trimUnusedTrailingRows()
+    self:addRowWhenTailFilled()
+    self:removeIdleTailRows()
 end
 
 ---@private
@@ -101,7 +101,7 @@ end
 ---@private
 ---@return number
 function Table:columnsCount()
-    return math.max(self._toolbar:columns(), self:lastOccupiedColumnIndex())
+    return math.max(self._toolbar:pageColumns(), self:lastOccupiedColumnIndex())
 end
 
 ---@private
@@ -121,17 +121,19 @@ function Table:trimColumnsToMinimum(minimum)
 end
 
 ---@private
-function Table:expandRowsWhenLastSlotIsOccupied()
-    while self:rows()[self:rowsCount()]:lastSlotIsOccupied() do
+function Table:addRowWhenTailFilled()
+    -- 最后一格被占用才扩一行，避免像旧实现那样横向无限长。
+    while self:rows()[self:rowsCount()]:tailHasThing() do
         local row = Row.create(self)
         row:ensureColumnsMinimum(self:columnsCount())
     end
 end
 
 ---@private
-function Table:trimUnusedTrailingRows()
+function Table:removeIdleTailRows()
+    -- 只有倒数第二行的末格也空着时才收尾行，保证玩家始终有一行可继续放新物品。
     while self:rowsCount() > 1 and not self:rows()[self:rowsCount()]:isOccupied()
-            and not self:rows()[self:rowsCount() - 1]:lastSlotIsOccupied() do
+            and not self:rows()[self:rowsCount() - 1]:tailHasThing() do
         self:rows()[self:rowsCount()]:delete()
     end
 end

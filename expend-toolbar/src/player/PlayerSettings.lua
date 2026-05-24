@@ -1,4 +1,4 @@
-import("factorio.events.settings.PlayerSettingChanged")
+import("factorio.events.events")
 import("player.events.settings.ShowVehicleInventoriesContentSettingChanged")
 import("player.events.settings.ShowLogisticNetworksContentSettingChanged")
 
@@ -74,7 +74,7 @@ end
 
 ---@public
 ---@return number
-function PlayerSettings:columns()
+function PlayerSettings:toolbarColumns()
     return self._columns
 end
 

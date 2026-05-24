@@ -1,11 +1,5 @@
 import("player.Player")
-import("factorio.events.controls.Clear")
-import("factorio.events.controls.DecreaseQuality")
-import("factorio.events.controls.IncreaseQuality")
-import("factorio.events.controls.OpenFactoriopedia")
-import("factorio.events.controls.Pick")
-import("factorio.events.controls.SearchFactory")
-import("factorio.events.controls.ToggleToolbarHeader")
+import("factorio.events.events")
 
 ---@param event EventData
 script.on_event(Toolbars.controls.createToolbar, function(event)

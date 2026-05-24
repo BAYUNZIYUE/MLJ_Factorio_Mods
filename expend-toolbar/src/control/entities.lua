@@ -1,4 +1,4 @@
-import("factorio.events.entities.SpidertronDeleted")
+import("factorio.events.events")
 import("player.Player")
 
 local SpidertronDeletionHandler = {}

@@ -1,4 +1,4 @@
-import("factorio.events.gui.ElementChanged")
+import("factorio.events.events")
 import("model.Item")
 import("gui.toolbar.content.sections.section.content.table.Slot")
 import("gui.toolbar.content.sections.section.content.table.slots.empty.EmptyButton")

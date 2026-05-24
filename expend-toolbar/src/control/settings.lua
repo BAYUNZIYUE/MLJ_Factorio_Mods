@@ -1,4 +1,4 @@
-import("factorio.events.settings.PlayerSettingChanged")
+import("factorio.events.events")
 
 ---@param event EventData
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)

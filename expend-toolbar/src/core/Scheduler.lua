@@ -1,4 +1,4 @@
-import("factorio.events.general.Tick")
+import("factorio.events.events")
 
 ---@class Scheduler : Object
 ---@field private _eventBus EventBus

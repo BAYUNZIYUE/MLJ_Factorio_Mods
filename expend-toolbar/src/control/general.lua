@@ -1,6 +1,4 @@
-import("factorio.events.general.ControllerChanged")
-import("factorio.events.general.SurfaceChanged")
-import("factorio.events.general.Tick")
+import("factorio.events.events")
 import("player.Player")
 
 ---@param event EventData

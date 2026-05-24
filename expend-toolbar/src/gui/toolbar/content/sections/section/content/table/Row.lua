@@ -54,7 +54,7 @@ end
 
 ---@public
 ---@return boolean
-function Row:lastSlotIsOccupied()
+function Row:tailHasThing()
     local lastSlot = self:children()[self:columnsCount()]
     return lastSlot and not lastSlot:isInstanceOf(EmptySlot) or false
 end

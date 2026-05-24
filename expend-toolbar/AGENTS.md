@@ -28,6 +28,7 @@ This mod is a Lua-first Factorio 2.0 mod that lets players create movable custom
 - Toolbar slot counts are based on `ViewInventory` main inventories. Personal-view logistic networks are side inventories for tooltip/detail refresh, not part of the slot count overlay.
 - Toolbar sections are tab-style pages. Keep the existing `Toolbar -> Sections -> Section` save shape, but only the active section content should be visible.
 - Toolbar pages use the per-user `Toolbars.settings.columns` value as their configured width. Preserve occupied slots beyond the configured width instead of deleting them; shrink back only after those right-side slots are empty.
+- Keep low-logic event classes and header button classes in aggregate modules such as `factorio/events/events.lua`, `ToolbarHeaderButtons.lua`, and `SectionHeaderControls.lua`. Do not restore one-file-per-button or one-file-per-event layout unless the class grows real standalone logic.
 - Inventory refresh methods should return `true` only when their visible content actually changed. Do not publish `InventoryChanged` merely because a polling interval elapsed.
 - Guard quality reads from `prototypes.quality[...]` because old saves, removed quality mods, or stale GUI tags can contain quality names that no longer exist.
 - Keep player-facing behavior documented in this directory's `README.md` when controls, settings, visible counts, remote view, or tooltip behavior changes.

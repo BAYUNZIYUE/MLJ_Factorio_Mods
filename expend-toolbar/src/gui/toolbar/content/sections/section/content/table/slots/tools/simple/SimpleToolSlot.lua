@@ -1,6 +1,6 @@
 import("gui.toolbar.content.sections.section.content.table.Slot")
 import("gui.toolbar.content.sections.section.content.table.slots.tools.simple.SimpleToolButton")
-import("factorio.events.controls.Pick")
+import("factorio.events.events")
 
 ---@private
 ---@class SimpleToolSlot : Slot

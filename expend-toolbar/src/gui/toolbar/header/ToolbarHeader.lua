@@ -1,15 +1,6 @@
 import("gui.HorizontalContainer")
 import("gui.toolbar.Toolbar")
-import("gui.toolbar.header.AlignBottom")
-import("gui.toolbar.header.AlignTop")
-import("gui.toolbar.header.CancelDeleteToolbar")
-import("gui.toolbar.header.CollapseToolbar")
-import("gui.toolbar.header.ConfirmDeleteToolbar")
-import("gui.toolbar.header.DeleteToolbar")
-import("gui.toolbar.header.ExpandToolbar")
-import("gui.toolbar.header.Lock")
-import("gui.toolbar.header.ToolbarDrag")
-import("gui.toolbar.header.Unlock")
+import("gui.toolbar.header.ToolbarHeaderButtons")
 
 ---@class ToolbarHeader : HorizontalContainer
 ToolbarHeader = HorizontalContainer:extendAs("gui.toolbar.header.Header")

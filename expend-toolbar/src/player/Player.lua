@@ -1,7 +1,6 @@
 import("core.EventBus")
 import("core.Scheduler")
-import("factorio.events.general.ControllerChanged")
-import("factorio.events.general.SurfaceChanged")
+import("factorio.events.events")
 import("gui.Gui")
 import("player.Cursor")
 import("player.Display")

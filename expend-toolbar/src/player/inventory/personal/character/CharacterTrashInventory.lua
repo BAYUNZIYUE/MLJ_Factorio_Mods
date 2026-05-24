@@ -1,5 +1,5 @@
 import("factorio.Icon")
-import("factorio.events.inventory.PlayerTrashInventoryChanged")
+import("factorio.events.events")
 import("player.inventory.Content")
 import("player.inventory.Inventory")
 

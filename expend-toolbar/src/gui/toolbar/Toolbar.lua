@@ -1,4 +1,4 @@
-import("factorio.events.controls.ToggleToolbarHeader")
+import("factorio.events.events")
 import("gui.Box")
 import("gui.Window")
 import("gui.toolbar.Strut")
@@ -7,7 +7,6 @@ import("gui.toolbar.content.ToolbarContent")
 import("gui.toolbar.content.sections.Sections")
 import("gui.toolbar.content.sections.section.Section")
 import("gui.toolbar.content.sections.section.content.table.Table")
-import("factorio.events.settings.PlayerSettingChanged")
 import("player.events.ToolbarsToggled")
 
 ---@class Toolbar : Window
@@ -40,7 +39,7 @@ function Toolbar:initilize()
         self:tableChanged()
     end)
 
-    self:ensureActiveSection()
+    self:selectFallbackPage()
     self:freezeWidth()
 end
 
@@ -86,7 +85,7 @@ function Toolbar:addSection()
     else
         section = self:content():sections():addSectionOntoStart()
     end
-    self:activateSection(section)
+    self:selectPage(section)
     self:adjustGrids()
 end
 
@@ -114,22 +113,22 @@ end
 
 ---@public
 ---@param section Section
-function Toolbar:activateSection(section)
-    self:content():sections():activate(section)
+function Toolbar:selectPage(section)
+    self:content():sections():select(section)
     self:adjustGrids()
     self:freezeWidth()
     self:keepWithinTheScreen()
 end
 
 ---@public
-function Toolbar:ensureActiveSection()
-    self:content():sections():ensureActiveSection()
+function Toolbar:selectFallbackPage()
+    self:content():sections():selectFallback()
 end
 
 ---@public
 ---@return number
-function Toolbar:columns()
-    return self:player():settings():columns()
+function Toolbar:pageColumns()
+    return self:player():settings():toolbarColumns()
 end
 
 function Toolbar:lock()
@@ -144,16 +143,15 @@ end
 
 ---@private
 function Toolbar:freezeWidth()
-    --migration to 2.13.0
+    -- 旧存档可能没有 Strut；这里顺手补齐，避免锁定宽度时 nil 访问。
     if not self:strut() then
         Strut.create(self)
     end
 
     self:strut():setWidth(self:content():width())
 
-    --migration to 2.13.0
+    -- 旧版本曾直接写 minimal_width，当前统一交给 Strut 控制宽度。
     self:element().style.minimal_width = 0
-    --migration to 2.8.1
     if self:header() then
         self:header():element().style.minimal_width = 0
     end

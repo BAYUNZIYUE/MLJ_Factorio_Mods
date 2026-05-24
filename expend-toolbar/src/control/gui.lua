@@ -1,8 +1,4 @@
-import("factorio.events.gui.Click")
-import("factorio.events.gui.ElementChanged")
-import("factorio.events.gui.ElementLocationChanged")
-import("factorio.events.gui.Hovered")
-import("factorio.events.gui.Left")
+import("factorio.events.events")
 
 ---@param event EventData
 script.on_event(defines.events.on_player_created, function(event)

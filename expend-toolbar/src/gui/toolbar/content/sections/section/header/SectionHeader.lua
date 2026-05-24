@@ -2,14 +2,7 @@ import("gui.HorizontalContainer")
 import("gui.Box")
 import("gui.toolbar.Toolbar")
 import("gui.toolbar.content.sections.section.Section")
-import("gui.toolbar.content.sections.section.header.MoveDown")
-import("gui.toolbar.content.sections.section.header.MoveUp")
-import("gui.toolbar.content.sections.section.header.DeleteSection")
-import("gui.toolbar.content.sections.section.header.CancelDeleteSection")
-import("gui.toolbar.content.sections.section.header.ConfirmDeleteSection")
-import("gui.toolbar.content.sections.section.header.SectionNameUnlocked")
-import("gui.toolbar.content.sections.section.header.SectionNameLocked")
-import("gui.toolbar.content.sections.section.header.ToRemoveSectionName")
+import("gui.toolbar.content.sections.section.header.SectionHeaderControls")
 
 ---@class SectionHeader : HorizontalContainer
 ---@field private _toolbar Toolbar

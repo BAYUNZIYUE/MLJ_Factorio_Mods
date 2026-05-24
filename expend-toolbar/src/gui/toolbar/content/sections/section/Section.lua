@@ -56,7 +56,7 @@ end
 
 ---@public
 function Section:expand()
-    self:ancestor(Toolbar):activateSection(self)
+    self:ancestor(Toolbar):selectPage(self)
 end
 
 ---@public
@@ -77,6 +77,7 @@ end
 
 ---@private
 function Section:migrateToTabMode()
+    -- 旧 GUI 里会保存折叠/展开按钮；tab 页模式不再需要这些按钮，加载时直接清掉。
     for _, child in ipairs(self:header():element().children) do
         if child.tags and (child.tags.className == "gui.toolbar.content.sections.section.header.Collapse"
                 or child.tags.className == "gui.toolbar.content.sections.section.header.Expand") then

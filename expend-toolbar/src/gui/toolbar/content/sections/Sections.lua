@@ -82,7 +82,7 @@ end
 
 ---@public
 ---@param activeSection Section
-function Sections:activate(activeSection)
+function Sections:select(activeSection)
     for _, section in ipairs(self:sections()) do
         if section == activeSection then
             section:activate()
@@ -94,11 +94,11 @@ function Sections:activate(activeSection)
 end
 
 ---@public
-function Sections:ensureActiveSection()
+function Sections:selectFallback()
     local activeSection = self:activeSection()
     if activeSection then
-        self:activate(activeSection)
+        self:select(activeSection)
     elseif self:sections()[1] then
-        self:activate(self:sections()[1])
+        self:select(self:sections()[1])
     end
 end
