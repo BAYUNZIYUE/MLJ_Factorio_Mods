@@ -19,14 +19,9 @@ M.input = {
 
 M.setting = {
   wide = "columns",
-  hint_wait = "tooltip-delay",
-  hint_step = "tooltip-refresh-interval",
   hint_keys = "show-controls-in-the-tooltip",
-  body_step = "character-inventories-content-refresh-interval",
   vehicle_on = "show-vehicle-inventories-content",
-  vehicle_step = "vehicle-inventories-content-refresh-interval",
   network_on = "show-logistic-networks-content",
-  network_step = "logistic-networks-content-refresh-interval",
 }
 
 M.sprite = {

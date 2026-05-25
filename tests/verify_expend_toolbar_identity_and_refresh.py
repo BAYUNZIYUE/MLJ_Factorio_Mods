@@ -43,6 +43,10 @@ def main() -> int:
     info = json.loads(read(SRC / "info.json"))
     if info["name"] != "expend-toolbar":
         raise AssertionError("expend-toolbar/src/info.json name must stay expend-toolbar")
+    if "Create movable custom item bars" not in info["description"]:
+        raise AssertionError("expend-toolbar/src/info.json description must include a concise English summary")
+    if "创建可移动的自定义物品栏" not in info["description"]:
+        raise AssertionError("expend-toolbar/src/info.json description must include a concise Chinese summary")
 
     if not (MOD_ROOT / "README.md").is_file() or not (MOD_ROOT / "AGENTS.md").is_file():
         raise AssertionError("expend-toolbar must keep root README.md and AGENTS.md")
@@ -53,6 +57,7 @@ def main() -> int:
     removed_files = [
         SRC / "locale/en/AzeretMono-Regular.ttf",
         SRC / "locale/en/OFL.txt",
+        SRC / "locale/en/info.json",
         SRC / "data/fonts.lua",
         SRC / "control/remote.lua",
         SRC / "factorio/events/controls/Craft.lua",
@@ -110,10 +115,25 @@ def main() -> int:
             assert_not_contains(path, "addRowWhenTailFilled")
             assert_not_contains(path, "removeIdleTailRows")
             assert_not_contains(path, "tailHasThing")
+            assert_not_contains(path, "tooltip-delay")
+            assert_not_contains(path, "tooltip-refresh-interval")
+            assert_not_contains(path, "character-inventories-content-refresh-interval")
+            assert_not_contains(path, "vehicle-inventories-content-refresh-interval")
+            assert_not_contains(path, "logistic-networks-content-refresh-interval")
 
     assert_contains(SRC / "names.lua", 'M.mod = "expend-toolbar"')
     assert_contains(SRC / "names.lua", 'wide = "columns"')
     assert_contains(SRC / "settings.lua", "default_value = 10")
+    setting_text = read(SRC / "settings.lua")
+    if setting_text.count('setting_type = "runtime-per-user"') != 4:
+        raise AssertionError("expend-toolbar should keep exactly four runtime-per-user settings")
+    assert_contains(SRC / "locale/en/locale.cfg", "[mod-name]")
+    assert_contains(SRC / "locale/en/locale.cfg", "expend-toolbar=Expend Toolbar")
+    assert_contains(SRC / "locale/en/locale.cfg", "[mod-description]")
+    assert_contains(SRC / "locale/zh-CN/locale.cfg", "expend-toolbar=扩展工具栏")
+    assert_contains(SRC / "locale/zh-CN/locale.cfg", "创建可移动的自定义物品栏")
+    assert_not_contains(SRC / "changelog.txt", "Version: 2.")
+    assert_not_contains(SRC / "changelog.txt", "Toolbars")
     assert_contains(SRC / "stock.lua", "附近物流网络只作为提示列，不参与槽位主数字")
     assert_contains(SRC / "stock.lua", "远程星球视图没有玩家背包语义")
     assert_contains(SRC / "panel.lua", "最后一格被占用时立刻追加一行")
