@@ -14,7 +14,11 @@ ALLOWED_SRC_ROOT_FILES = {
     "data-final-fixes.lua",
     "data.lua",
     "info.json",
+    "names.lua",
+    "panel.lua",
+    "runtime.lua",
     "settings.lua",
+    "stock.lua",
     "thumbnail.png",
 }
 
@@ -72,7 +76,22 @@ def main() -> int:
     unexpected_root_files = root_files - ALLOWED_SRC_ROOT_FILES
     if unexpected_root_files:
         formatted = ", ".join(sorted(unexpected_root_files))
-        raise AssertionError(f"expend-toolbar/src root has custom files that should be packaged: {formatted}")
+        raise AssertionError(f"expend-toolbar/src root has unexpected files: {formatted}")
+
+    removed_dirs = [
+        SRC / "control",
+        SRC / "core",
+        SRC / "data",
+        SRC / "factorio",
+        SRC / "gui",
+        SRC / "lang",
+        SRC / "model",
+        SRC / "player",
+        SRC / "settings",
+    ]
+    for path in removed_dirs:
+        if path.exists():
+            raise AssertionError(f"{path.relative_to(ROOT)} should stay removed after the runtime rewrite")
 
     for path in SRC.rglob("*"):
         if path.is_file() and path.suffix in {".lua", ".json", ".cfg"}:
@@ -80,24 +99,28 @@ def main() -> int:
             assert_not_contains(path, "__toolbars-mod__")
             assert_not_contains(path, 'require("src.')
             assert_not_contains(path, "require('src.")
+            assert_not_contains(path, "Toolbars")
+            assert_not_contains(path, "EventBus")
+            assert_not_contains(path, "extendAs")
+            assert_not_contains(path, "import(")
+            assert_not_contains(path, "ToolbarHeader")
+            assert_not_contains(path, "SectionHeader")
+            assert_not_contains(path, "QualitySprite")
+            assert_not_contains(path, "ViewInventory")
+            assert_not_contains(path, "addRowWhenTailFilled")
+            assert_not_contains(path, "removeIdleTailRows")
+            assert_not_contains(path, "tailHasThing")
 
-    assert_contains(SRC / "core/Toolbars.lua", 'Toolbars.name = "expend-toolbar"')
-    assert_contains(SRC / "core/Toolbars.lua", 'columns = "columns"')
-    assert_not_contains(SRC / "core/Toolbars.lua", "Toolbars.fonts")
-    assert_not_contains(SRC / "core/Toolbars.lua", "craftOne")
-    assert_contains(SRC / "lang/import.lua", "require(module)")
-    assert_contains(SRC / "player/inventory/ViewInventory.lua", "return sideChanged")
-    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/slots/item/QualitySprite.lua", "if quality and quality.draw_sprite_by_default then")
-    assert_contains(SRC / "settings/settings.lua", "default_value = 10")
-    assert_contains(SRC / "factorio/events/events.lua", "Tick = Event:extendAs")
-    assert_contains(SRC / "gui/toolbar/header/ToolbarHeaderButtons.lua", "Lock = ToolbarHeaderButton:extendAs")
-    assert_contains(SRC / "gui/toolbar/content/sections/section/header/SectionHeaderControls.lua", "DeleteSection = SectionHeaderButton:extendAs")
-    assert_contains(SRC / "gui/toolbar/content/sections/Sections.lua", "function Sections:select(activeSection)")
-    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Table.lua", "function Table:addRowWhenTailFilled()")
-    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Table.lua", "function Table:removeIdleTailRows()")
-    assert_contains(SRC / "gui/toolbar/content/sections/section/content/table/Row.lua", "function Row:tailHasThing()")
+    assert_contains(SRC / "names.lua", 'M.mod = "expend-toolbar"')
+    assert_contains(SRC / "names.lua", 'wide = "columns"')
+    assert_contains(SRC / "settings.lua", "default_value = 10")
+    assert_contains(SRC / "stock.lua", "附近物流网络只作为提示列，不参与槽位主数字")
+    assert_contains(SRC / "stock.lua", "远程星球视图没有玩家背包语义")
+    assert_contains(SRC / "panel.lua", "最后一格被占用时立刻追加一行")
+    assert_contains(SRC / "panel.lua", "倒数第二行末格也空")
+    assert_contains(SRC / "runtime.lua", "script.on_nth_tick(30, repaint_connected)")
 
-    print("PASS: expend-toolbar identity, layout, docs, quality guard, side refresh, tabs, columns, cleanup, and merged modules are consistent.")
+    print("PASS: expend-toolbar was rewritten into a compact non-compatible runtime layout.")
     return 0
 
 

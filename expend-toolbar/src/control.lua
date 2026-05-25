@@ -1,2 +1,1 @@
-require("core.Toolbars")
-require("control._package")
+require("runtime").attach()

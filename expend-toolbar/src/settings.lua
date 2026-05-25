@@ -1,3 +1,79 @@
-require("lang.Object")
-require("core.Toolbars")
-require("settings._package")
+local names = require("names")
+
+data:extend({
+  {
+    order = "a1",
+    name = names.setting.wide,
+    localised_name = "Toolbar columns",
+    localised_description = "Horizontal slot count for every toolbar page. Rows still expand and shrink automatically.",
+    setting_type = "runtime-per-user",
+    type = "int-setting",
+    default_value = 10,
+    minimum_value = 1,
+    maximum_value = 100,
+  },
+  {
+    order = "a2",
+    name = names.setting.hint_wait,
+    localised_name = "Tooltip delay [ms]",
+    setting_type = "runtime-per-user",
+    type = "int-setting",
+    default_value = 600,
+  },
+  {
+    order = "a3",
+    name = names.setting.hint_step,
+    localised_name = "Tooltip refresh interval [tick=16.6ms]",
+    setting_type = "runtime-per-user",
+    type = "int-setting",
+    default_value = 5,
+  },
+  {
+    order = "a4",
+    name = names.setting.hint_keys,
+    localised_name = "Show controls in the tooltip",
+    setting_type = "runtime-per-user",
+    type = "bool-setting",
+    default_value = true,
+  },
+  {
+    order = "b1",
+    name = names.setting.body_step,
+    localised_name = "Character inventories content refresh interval [tick=16.6ms]",
+    setting_type = "runtime-per-user",
+    type = "int-setting",
+    default_value = 1,
+  },
+  {
+    order = "c1",
+    name = names.setting.vehicle_on,
+    localised_name = "Show vehicle inventories content",
+    setting_type = "runtime-per-user",
+    type = "bool-setting",
+    default_value = true,
+  },
+  {
+    order = "c2",
+    name = names.setting.vehicle_step,
+    localised_name = "Vehicle inventories content refresh interval [tick=16.6ms]",
+    setting_type = "runtime-per-user",
+    type = "int-setting",
+    default_value = 5,
+  },
+  {
+    order = "d1",
+    name = names.setting.network_on,
+    localised_name = "Show logistic networks content",
+    setting_type = "runtime-per-user",
+    type = "bool-setting",
+    default_value = true,
+  },
+  {
+    order = "d2",
+    name = names.setting.network_step,
+    localised_name = "Logistic networks content refresh interval [tick=16.6ms]",
+    setting_type = "runtime-per-user",
+    type = "int-setting",
+    default_value = 5,
+  },
+})

@@ -1,4 +1,4 @@
-for _, quality in pairs(data.raw["quality"]) do
+for _, quality in pairs(data.raw["quality"] or {}) do
     if quality.icon then
         data:extend {
             {
@@ -34,7 +34,7 @@ for _, quality in pairs(data.raw["quality"]) do
     end
 end
 
-for _, planet in pairs(data.raw["planet"]) do
+for _, planet in pairs(data.raw["planet"] or {}) do
     if planet.icon then
         data:extend {
             {

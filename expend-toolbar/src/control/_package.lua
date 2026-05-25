@@ -1,7 +1,0 @@
-require("control.controls")
-require("control.entities")
-require("control.general")
-require("control.gui")
-require("control.inventory")
-require("control.settings")
-require("control.shortcuts")
