@@ -26,6 +26,16 @@ local function mark(player)
   storage.expend_toolbar.dirty[player.index] = true
 end
 
+local function refresh_now(player)
+  if not player then
+    return
+  end
+  if not panel.has_visible_bars(player) then
+    return
+  end
+  panel.refresh(player)
+end
+
 local function mark_polling_players()
   panel.ensure_storage()
   storage.expend_toolbar.dirty = storage.expend_toolbar.dirty or {}
@@ -133,7 +143,7 @@ function M.attach()
     defines.events.on_player_controller_changed,
     defines.events.on_player_changed_surface,
   }, function(event)
-    mark(player_of(event))
+    refresh_now(player_of(event))
   end)
 
   script.on_nth_tick(30, function()
