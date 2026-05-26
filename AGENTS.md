@@ -27,7 +27,7 @@ mlj_factorio_mods/
 |------|----------|-------|
 | Pack or validate all mods | `pack_mods.py` | Source of truth for discovery, ignored dirs, entrypoint names, zip naming, and opening `ModZips/` |
 | Runtime inventory logic | `DynamicInventory/` | Runtime/settings mod; no `data.lua` |
-| Custom toolbar logic | `expend-toolbar/` | Runtime/data/settings mod; package root keeps only Factorio entry/metadata/resource files, with custom runtime modules grouped under `src/core/`, `src/model/`, `src/gui/`, `src/player/`, and `src/factorio/` |
+| Custom toolbar logic | `expend-toolbar/` | Runtime/data/settings mod; compact runtime modules live directly under `src/` as `names.lua`, `stock.lua`, `panel.lua`, and `runtime.lua` |
 | Starter item logic | `py_quick_start/` | Runtime/settings mod; no `data.lua` |
 | Blueprint quality cycling | `quality-cycler/` | Runtime/settings mod; blueprint, blueprint book, and upgrade planner quality controls |
 | Section Autocraft logic | `section-autocraft/` | Lua source directly under `src/` |

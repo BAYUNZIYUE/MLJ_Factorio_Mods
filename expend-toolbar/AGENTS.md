@@ -40,4 +40,4 @@ This mod is a Lua-first Factorio 2.0 mod that lets players create movable custom
 
 - Run the root packaging guard after structure or documentation changes: `python3 tests/verify_pack_mods_ignores_non_runtime_files.py`.
 - Run `python3 pack_mods.py` after source or package-identity changes and confirm `ModZips/expend-toolbar_1.0.0.zip` is produced.
-- For refresh bugs, inspect `stock.lua`, `panel.lua`, and the `script.on_nth_tick(30, repaint_connected)` path before changing polling intervals.
+- For refresh bugs, inspect `stock.lua`, `panel.lua`, and the `runtime.lua` dirty repaint path before changing polling intervals.

@@ -44,6 +44,10 @@ local function read_tags(element)
   return element and element.valid and element.tags or {}
 end
 
+local function slot_name(bar_id, position)
+  return names.gui.pick .. "_" .. tostring(bar_id) .. "_" .. tostring(position)
+end
+
 local function nth_bar(state, id)
   for index, bar in ipairs(state.bars) do
     if bar.id == id then
@@ -110,9 +114,29 @@ local function cell_text(main, name, grade)
   return tostring(count)
 end
 
-local function hint_text(player, main, side, slot)
+local function wanted_items(state)
+  local wanted = {}
+  for _, bar in ipairs(state.bars) do
+    if not bar.folded then
+      clamp_page(bar)
+      local page = bar.pages[bar.active]
+      for _, slot in pairs(page.slots) do
+        if slot and slot.name and stock.item_known(slot.name) then
+          wanted[slot.name] = true
+        end
+      end
+    end
+  end
+  return next(wanted) and wanted or nil
+end
+
+local function hint_text(player, main, side, slot, cache)
   if not slot or not slot.name then
     return nil
+  end
+  local key = slot.name .. "\t" .. (slot.grade or "normal")
+  if cache and cache[key] then
+    return cache[key]
   end
 
   local lines = { { "?", { "item-name." .. slot.name }, " [", slot.grade or "normal", "]" } }
@@ -130,6 +154,9 @@ local function hint_text(player, main, side, slot)
     lines[#lines + 1] = "\n"
     lines[#lines + 1] = { "?", { "controls.cycle-quality-up" }, " / ", { "controls.cycle-quality-down" } }
   end
+  if cache then
+    cache[key] = lines
+  end
   return lines
 end
 
@@ -143,7 +170,7 @@ local function item_sprite(name)
   return names.sprite.blank
 end
 
-local function draw_slot(parent, player, bar, page, position, main, side)
+local function draw_slot(parent, player, bar, page, position, main, side, hint_cache)
   local slot = page.slots[position]
   if slot and slot.name and not stock.item_known(slot.name) then
     page.slots[position] = nil
@@ -153,16 +180,19 @@ local function draw_slot(parent, player, bar, page, position, main, side)
   if slot and slot.name then
     parent.add {
       type = "sprite-button",
+      name = slot_name(bar.id, position),
       sprite = item_sprite(slot.name),
       number = tonumber(cell_text(main, slot.name, slot.grade)) or nil,
-      tooltip = hint_text(player, main, side, slot),
+      tooltip = hint_text(player, main, side, slot, hint_cache),
       style = "expend_toolbar_slot",
       tags = { mod = names.mod, act = names.action.take_item, bar = bar.id, pos = position },
       mouse_button_filter = { "left", "right", "middle" },
+      raise_hover_events = true,
     }
   else
     parent.add {
       type = "choose-elem-button",
+      name = slot_name(bar.id, position),
       elem_type = "item-with-quality",
       style = "expend_toolbar_slot",
       tags = { mod = names.mod, act = names.action.choose_item, bar = bar.id, pos = position },
@@ -170,21 +200,20 @@ local function draw_slot(parent, player, bar, page, position, main, side)
   end
 end
 
-local function draw_cells(container, player, bar, page, main, side)
+local function draw_cells(container, player, bar, page, main, side, hint_cache)
   local wide, rows = trim_page(player, page)
   for y = 1, rows do
     local line = container.add { type = "flow", direction = "horizontal" }
     line.style.horizontal_spacing = 0
     for x = 1, wide do
-      draw_slot(line, player, bar, page, (y - 1) * wide + x, main, side)
+      draw_slot(line, player, bar, page, (y - 1) * wide + x, main, side, hint_cache)
     end
   end
 end
 
-local function redraw_bar(player, order, bar)
+local function redraw_bar(player, order, bar, main, side, hint_cache)
   clamp_page(bar)
   local page = bar.pages[bar.active]
-  local main, side = stock.snapshot(player)
 
   local frame = player.gui.screen.add {
     type = "frame",
@@ -254,7 +283,7 @@ local function redraw_bar(player, order, bar)
     }
 
     local cells = frame.add { type = "frame", direction = "vertical", style = "expend_toolbar_cells" }
-    draw_cells(cells, player, bar, page, main, side)
+    draw_cells(cells, player, bar, page, main, side, hint_cache)
   end
 end
 
@@ -280,17 +309,83 @@ function M.paint(player)
   end
 
   local state = board(player.index)
-  if state.shown == false then
+  if state.shown == false or #state.bars == 0 then
     return
   end
 
+  local wanted = wanted_items(state)
+  local main, side = {}, {}
+  if wanted then
+    main, side = stock.snapshot(player, wanted)
+  end
+  local hint_cache = {}
   for order, bar in ipairs(state.bars) do
-    redraw_bar(player, order, bar)
+    redraw_bar(player, order, bar, main, side, hint_cache)
   end
 end
 
 function M.paint_all()
   for _, player in pairs(game.connected_players) do
+    M.paint(player)
+  end
+end
+
+function M.has_visible_bars(player)
+  M.ensure_storage()
+  local state = storage.expend_toolbar.players[player.index]
+  return state and state.shown ~= false and #state.bars > 0
+end
+
+function M.needs_polling(player)
+  M.ensure_storage()
+  local state = storage.expend_toolbar.players[player.index]
+  if not state or state.shown == false or not wanted_items(state) then
+    return false
+  end
+  if player.controller_type == defines.controllers.remote then
+    return true
+  end
+  local values = settings.get_player_settings(player)
+  return values[names.setting.network_on].value and state.focus ~= nil
+end
+
+local function update_element(player, state, element, main, side, hint_cache)
+  local tag = read_tags(element)
+  if tag.mod == names.mod and tag.act == names.action.take_item then
+    local bar = nth_bar(state, tag.bar)
+    local page = bar and bar.pages[bar.active or 1] or nil
+    local slot = page and page.slots[tag.pos] or nil
+    if slot and slot.name and stock.item_known(slot.name) then
+      element.number = tonumber(cell_text(main, slot.name, slot.grade)) or nil
+      element.tooltip = hint_text(player, main, side, slot, hint_cache)
+    end
+  end
+  for _, child in pairs(element.children or {}) do
+    update_element(player, state, child, main, side, hint_cache)
+  end
+end
+
+function M.refresh(player)
+  M.ensure_storage()
+  local state = storage.expend_toolbar.players[player.index]
+  if not state or state.shown == false or #state.bars == 0 then
+    return
+  end
+  local wanted = wanted_items(state)
+  if not wanted then
+    return
+  end
+  local main, side = stock.snapshot(player, wanted)
+  local hint_cache = {}
+  local touched = false
+  for _, child in pairs(player.gui.screen.children) do
+    local tag = read_tags(child)
+    if tag.mod == names.mod then
+      touched = true
+      update_element(player, state, child, main, side, hint_cache)
+    end
+  end
+  if not touched then
     M.paint(player)
   end
 end
@@ -385,6 +480,30 @@ function M.remember_hover(event)
   end
   local state = board(player.index)
   state.focus = { bar = tag.bar, pos = tag.pos }
+  local bar = nth_bar(state, tag.bar)
+  local page = bar and bar.pages[bar.active or 1] or nil
+  local slot = page and page.slots[tag.pos] or nil
+  if slot and slot.name then
+    -- 普通视图物流网络只影响提示，悬停时即时刷新这一格即可。
+    local main, side = stock.snapshot(player, { [slot.name] = true })
+    event.element.number = tonumber(cell_text(main, slot.name, slot.grade)) or nil
+    event.element.tooltip = hint_text(player, main, side, slot, {})
+  end
+end
+
+function M.forget_hover(event)
+  local player = game.get_player(event.player_index)
+  if not player then
+    return
+  end
+  local tag = read_tags(event.element)
+  if tag.mod ~= names.mod or tag.act ~= names.action.take_item then
+    return
+  end
+  local state = board(player.index)
+  if state.focus and state.focus.bar == tag.bar and state.focus.pos == tag.pos then
+    state.focus = nil
+  end
 end
 
 function M.remember_place(event)

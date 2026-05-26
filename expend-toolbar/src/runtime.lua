@@ -3,13 +3,49 @@ local panel = require("panel")
 
 local M = {}
 
+local watched_settings = {
+  [names.setting.wide] = true,
+  [names.setting.hint_keys] = true,
+  [names.setting.vehicle_on] = true,
+  [names.setting.network_on] = true,
+}
+
 local function player_of(event)
   return event.player_index and game.get_player(event.player_index) or nil
 end
 
-local function repaint_connected()
+local function mark(player)
+  if not player then
+    return
+  end
+  if not panel.has_visible_bars(player) then
+    return
+  end
   panel.ensure_storage()
-  panel.paint_all()
+  storage.expend_toolbar.dirty = storage.expend_toolbar.dirty or {}
+  storage.expend_toolbar.dirty[player.index] = true
+end
+
+local function mark_polling_players()
+  panel.ensure_storage()
+  storage.expend_toolbar.dirty = storage.expend_toolbar.dirty or {}
+  for _, player in pairs(game.connected_players) do
+    if panel.needs_polling(player) then
+      storage.expend_toolbar.dirty[player.index] = true
+    end
+  end
+end
+
+local function repaint_dirty()
+  panel.ensure_storage()
+  local dirty = storage.expend_toolbar.dirty or {}
+  storage.expend_toolbar.dirty = {}
+  for index in pairs(dirty) do
+    local player = game.get_player(index)
+    if player and player.connected then
+      panel.refresh(player)
+    end
+  end
 end
 
 local function on_shortcut(event)
@@ -55,12 +91,14 @@ end
 
 function M.attach()
   script.on_init(function()
-    storage.expend_toolbar = { next_id = 1, players = {} }
+    storage.expend_toolbar = { next_id = 1, players = {}, dirty = {} }
   end)
 
   script.on_configuration_changed(function()
-    storage.expend_toolbar = { next_id = 1, players = {} }
-    repaint_connected()
+    storage.expend_toolbar = { next_id = 1, players = {}, dirty = {} }
+    for _, player in pairs(game.connected_players) do
+      panel.paint(player)
+    end
   end)
 
   script.on_event(defines.events.on_player_joined_game, function(event)
@@ -75,11 +113,15 @@ function M.attach()
   script.on_event(defines.events.on_gui_click, panel.handle_click)
   script.on_event(defines.events.on_gui_elem_changed, panel.handle_choice)
   script.on_event(defines.events.on_gui_hover, panel.remember_hover)
+  script.on_event(defines.events.on_gui_leave, panel.forget_hover)
   script.on_event(defines.events.on_gui_location_changed, panel.remember_place)
 
   script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)
+    if not watched_settings[event.setting] then
+      return
+    end
     local player = player_of(event)
-    if player then
+    if player and panel.has_visible_bars(player) then
       panel.paint(player)
     end
   end)
@@ -91,13 +133,13 @@ function M.attach()
     defines.events.on_player_controller_changed,
     defines.events.on_player_changed_surface,
   }, function(event)
-    local player = player_of(event)
-    if player then
-      panel.paint(player)
-    end
+    mark(player_of(event))
   end)
 
-  script.on_nth_tick(30, repaint_connected)
+  script.on_nth_tick(30, function()
+    mark_polling_players()
+    repaint_dirty()
+  end)
 
   script.on_event({
     names.input.make,
