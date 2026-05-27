@@ -67,14 +67,7 @@ local function clamp_page(bar)
 end
 
 local function wanted_width(player, page)
-  local configured = math.max(1, tonumber(setting(player, names.setting.wide)) or 10)
-  local rightmost = 0
-  for index, slot in pairs(page.slots) do
-    if slot and slot.name and index > rightmost then
-      rightmost = index
-    end
-  end
-  return math.max(configured, rightmost)
+  return math.max(1, tonumber(setting(player, names.setting.wide)) or 10)
 end
 
 local function trim_page(player, page)
@@ -238,7 +231,8 @@ local function redraw_bar(player, order, bar, main, side, hint_cache)
   if not bar.locked then
     head.drag_target = frame
     drag.drag_target = frame
-    drag.style.size = { 120, 20 }
+    drag.style.width = 160
+    drag.style.height = 20
   end
 
   head.add {
@@ -264,12 +258,13 @@ local function redraw_bar(player, order, bar, main, side, hint_cache)
     local tabs = frame.add { type = "flow", direction = "horizontal" }
     tabs.style.horizontal_spacing = 1
     for index, each in ipairs(bar.pages) do
-      tabs.add {
+      local tab = tabs.add {
         type = "button",
         caption = each.title or tostring(index),
         style = index == bar.active and "expend_toolbar_tab_on" or "expend_toolbar_tab",
         tags = { mod = names.mod, act = names.action.pick_page, bar = bar.id, page = index },
       }
+      tab.style.width = 28
     end
     tabs.add {
       type = "sprite-button",
