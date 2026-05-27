@@ -139,7 +139,7 @@ local function hint_text(player, main, side, slot, cache)
     return cache[key]
   end
 
-  local lines = { { "?", { "item-name." .. slot.name }, " [", slot.grade or "normal", "]" } }
+  local lines = { "", { "?", { "item-name." .. slot.name }, slot.name }, " [", slot.grade or "normal", "]" }
   for _, grade in ipairs(stock.grade_list(main, side, slot.name)) do
     local direct = stock.amount(main, slot.name, grade)
     local nearby = stock.amount(side, slot.name, grade)
@@ -236,7 +236,9 @@ local function redraw_bar(player, order, bar, main, side, hint_cache)
     tags = { mod = names.mod, act = names.action.move, bar = bar.id },
   }
   if not bar.locked then
+    head.drag_target = frame
     drag.drag_target = frame
+    drag.style.size = { 120, 20 }
   end
 
   head.add {

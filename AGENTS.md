@@ -135,6 +135,10 @@ copy the contents into the archive root.
   meaning when touching mixed Chinese/English text.
 - In WSL, `pack_mods.py` should open `ModZips/` with Windows Explorer through
   `/mnt/c/Windows/explorer.exe` after converting the path with `wslpath -w`.
+- Standard debug deployment rule: after a mod is successfully packaged,
+  `pack_mods.py` checks `%AppData%\Factorio\mods` for `{info.name}_*.zip`. If
+  a zip exists, skip folder deployment for that mod. If no zip exists, copy the
+  unpacked `{info.name}_{info.version}/` folder for the current package.
 
 ## ANTI-PATTERNS
 
@@ -161,13 +165,12 @@ python3 pack_mods.py
 
 - Run `python3 pack_mods.py` to package every discovered mod.
 - Confirm the target artifact name under `ModZips/`.
-- For active Factorio debugging, prefer deploying the unpacked mod folder to
-  `%AppData%\Factorio\mods`, not only the `.zip`.
+- `pack_mods.py` also performs debug folder deployment for every successfully
+  packaged mod using this rule: if `%AppData%\Factorio\mods` already contains
+  `{info.name}_*.zip`, skip copying the folder; otherwise copy the unpacked
+  `{info.name}_{info.version}/` folder for the current package.
 - The folder deployed to `%AppData%\Factorio\mods` must be the archive root,
   for example `{info.name}_{info.version}/`; do not deploy raw `src/` directly.
-- Before deploying a folder version, remove the old version of the same mod from
-  the Factorio mods directory. Do not keep old `.zip` and folder copies of the
-  same mod side by side.
 
 ## GIT PRACTICES
 

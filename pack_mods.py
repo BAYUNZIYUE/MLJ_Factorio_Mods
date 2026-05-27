@@ -16,6 +16,7 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "ModZips"
+WINDOWS_FACTORIO_MODS_DIR = Path("/mnt/c/Users/MLJ/AppData/Roaming/Factorio/mods")
 IGNORED_DIRS = {".git", ".idea", ".vscode", ".vs", "__pycache__", "bin", "obj", "tests"}
 IGNORED_SUFFIXES = {".zip", ".psd"}
 IGNORED_FILES = {".DS_Store", "Thumbs.db", "AGENTS.md", "README.md"}
@@ -54,6 +55,7 @@ def main() -> int:
             zip_path = pack_project(project)
             success_count += 1
             print(f"{progress} OK {project.package_name} -> {zip_path}")
+            deploy_debug_folder(project)
         except Exception as exc:  # noqa: BLE001
             failures += 1
             print(f"{progress} FAILED {project.root_dir}: {exc}", file=sys.stderr)
@@ -163,12 +165,7 @@ def pack_project(project: ModProject) -> Path:
     staging_root = Path(tempfile.mkdtemp(prefix="factorio_mod_pack_"))
     try:
         package_root = staging_root / project.package_name
-        package_root.mkdir(parents=True, exist_ok=True)
-
-        for source, relative in files:
-            target = package_root / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+        copy_package_files(project, package_root)
 
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for file_path in sorted(package_root.rglob("*")):
@@ -178,6 +175,30 @@ def pack_project(project: ModProject) -> Path:
         shutil.rmtree(staging_root, ignore_errors=True)
 
     return zip_path
+
+
+def copy_package_files(project: ModProject, package_root: Path) -> None:
+    package_root.mkdir(parents=True, exist_ok=True)
+    for source, relative in iter_pack_files(project):
+        target = package_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
+def deploy_debug_folder(project: ModProject) -> None:
+    if not WINDOWS_FACTORIO_MODS_DIR.is_dir():
+        print(f"Skipped deploy for {project.package_name}: Factorio mods folder not found.")
+        return
+
+    zip_matches = sorted(WINDOWS_FACTORIO_MODS_DIR.glob(f"{project.name}_*.zip"))
+    if zip_matches:
+        names = ", ".join(path.name for path in zip_matches)
+        print(f"Skipped deploy for {project.package_name}: zip exists in Factorio mods ({names}).")
+        return
+
+    target = WINDOWS_FACTORIO_MODS_DIR / project.package_name
+    copy_package_files(project, target)
+    print(f"Deployed folder for {project.package_name} -> {target}")
 
 
 def iter_pack_files(project: ModProject) -> Iterable[tuple[Path, Path]]:

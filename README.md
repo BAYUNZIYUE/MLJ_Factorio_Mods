@@ -58,7 +58,7 @@ python3 pack_mods.py
 
 ## 调试部署
 
-调试某个模组时，优先把解压后的模组文件夹放到：
+打包脚本会按模组自动处理调试文件夹部署：
 
 ```text
 %AppData%\Factorio\mods
@@ -66,10 +66,9 @@ python3 pack_mods.py
 
 注意事项：
 
-- 放入的是压缩包内部那层 `{info.name}_{info.version}/` 文件夹。
+- 如果该目录已有 `{info.name}_*.zip`，脚本会跳过该模组的文件夹部署。
+- 如果该目录没有 `{info.name}_*.zip`，脚本会复制本轮打包生成的 `{info.name}_{info.version}/` 文件夹。
 - 不要直接把源码目录 `src/` 放进 Factorio mods 目录。
-- 部署新版本前，先移除同一模组的旧 `.zip` 或旧文件夹。
-- 不要让同一模组的旧版本 zip 和新版本文件夹同时存在。
 
 ## 打包验证
 
