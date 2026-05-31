@@ -63,9 +63,7 @@ local function on_shortcut(event)
   if not player then
     return
   end
-  if event.prototype_name == names.input.make then
-    panel.new_toolbar(player)
-  elseif event.prototype_name == names.input.flip_all then
+  if event.prototype_name == names.input.flip_all then
     panel.toggle_all(player)
   end
 end
@@ -75,9 +73,7 @@ local function on_custom(event)
   if not player then
     return
   end
-  if event.input_name == names.input.make then
-    panel.new_toolbar(player)
-  elseif event.input_name == names.input.flip_all then
+  if event.input_name == names.input.flip_all then
     panel.toggle_all(player)
   elseif event.input_name == names.input.grade_up then
     panel.adjust_grade(player, 1)
@@ -93,11 +89,15 @@ end
 function M.attach()
   script.on_init(function()
     storage.expend_toolbar = { next_id = 1, players = {}, dirty = {} }
+    for _, player in pairs(game.players) do
+      panel.ensure_default(player)
+    end
   end)
 
   script.on_configuration_changed(function()
     storage.expend_toolbar = { next_id = 1, players = {}, dirty = {} }
     for _, player in pairs(game.connected_players) do
+      panel.ensure_default(player)
       panel.paint(player)
     end
   end)
@@ -105,6 +105,7 @@ function M.attach()
   script.on_event(defines.events.on_player_joined_game, function(event)
     local player = player_of(event)
     if player then
+      panel.ensure_default(player)
       panel.paint(player)
     end
   end)
@@ -148,14 +149,16 @@ function M.attach()
     refresh_now(player)
   end)
 
-  script.on_nth_tick(30, function()
-    mark_polling_players()
+  script.on_event(defines.events.on_tick, function(event)
     panel.snap_moved_bars()
+    if event.tick % 30 ~= 0 then
+      return
+    end
+    mark_polling_players()
     repaint_dirty()
   end)
 
   script.on_event({
-    names.input.make,
     names.input.flip_all,
     names.input.factoriopedia,
     names.input.grade_up,

@@ -351,6 +351,17 @@ local function frame_size(player, bar)
   return math.max(wide * 40 + 4, 136), rows * 40 + 64
 end
 
+local function first_place(player, width, height)
+  local screen_w, screen_h = screen_size(player)
+  local scale = player.display_scale or 1
+  local display_w = math.floor((width or 420) * scale)
+  local display_h = math.floor((height or 180) * scale)
+  return {
+    x = math.floor((screen_w - display_w) / 2),
+    y = math.floor(screen_h - display_h),
+  }
+end
+
 local function clear_moved_source(state, mark)
   if not mark then
     return
@@ -576,7 +587,7 @@ local function redraw_bar(player, order, bar, main, side, hint_cache, moving)
   if bar.place then
     frame.location = edge_place(player, bar.place, frame_w, frame_h)
   else
-    frame.location = edge_place(player, { 24, 48 + (order - 1) * 56 }, frame_w, frame_h)
+    frame.location = edge_place(player, first_place(player, frame_w, frame_h), frame_w, frame_h)
   end
 
   local head = frame.add { type = "flow", direction = "horizontal", style = "expend_toolbar_head" }
@@ -605,6 +616,17 @@ function M.ensure_storage()
   storage.expend_toolbar.next_id = storage.expend_toolbar.next_id or 1
 end
 
+function M.ensure_default(player)
+  local state = board(player.index)
+  if #state.bars == 0 then
+    state.bars[#state.bars + 1] = fresh_bar()
+  end
+  if state.shown == nil then
+    state.shown = true
+  end
+  player.set_shortcut_toggled(names.input.flip_all, state.shown ~= false)
+end
+
 function M.new_toolbar(player)
   local state = board(player.index)
   state.bars[#state.bars + 1] = fresh_bar()
@@ -621,6 +643,7 @@ function M.paint(player)
   end
 
   local state = board(player.index)
+  player.set_shortcut_toggled(names.input.flip_all, state.shown ~= false)
   if state.shown == false or #state.bars == 0 then
     return
   end
@@ -714,7 +737,7 @@ end
 function M.toggle_all(player)
   local state = board(player.index)
   state.shown = not state.shown
-  player.set_shortcut_toggled(names.input.flip_all, state.shown)
+  player.set_shortcut_toggled(names.input.flip_all, state.shown ~= false)
   M.paint(player)
 end
 
@@ -857,8 +880,8 @@ function M.snap_moved_bars()
         elseif game.tick > (snap.tick or 0) then
           snap.stable = (snap.stable or 0) + 1
         end
-        -- Factorio 没有 GUI 拖动释放事件；等待多个 30 tick 周期无位置变化后再贴边，避免拖动中途回弹。
-        if (snap.stable or 0) >= 3 then
+        -- Factorio 没有 GUI 拖动释放事件；每 tick 处理时仍等待少量稳定帧，避免拖动中途回弹。
+        if (snap.stable or 0) >= 8 then
           if bar and bar.place then
             local frame_w, frame_h = frame_size(player, bar)
             bar.place = edge_place(player, bar.place, frame_w, frame_h)

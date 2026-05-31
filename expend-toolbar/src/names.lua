@@ -7,7 +7,6 @@ function M.id(part)
 end
 
 M.input = {
-  make = M.id("create-toolbar"),
   flip_all = M.id("toggle-toolbars"),
   factoriopedia = M.id("open-factoriopedia"),
   grade_up = M.id("increase-quality"),

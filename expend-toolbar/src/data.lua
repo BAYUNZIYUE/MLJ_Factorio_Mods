@@ -3,13 +3,6 @@ local styles = data.raw["gui-style"].default
 
 data:extend({
   {
-    order = "a1",
-    type = "custom-input",
-    name = names.input.make,
-    localised_name = "Create a toolbar",
-    key_sequence = "",
-  },
-  {
     order = "a2",
     type = "custom-input",
     name = names.input.flip_all,
@@ -23,15 +16,6 @@ data:extend({
 })
 
 data:extend({
-  {
-    type = "shortcut",
-    name = names.input.make,
-    action = "lua",
-    associated_control_input = names.input.make,
-    localised_name = "Create Toolbar",
-    icons = { { icon = "__expend-toolbar__/_graphics/shortcuts/C.png", icon_size = 56 } },
-    small_icons = { { icon = "__expend-toolbar__/_graphics/shortcuts/C.png", icon_size = 56 } },
-  },
   {
     type = "shortcut",
     name = names.input.flip_all,
