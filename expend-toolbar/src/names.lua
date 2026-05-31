@@ -12,6 +12,8 @@ M.input = {
   grade_up = M.id("increase-quality"),
   grade_down = M.id("decrease-quality"),
   pipette = M.id("pipette"),
+  copy_selection = M.id("copy-selection"),
+  paste_selection = M.id("paste-selection"),
 }
 
 M.setting = {

@@ -13,6 +13,8 @@ data:extend({
   { type = "custom-input", name = names.input.grade_up, linked_game_control = "cycle-quality-up", key_sequence = "" },
   { type = "custom-input", name = names.input.grade_down, linked_game_control = "cycle-quality-down", key_sequence = "" },
   { type = "custom-input", name = names.input.pipette, linked_game_control = "pipette", key_sequence = "" },
+  { type = "custom-input", name = names.input.copy_selection, localised_name = "Copy toolbar row or page", key_sequence = "" },
+  { type = "custom-input", name = names.input.paste_selection, localised_name = "Paste toolbar row or page", key_sequence = "" },
 })
 
 data:extend({

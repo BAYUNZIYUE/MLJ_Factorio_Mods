@@ -83,6 +83,10 @@ local function on_custom(event)
     panel.open_focused_factoriopedia(player)
   elseif event.input_name == names.input.pipette then
     panel.copy_focused_to_cursor(player)
+  elseif event.input_name == names.input.copy_selection then
+    panel.copy_hovered(player)
+  elseif event.input_name == names.input.paste_selection then
+    panel.paste_hovered(player)
   end
 end
 
@@ -164,6 +168,8 @@ function M.attach()
     names.input.grade_up,
     names.input.grade_down,
     names.input.pipette,
+    names.input.copy_selection,
+    names.input.paste_selection,
   }, on_custom)
 end
 

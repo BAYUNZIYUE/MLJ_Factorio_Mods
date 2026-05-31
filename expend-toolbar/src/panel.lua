@@ -142,11 +142,8 @@ end
 
 local function toolbar_rows(player, bar)
   local wide = wanted_width(player)
-  local rows = 1
-  for _, page in ipairs(bar.pages) do
-    local _, page_rows = trim_page(player, page)
-    rows = math.max(rows, page_rows)
-  end
+  local page = bar.pages[bar.active or 1] or bar.pages[1] or fresh_page()
+  local _, rows = trim_page(player, page)
   return wide, rows
 end
 
@@ -269,8 +266,21 @@ local function clone_slot(slot)
   return { name = slot.name, grade = normalize_grade(slot.grade) }
 end
 
+local function clone_slots(slots)
+  local copy = {}
+  for index, slot in pairs(slots or {}) do
+    copy[index] = clone_slot(slot)
+  end
+  return copy
+end
+
 local function same_slot(a, b)
   return a and b and a.name == b.name and normalize_grade(a.grade) == normalize_grade(b.grade)
+end
+
+local function slot_row(player, position)
+  local wide = wanted_width(player)
+  return math.max(1, math.ceil((tonumber(position) or 1) / wide))
 end
 
 local function same_place(mark, bar_id, page_index, position)
@@ -477,6 +487,7 @@ local function draw_slot(parent, player, state, bar, page, page_index, position,
       style = "expend_toolbar_slot",
       tags = { mod = names.mod, act = names.action.choose_item, bar = bar.id, page = page_index, pos = position },
       mouse_button_filter = { "left" },
+      raise_hover_events = true,
     }
   else
     cell.add {
@@ -485,6 +496,7 @@ local function draw_slot(parent, player, state, bar, page, page_index, position,
       elem_type = "item-with-quality",
       style = "expend_toolbar_slot",
       tags = { mod = names.mod, act = names.action.choose_item, bar = bar.id, page = page_index, pos = position },
+      raise_hover_events = true,
     }
   end
 end
@@ -564,6 +576,7 @@ local function draw_page_buttons(parent, player, bar)
       style = index == bar.active and "slot_sized_button_blue" or "slot_sized_button",
       tags = { mod = names.mod, act = names.action.pick_page, bar = bar.id, page = index },
       mouse_button_filter = { "left" },
+      raise_hover_events = true,
     }
     button.style.width = 40
     button.style.height = 32
@@ -741,6 +754,72 @@ function M.toggle_all(player)
   M.paint(player)
 end
 
+function M.copy_hovered(player)
+  local state = board(player.index)
+  local focus = state.page_focus
+  if focus then
+    local bar = nth_bar(state, focus.bar)
+    local page = bar and bar.pages[focus.page] or nil
+    if page then
+      state.clipboard = { kind = "page", slots = clone_slots(page.slots) }
+      player.play_sound { path = "utility/inventory_click" }
+      return true
+    end
+  end
+
+  focus = state.row_focus
+  if focus then
+    local bar = nth_bar(state, focus.bar)
+    local page = bar and bar.pages[focus.page or (bar and bar.active) or 1] or nil
+    if page then
+      local wide = wanted_width(player)
+      local first = (focus.row - 1) * wide + 1
+      local slots = {}
+      for offset = 0, wide - 1 do
+        slots[offset + 1] = clone_slot(page.slots[first + offset])
+      end
+      state.clipboard = { kind = "row", width = wide, slots = slots }
+      player.play_sound { path = "utility/inventory_click" }
+      return true
+    end
+  end
+  return false
+end
+
+function M.paste_hovered(player)
+  local state = board(player.index)
+  local clipboard = state.clipboard
+  if not clipboard then
+    return false
+  end
+
+  if clipboard.kind == "page" and state.page_focus then
+    local bar = nth_bar(state, state.page_focus.bar)
+    local page = bar and bar.pages[state.page_focus.page] or nil
+    if page then
+      page.slots = clone_slots(clipboard.slots)
+      player.play_sound { path = "utility/inventory_click" }
+      M.paint(player)
+      return true
+    end
+  elseif clipboard.kind == "row" and state.row_focus then
+    local focus = state.row_focus
+    local bar = nth_bar(state, focus.bar)
+    local page = bar and bar.pages[focus.page or (bar and bar.active) or 1] or nil
+    if page then
+      local wide = wanted_width(player)
+      local first = (focus.row - 1) * wide + 1
+      for offset = 0, wide - 1 do
+        page.slots[first + offset] = clone_slot(clipboard.slots[offset + 1])
+      end
+      player.play_sound { path = "utility/inventory_click" }
+      M.paint(player)
+      return true
+    end
+  end
+  return false
+end
+
 function M.handle_click(event)
   local player = game.get_player(event.player_index)
   if not player then
@@ -815,10 +894,23 @@ function M.remember_hover(event)
     return
   end
   local tag = read_tags(event.element)
-  if tag.mod ~= names.mod or tag.act ~= names.action.take_item then
+  if tag.mod ~= names.mod then
     return
   end
   local state = board(player.index)
+  if tag.act == names.action.pick_page then
+    state.row_focus = nil
+    state.page_focus = { bar = tag.bar, page = tag.page }
+    return
+  end
+  if tag.act ~= names.action.take_item and tag.act ~= names.action.choose_item then
+    return
+  end
+  state.page_focus = nil
+  state.row_focus = { bar = tag.bar, page = tag.page, row = slot_row(player, tag.pos) }
+  if tag.act ~= names.action.take_item then
+    return
+  end
   state.focus = { bar = tag.bar, page = tag.page, pos = tag.pos }
   local bar = nth_bar(state, tag.bar)
   local page = bar and bar.pages[tag.page or bar.active or 1] or nil
@@ -837,10 +929,26 @@ function M.forget_hover(event)
     return
   end
   local tag = read_tags(event.element)
-  if tag.mod ~= names.mod or tag.act ~= names.action.take_item then
+  if tag.mod ~= names.mod then
     return
   end
   local state = board(player.index)
+  if tag.act == names.action.pick_page then
+    if state.page_focus and state.page_focus.bar == tag.bar and state.page_focus.page == tag.page then
+      state.page_focus = nil
+    end
+    return
+  end
+  if tag.act ~= names.action.take_item and tag.act ~= names.action.choose_item then
+    return
+  end
+  local row = slot_row(player, tag.pos)
+  if state.row_focus and state.row_focus.bar == tag.bar and state.row_focus.page == tag.page and state.row_focus.row == row then
+    state.row_focus = nil
+  end
+  if tag.act ~= names.action.take_item then
+    return
+  end
   if state.focus and state.focus.bar == tag.bar and state.focus.page == tag.page and state.focus.pos == tag.pos then
     state.focus = nil
   end
