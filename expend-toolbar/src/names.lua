@@ -12,6 +12,7 @@ M.input = {
   factoriopedia = M.id("open-factoriopedia"),
   grade_up = M.id("increase-quality"),
   grade_down = M.id("decrease-quality"),
+  pipette = M.id("pipette"),
 }
 
 M.setting = {

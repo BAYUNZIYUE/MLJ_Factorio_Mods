@@ -219,11 +219,21 @@ local function next_grade(current, step)
     return "normal"
   end
   current = sane_quality(current)
+  local normal = prototypes.quality.normal
   local found = 1
   for i, row in ipairs(list) do
     if row.name == current then
       found = i
       break
+    end
+  end
+  if current == "normal" and normal and normal.next and step > 0 then
+    current = normal.next.name
+    for i, row in ipairs(list) do
+      if row.name == current then
+        found = i - 1
+        break
+      end
     end
   end
   local target = math.min(#list, math.max(1, found + step))

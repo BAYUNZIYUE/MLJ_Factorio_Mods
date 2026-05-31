@@ -19,6 +19,7 @@ data:extend({
   { type = "custom-input", name = names.input.factoriopedia, linked_game_control = "open-factoriopedia", key_sequence = "" },
   { type = "custom-input", name = names.input.grade_up, linked_game_control = "cycle-quality-up", key_sequence = "" },
   { type = "custom-input", name = names.input.grade_down, linked_game_control = "cycle-quality-down", key_sequence = "" },
+  { type = "custom-input", name = names.input.pipette, linked_game_control = "pipette", key_sequence = "" },
 })
 
 data:extend({
@@ -99,6 +100,13 @@ styles.expend_toolbar_slot = {
   type = "button_style",
   parent = "slot_button",
   size = 40,
+}
+styles.expend_toolbar_slot_selected = {
+  type = "button_style",
+  parent = "expend_toolbar_slot",
+  default_graphical_set = styles.slot_button.selected_graphical_set,
+  hovered_graphical_set = styles.slot_button.selected_hovered_graphical_set,
+  clicked_graphical_set = styles.slot_button.selected_clicked_graphical_set,
 }
 styles.expend_toolbar_slot_box = {
   type = "empty_widget_style",

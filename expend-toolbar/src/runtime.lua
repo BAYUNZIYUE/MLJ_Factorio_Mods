@@ -85,6 +85,8 @@ local function on_custom(event)
     panel.adjust_grade(player, -1)
   elseif event.input_name == names.input.factoriopedia then
     panel.open_focused_factoriopedia(player)
+  elseif event.input_name == names.input.pipette then
+    panel.copy_focused_to_cursor(player)
   end
 end
 
@@ -129,15 +131,26 @@ function M.attach()
   script.on_event({
     defines.events.on_player_main_inventory_changed,
     defines.events.on_player_trash_inventory_changed,
-    defines.events.on_player_cursor_stack_changed,
     defines.events.on_player_controller_changed,
     defines.events.on_player_changed_surface,
   }, function(event)
     refresh_now(player_of(event))
   end)
 
+  script.on_event(defines.events.on_player_cursor_stack_changed, function(event)
+    local player = player_of(event)
+    if not player then
+      return
+    end
+    if panel.sync_cursor(player) then
+      return
+    end
+    refresh_now(player)
+  end)
+
   script.on_nth_tick(30, function()
     mark_polling_players()
+    panel.snap_moved_bars()
     repaint_dirty()
   end)
 
@@ -147,6 +160,7 @@ function M.attach()
     names.input.factoriopedia,
     names.input.grade_up,
     names.input.grade_down,
+    names.input.pipette,
   }, on_custom)
 end
 

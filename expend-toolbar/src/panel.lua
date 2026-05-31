@@ -277,21 +277,36 @@ local function same_place(mark, bar_id, page_index, position)
   return mark and mark.bar == bar_id and mark.page == page_index and mark.pos == position
 end
 
+local function ghost_name(ghost)
+  if not ghost or not ghost.name then
+    return nil
+  end
+  if type(ghost.name) == "table" then
+    return ghost.name.name
+  end
+  return ghost.name
+end
+
+local function ghost_slot(player)
+  local ghost = player.cursor_ghost
+  local name = ghost_name(ghost)
+  if not name then
+    return nil
+  end
+  return { name = name, grade = normalize_grade(ghost.quality) }
+end
+
+local function cursor_slot(player)
+  local stack = player.cursor_stack
+  if stack and stack.valid_for_read and stack.type == "item" then
+    return { name = stack.name, grade = normalize_grade(stack.quality) }
+  end
+  return ghost_slot(player)
+end
+
 local function cursor_busy(player)
   local stack = player.cursor_stack
   return (stack and stack.valid_for_read) or player.cursor_ghost ~= nil
-end
-
-local function cursor_holds(player, slot)
-  local stack = player.cursor_stack
-  if stack and stack.valid_for_read and stack.type == "item" then
-    return same_slot({ name = stack.name, grade = stack.quality }, slot)
-  end
-  local ghost = player.cursor_ghost
-  if ghost and ghost.name then
-    return same_slot({ name = ghost.name.name or ghost.name, grade = ghost.quality }, slot)
-  end
-  return false
 end
 
 local function screen_size(player)
@@ -330,6 +345,12 @@ local function edge_place(player, place, width, height)
   return { x = x, y = y }
 end
 
+local function frame_size(player, bar)
+  local wide, rows = toolbar_rows(player, bar)
+  -- 按当前控件树估算：外框 padding、标题行、内容框边、格子表、底部页按钮。
+  return math.max(wide * 40 + 4, 136), rows * 40 + 64
+end
+
 local function clear_moved_source(state, mark)
   if not mark then
     return
@@ -347,7 +368,61 @@ local function clear_cursor(player)
   player.cursor_ghost = nil
 end
 
-local function draw_slot(parent, player, bar, page, page_index, position, main, side, hint_cache, moving)
+local function clear_move_state(state)
+  state.moving = nil
+end
+
+local function clear_copy_state(state)
+  state.copying = nil
+end
+
+local function sync_cursor_state(player, state)
+  local changed = false
+  if state.copying and not cursor_slot(player) then
+    clear_copy_state(state)
+    changed = true
+  end
+  return changed
+end
+
+local function set_cursor_ghost(player, slot)
+  player.cursor_ghost = { name = slot.name, quality = normalize_grade(slot.grade) }
+end
+
+local function selected_slot(state, bar_id, page_index, position, slot)
+  return same_place(state.moving, bar_id, page_index, position) and same_slot(state.moving.slot, slot)
+end
+
+local function carried_slot(player, state)
+  if state.moving then
+    return clone_slot(state.moving.slot), "move"
+  end
+  if state.copying then
+    return clone_slot(state.copying.slot), "copy"
+  end
+  return cursor_slot(player), "cursor"
+end
+
+local function place_carried_slot(player, state, tag, page)
+  if not page then
+    return false
+  end
+  local carried, mode = carried_slot(player, state)
+  if not carried or not carried.name then
+    return false
+  end
+  page.slots[tag.pos] = clone_slot(carried)
+  if mode == "move" then
+    clear_moved_source(state, state.moving)
+    clear_cursor(player)
+    clear_move_state(state)
+  elseif mode == "copy" then
+    set_cursor_ghost(player, carried)
+  end
+  return true
+end
+
+local function draw_slot(parent, player, state, bar, page, page_index, position, main, side, hint_cache, moving)
   local slot = page.slots[position]
   if slot and slot.name and not stock.item_known(slot.name) then
     page.slots[position] = nil
@@ -356,13 +431,14 @@ local function draw_slot(parent, player, bar, page, page_index, position, main, 
 
   local cell = parent.add { type = "empty-widget", style = "expend_toolbar_slot_box" }
   if slot and slot.name then
+    local chosen = selected_slot(state, bar.id, page_index, position, slot)
     cell.add {
       type = "sprite-button",
       name = slot_name(bar.id, position),
       sprite = item_sprite(slot.name),
       number = tonumber(cell_text(main, slot.name, normalize_grade(slot.grade))) or nil,
       tooltip = hint_text(player, main, side, slot, hint_cache),
-      style = "expend_toolbar_slot",
+      style = chosen and "expend_toolbar_slot_selected" or "expend_toolbar_slot",
       tags = { mod = names.mod, act = names.action.take_item, bar = bar.id, page = page_index, pos = position },
       mouse_button_filter = { "left", "right", "middle" },
       raise_hover_events = true,
@@ -382,7 +458,7 @@ local function draw_slot(parent, player, bar, page, page_index, position, main, 
         ignored_by_interaction = true,
       }
     end
-  elseif moving then
+  elseif moving or state.copying or cursor_slot(player) then
     cell.add {
       type = "sprite-button",
       name = slot_name(bar.id, position),
@@ -402,7 +478,7 @@ local function draw_slot(parent, player, bar, page, page_index, position, main, 
   end
 end
 
-local function draw_cells(container, player, bar, page, page_index, rows, main, side, hint_cache, moving)
+local function draw_cells(container, player, state, bar, page, page_index, rows, main, side, hint_cache, moving)
   local wide = wanted_width(player)
   local table_box = container.add {
     type = "table",
@@ -410,7 +486,7 @@ local function draw_cells(container, player, bar, page, page_index, rows, main, 
     style = "expend_toolbar_slot_table",
   }
   for position = 1, wide * rows do
-    draw_slot(table_box, player, bar, page, page_index, position, main, side, hint_cache, moving)
+    draw_slot(table_box, player, state, bar, page, page_index, position, main, side, hint_cache, moving)
   end
 end
 
@@ -485,6 +561,7 @@ end
 
 local function redraw_bar(player, order, bar, main, side, hint_cache, moving)
   clamp_page(bar)
+  local state = board(player.index)
   local wide, rows = toolbar_rows(player, bar)
 
   local frame = player.gui.screen.add {
@@ -495,8 +572,7 @@ local function redraw_bar(player, order, bar, main, side, hint_cache, moving)
     tags = { mod = names.mod, act = names.action.move, bar = bar.id },
   }
   frame.auto_center = false
-  local frame_w = wide * 40 + 150
-  local frame_h = rows * 40 + 150
+  local frame_w, frame_h = frame_size(player, bar)
   if bar.place then
     frame.location = edge_place(player, bar.place, frame_w, frame_h)
   else
@@ -518,7 +594,7 @@ local function redraw_bar(player, order, bar, main, side, hint_cache, moving)
 
   local content = frame.add { type = "frame", direction = "vertical", style = "expend_toolbar_page" }
   local cells = content.add { type = "frame", direction = "vertical", style = "expend_toolbar_cells" }
-  draw_cells(cells, player, bar, bar.pages[bar.active], bar.active, rows, main, side, hint_cache, moving)
+  draw_cells(cells, player, state, bar, bar.pages[bar.active], bar.active, rows, main, side, hint_cache, moving)
   draw_page_buttons(content, player, bar)
   draw_rename_prompt(player, frame, bar)
 end
@@ -626,6 +702,15 @@ function M.refresh(player)
   end
 end
 
+function M.sync_cursor(player)
+  local state = board(player.index)
+  local changed = sync_cursor_state(player, state)
+  if changed then
+    M.paint(player)
+  end
+  return changed
+end
+
 function M.toggle_all(player)
   local state = board(player.index)
   state.shown = not state.shown
@@ -647,9 +732,6 @@ function M.handle_click(event)
   end
 
   local state = board(player.index)
-  if state.moving and not cursor_holds(player, state.moving.slot) then
-    state.moving = nil
-  end
   local bar = nth_bar(state, tag.bar)
   if not bar then
     return
@@ -678,14 +760,14 @@ function M.handle_click(event)
     if event.button == defines.mouse_button_type.right or event.button == defines.mouse_button_type.middle then
       page.slots[tag.pos] = nil
       if same_place(state.moving, tag.bar, tag.page or bar.active, tag.pos) then
-        state.moving = nil
+        clear_move_state(state)
       end
       changed = true
     elseif state.moving and not same_place(state.moving, tag.bar, tag.page or bar.active, tag.pos) then
-      page.slots[tag.pos] = clone_slot(state.moving.slot)
-      clear_moved_source(state, state.moving)
-      clear_cursor(player)
-      state.moving = nil
+      place_carried_slot(player, state, tag, page)
+      changed = true
+    elseif not state.moving and cursor_slot(player) then
+      place_carried_slot(player, state, tag, page)
       changed = true
     elseif page.slots[tag.pos] then
       local picked = clone_slot(page.slots[tag.pos])
@@ -694,11 +776,8 @@ function M.handle_click(event)
         changed = true
       end
     end
-  elseif tag.act == names.action.choose_item and state.moving then
-    page.slots[tag.pos] = clone_slot(state.moving.slot)
-    clear_moved_source(state, state.moving)
-    clear_cursor(player)
-    state.moving = nil
+  elseif tag.act == names.action.choose_item and (state.moving or cursor_slot(player)) then
+    place_carried_slot(player, state, tag, page)
     changed = true
   end
 
@@ -754,14 +833,44 @@ function M.remember_place(event)
     return
   end
   local state = board(player.index)
-  if state.moving and not cursor_holds(player, state.moving.slot) then
-    state.moving = nil
-  end
   local bar = nth_bar(state, tag.bar)
   if bar then
-    local wide, rows = toolbar_rows(player, bar)
-    bar.place = edge_place(player, event.element.location, wide * 40 + 150, rows * 40 + 150)
-    event.element.location = bar.place
+    local location = event.element.location
+    bar.place = { x = location.x or location[1] or 24, y = location.y or location[2] or 48 }
+    state.snap = state.snap or {}
+    state.snap[bar.id] = { tick = event.tick or game.tick, stable = 0, last = bar.place }
+  end
+end
+
+function M.snap_moved_bars()
+  M.ensure_storage()
+  for index, state in pairs(storage.expend_toolbar.players or {}) do
+    local player = game.get_player(index)
+    if player and player.connected and state.snap then
+      local changed = false
+      for bar_id, snap in pairs(state.snap) do
+        local bar = nth_bar(state, bar_id)
+        if bar and bar.place and snap.last and (bar.place.x ~= snap.last.x or bar.place.y ~= snap.last.y) then
+          snap.last = { x = bar.place.x, y = bar.place.y }
+          snap.stable = 0
+          snap.tick = game.tick
+        elseif game.tick > (snap.tick or 0) then
+          snap.stable = (snap.stable or 0) + 1
+        end
+        -- Factorio 没有 GUI 拖动释放事件；等待多个 30 tick 周期无位置变化后再贴边，避免拖动中途回弹。
+        if (snap.stable or 0) >= 3 then
+          if bar and bar.place then
+            local frame_w, frame_h = frame_size(player, bar)
+            bar.place = edge_place(player, bar.place, frame_w, frame_h)
+            changed = true
+          end
+          state.snap[bar_id] = nil
+        end
+      end
+      if changed then
+        M.paint(player)
+      end
+    end
   end
 end
 
@@ -774,10 +883,6 @@ function M.handle_choice(event)
   if tag.mod ~= names.mod or tag.act ~= names.action.choose_item then
     return
   end
-  local value = event.element.elem_value
-  if not value then
-    return
-  end
   local state = board(player.index)
   local bar = nth_bar(state, tag.bar)
   if not bar then
@@ -785,15 +890,20 @@ function M.handle_choice(event)
   end
   clamp_page(bar)
   local page = bar.pages[tag.page or bar.active]
-  local picked = { name = value.name, grade = normalize_grade(value.quality) }
-  page.slots[tag.pos] = picked
-  if state.moving and not same_place(state.moving, tag.bar, tag.page or bar.active, tag.pos) and same_slot(picked, state.moving.slot) then
-    clear_moved_source(state, state.moving)
-    clear_cursor(player)
-    state.moving = nil
+  local value = event.element.elem_value
+  if value then
+    local picked = { name = value.name, grade = normalize_grade(value.quality) }
+    page.slots[tag.pos] = picked
+    if state.moving and not same_place(state.moving, tag.bar, tag.page or bar.active, tag.pos) and same_slot(picked, state.moving.slot) then
+      clear_moved_source(state, state.moving)
+      clear_cursor(player)
+      clear_move_state(state)
+    end
+    event.element.elem_value = nil
+    M.paint(player)
+  elseif place_carried_slot(player, state, tag, page) then
+    M.paint(player)
   end
-  event.element.elem_value = nil
-  M.paint(player)
 end
 
 function M.save_rename(player, bar, page_index, text)
@@ -870,13 +980,38 @@ function M.take(player, slot)
   if player.cursor_stack and player.cursor_stack.valid_for_read then
     return false
   end
-  if stock.lift_to_cursor(player, slot) then
-    player.play_sound { path = "utility/inventory_click" }
-    return true
-  end
-  player.cursor_ghost = { name = slot.name, quality = normalize_grade(slot.grade) }
+  set_cursor_ghost(player, slot)
   player.play_sound { path = "utility/cannot_build" }
   return true
+end
+
+function M.copy_focused_to_cursor(player)
+  local state = board(player.index)
+  if state.moving then
+    clear_move_state(state)
+    clear_copy_state(state)
+    clear_cursor(player)
+    M.paint(player)
+    return
+  end
+  if state.copying then
+    clear_copy_state(state)
+    clear_cursor(player)
+    M.paint(player)
+    return
+  end
+  local _, _, slot = focused_slot(player)
+  if not slot or not slot.name then
+    clear_copy_state(state)
+    clear_move_state(state)
+    return
+  end
+  clear_move_state(state)
+  clear_cursor(player)
+  state.copying = { slot = clone_slot(slot) }
+  set_cursor_ghost(player, state.copying.slot)
+  player.play_sound { path = "utility/inventory_click" }
+  M.paint(player)
 end
 
 return M
