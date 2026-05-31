@@ -2,6 +2,6 @@
 Version: 1.0.0
 Date: 25. 05. 2026
   Features:
-    - Added movable custom item bars with tab pages, live inventory counts, and quality controls.
+    - Added movable custom item bars with ten fixed pages, live inventory counts, and quality controls.
   Changes:
     - Started the standalone Expend Toolbar changelog.

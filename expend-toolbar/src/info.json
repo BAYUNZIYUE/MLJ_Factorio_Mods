@@ -7,5 +7,5 @@
 	"dependencies": [
 		"base >= 2.0"
 	],
-	"description": "Create movable custom item bars with tabs, live inventory counts, and quality controls. / 创建可移动的自定义物品栏，支持分页、实时库存数量和品质切换。"
+	"description": "Create movable custom item bars with ten fixed pages, live inventory counts, and quality controls. / 创建可移动的自定义物品栏，支持 10 个固定页面、实时库存数量和品质切换。"
 }

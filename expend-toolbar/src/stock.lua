@@ -40,6 +40,16 @@ local function wanted_names(wanted)
   return list
 end
 
+local function sane_quality(quality)
+  if type(quality) == "table" then
+    quality = quality.name
+  end
+  if not quality or quality == "" or quality == "quality-unknown" or not prototypes.quality[quality] then
+    return "normal"
+  end
+  return quality
+end
+
 local function add_bucket(box, stack, wanted)
   if not stack or not stack.name or not stack.count then
     return
@@ -47,11 +57,7 @@ local function add_bucket(box, stack, wanted)
   if wanted and not wanted[stack.name] then
     return
   end
-  local grade = stack.quality
-  if type(grade) == "table" then
-    grade = grade.name
-  end
-  grade = grade or "normal"
+  local grade = sane_quality(stack.quality)
   box[stack.name] = box[stack.name] or {}
   box[stack.name][grade] = (box[stack.name][grade] or 0) + stack.count
 end
@@ -212,6 +218,7 @@ local function next_grade(current, step)
   if #list == 0 then
     return "normal"
   end
+  current = sane_quality(current)
   local found = 1
   for i, row in ipairs(list) do
     if row.name == current then
@@ -239,7 +246,7 @@ local function transfer_from(player, inventory, slot)
   if not inventory or not inventory.valid then
     return false
   end
-  local stack = inventory.find_item_stack({ name = slot.name, quality = slot.grade or "normal" })
+  local stack = inventory.find_item_stack({ name = slot.name, quality = sane_quality(slot.grade) })
   if not stack then
     return false
   end

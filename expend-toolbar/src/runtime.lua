@@ -79,21 +79,10 @@ local function on_custom(event)
     panel.new_toolbar(player)
   elseif event.input_name == names.input.flip_all then
     panel.toggle_all(player)
-  elseif event.input_name == names.input.fold_header then
-    local state = storage.expend_toolbar and storage.expend_toolbar.players and storage.expend_toolbar.players[player.index]
-    local bar = state and state.bars and state.bars[1]
-    if bar then
-      bar.folded = not bar.folded
-      panel.paint(player)
-    end
-  elseif event.input_name == names.input.pipette then
-    panel.place_cursor(player)
   elseif event.input_name == names.input.grade_up then
     panel.adjust_grade(player, 1)
   elseif event.input_name == names.input.grade_down then
     panel.adjust_grade(player, -1)
-  elseif event.input_name == names.input.clear then
-    panel.clear_focused(player)
   elseif event.input_name == names.input.factoriopedia then
     panel.open_focused_factoriopedia(player)
   end
@@ -122,6 +111,7 @@ function M.attach()
 
   script.on_event(defines.events.on_gui_click, panel.handle_click)
   script.on_event(defines.events.on_gui_elem_changed, panel.handle_choice)
+  script.on_event(defines.events.on_gui_confirmed, panel.handle_confirmed)
   script.on_event(defines.events.on_gui_hover, panel.remember_hover)
   script.on_event(defines.events.on_gui_leave, panel.forget_hover)
   script.on_event(defines.events.on_gui_location_changed, panel.remember_place)
@@ -154,9 +144,6 @@ function M.attach()
   script.on_event({
     names.input.make,
     names.input.flip_all,
-    names.input.fold_header,
-    names.input.pipette,
-    names.input.clear,
     names.input.factoriopedia,
     names.input.grade_up,
     names.input.grade_down,
