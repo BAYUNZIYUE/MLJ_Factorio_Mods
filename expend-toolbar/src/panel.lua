@@ -3,6 +3,9 @@ local stock = require("stock")
 
 local M = {}
 local PAGE_COUNT = 10
+local SLOT_SIZE = 40
+local PAGE_TITLE_MIN_WIDTH = 72
+local SNAP_QUIET_TICKS = 20
 
 local function setting(player, key)
   return settings.get_player_settings(player)[key].value
@@ -145,6 +148,14 @@ local function toolbar_rows(player, bar)
   local page = bar.pages[bar.active or 1] or bar.pages[1] or fresh_page()
   local _, rows = trim_page(player, page)
   return wide, rows
+end
+
+local function page_button_width(wide)
+  return math.max(SLOT_SIZE, math.floor((math.max(1, wide) * SLOT_SIZE) / PAGE_COUNT))
+end
+
+local function toolbar_body_width(wide)
+  return math.max(math.max(1, wide) * SLOT_SIZE, page_button_width(wide) * PAGE_COUNT)
 end
 
 local function ui_text(player, zh, en)
@@ -358,7 +369,14 @@ end
 local function frame_size(player, bar)
   local wide, rows = toolbar_rows(player, bar)
   -- 按当前控件树估算：外框 padding、标题行、内容框边、格子表、底部页按钮。
-  return math.max(wide * 40 + 4, 136), rows * 40 + 64
+  return math.max(toolbar_body_width(wide) + 4, 136), rows * SLOT_SIZE + 64
+end
+
+local function location_changed(a, b)
+  if not a or not b then
+    return true
+  end
+  return (a.x or a[1] or 0) ~= (b.x or b[1] or 0) or (a.y or a[2] or 0) ~= (b.y or b[2] or 0)
 end
 
 local function first_place(player, width, height)
@@ -564,21 +582,24 @@ local function draw_rename_prompt(player, frame, bar)
   cancel.style.height = 28
 end
 
-local function draw_page_buttons(parent, player, bar)
+local function draw_page_buttons(parent, player, bar, wide)
+  local button_width = page_button_width(wide)
+  local show_titles = button_width >= PAGE_TITLE_MIN_WIDTH
   local table_box = parent.add { type = "table", column_count = PAGE_COUNT }
   table_box.style.horizontal_spacing = 0
   table_box.style.vertical_spacing = 0
   for index = 1, PAGE_COUNT do
+    local title = page_title(player, bar.pages[index], index)
     local button = table_box.add {
       type = "button",
-      caption = tostring(index),
-      tooltip = page_title(player, bar.pages[index], index),
+      caption = show_titles and title or tostring(index),
+      tooltip = title,
       style = index == bar.active and "slot_sized_button_blue" or "slot_sized_button",
       tags = { mod = names.mod, act = names.action.pick_page, bar = bar.id, page = index },
       mouse_button_filter = { "left" },
       raise_hover_events = true,
     }
-    button.style.width = 40
+    button.style.width = button_width
     button.style.height = 32
   end
 end
@@ -614,12 +635,12 @@ local function redraw_bar(player, order, bar, main, side, hint_cache, moving)
     style = "draggable_space",
   }
   drag.drag_target = frame
-  drag.style.size = { math.max(40, wide * 40 - 152), 20 }
+  drag.style.size = { math.max(40, toolbar_body_width(wide) - 152), 20 }
 
   local content = frame.add { type = "frame", direction = "vertical", style = "expend_toolbar_page" }
   local cells = content.add { type = "frame", direction = "vertical", style = "expend_toolbar_cells" }
   draw_cells(cells, player, state, bar, bar.pages[bar.active], bar.active, rows, main, side, hint_cache, moving)
-  draw_page_buttons(content, player, bar)
+  draw_page_buttons(content, player, bar, wide)
   draw_rename_prompt(player, frame, bar)
 end
 
@@ -969,7 +990,7 @@ function M.remember_place(event)
     local location = event.element.location
     bar.place = { x = location.x or location[1] or 24, y = location.y or location[2] or 48 }
     state.snap = state.snap or {}
-    state.snap[bar.id] = { tick = event.tick or game.tick, stable = 0, last = bar.place }
+    state.snap[bar.id] = { tick = event.tick or game.tick }
   end
 end
 
@@ -981,19 +1002,15 @@ function M.snap_moved_bars()
       local changed = false
       for bar_id, snap in pairs(state.snap) do
         local bar = nth_bar(state, bar_id)
-        if bar and bar.place and snap.last and (bar.place.x ~= snap.last.x or bar.place.y ~= snap.last.y) then
-          snap.last = { x = bar.place.x, y = bar.place.y }
-          snap.stable = 0
-          snap.tick = game.tick
-        elseif game.tick > (snap.tick or 0) then
-          snap.stable = (snap.stable or 0) + 1
-        end
-        -- Factorio 没有 GUI 拖动释放事件；每 tick 处理时仍等待少量稳定帧，避免拖动中途回弹。
-        if (snap.stable or 0) >= 8 then
+        -- Factorio 没有 GUI 拖动释放事件；等待一段没有位置事件的静默窗口，再做一次贴边。
+        if game.tick - (snap.tick or 0) >= SNAP_QUIET_TICKS then
           if bar and bar.place then
             local frame_w, frame_h = frame_size(player, bar)
-            bar.place = edge_place(player, bar.place, frame_w, frame_h)
-            changed = true
+            local next_place = edge_place(player, bar.place, frame_w, frame_h)
+            if location_changed(next_place, bar.place) then
+              bar.place = next_place
+              changed = true
+            end
           end
           state.snap[bar_id] = nil
         end
