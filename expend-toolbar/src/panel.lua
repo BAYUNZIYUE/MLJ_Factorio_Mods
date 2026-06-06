@@ -230,6 +230,13 @@ local function dim_text(value)
   return "[color=0.7,0.7,0.7]" .. value .. "[/color]"
 end
 
+local function rich_icon(name)
+  if prototypes.fluid[name] then
+    return "[fluid=" .. name .. "]"
+  end
+  return "[item=" .. name .. "]"
+end
+
 local function wanted_items(state, player)
   local wanted = {}
   for _, bar in ipairs(state.bars) do
@@ -343,33 +350,31 @@ local function hint_text(player, main, side, slot, cache)
     return cache[key]
   end
 
-  local lines = { "", { "?", { "item-name." .. slot.name }, slot.name }, " ", quality_icon(slot.grade) }
+  local lines = { rich_icon(slot.name) .. " " .. slot.name .. " " .. quality_icon(slot.grade) }
   local grades = stock.grade_list(main, side, slot.name)
   for index = #grades, 1, -1 do
     local grade = grades[index]
     local direct = stock.amount(main, slot.name, grade)
     local nearby = stock.amount(side, slot.name, grade)
-    lines[#lines + 1] = "\n"
     local direct_text = short_count(direct) .. quality_icon(grade)
     if grade ~= slot.grade then
       direct_text = dim_text(direct_text)
     end
-    lines[#lines + 1] = direct_text
+    lines[#lines + 1] = "\n" .. direct_text
     if nearby > 0 then
-      lines[#lines + 1] = " "
-      lines[#lines + 1] = dim_text("+" .. short_count(nearby) .. quality_icon(grade))
+      lines[#lines] = lines[#lines] .. " " .. dim_text("+" .. short_count(nearby) .. quality_icon(grade))
     end
   end
   add_item_details(lines, slot)
 
   if setting(player, names.setting.hint_keys) then
-    lines[#lines + 1] = "\n"
-    lines[#lines + 1] = { "?", { "controls.cycle-quality-up" }, " / ", { "controls.cycle-quality-down" } }
+    lines[#lines + 1] = "\n" .. dim_text("cycle-quality-up / cycle-quality-down")
   end
+  local text = table.concat(lines)
   if cache then
-    cache[key] = lines
+    cache[key] = text
   end
-  return lines
+  return text
 end
 
 local function item_sprite(name)
