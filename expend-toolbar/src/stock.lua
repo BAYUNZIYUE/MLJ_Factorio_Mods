@@ -267,6 +267,9 @@ function M.lift_to_cursor(player, slot)
   if transfer_from(player, player.get_main_inventory(), slot) then
     return true
   end
+  if player.character and transfer_from(player, player.character.get_inventory(defines.inventory.character_trash), slot) then
+    return true
+  end
   local vehicle = player.vehicle
   if vehicle and vehicle.valid and settings.get_player_settings(player)[names.setting.vehicle_on].value then
     if transfer_from(player, vehicle.get_inventory(defines.inventory.car_trunk), slot) then

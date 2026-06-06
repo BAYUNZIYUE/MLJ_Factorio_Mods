@@ -36,6 +36,16 @@ local function refresh_now(player)
   panel.refresh(player)
 end
 
+local function repaint_for_cursor(player)
+  if not player then
+    return
+  end
+  if not panel.has_visible_bars(player) then
+    return
+  end
+  panel.paint(player)
+end
+
 local function mark_polling_players()
   panel.ensure_storage()
   storage.expend_toolbar.dirty = storage.expend_toolbar.dirty or {}
@@ -150,7 +160,7 @@ function M.attach()
     if panel.sync_cursor(player) then
       return
     end
-    refresh_now(player)
+    repaint_for_cursor(player)
   end)
 
   script.on_event(defines.events.on_tick, function(event)

@@ -39,6 +39,18 @@ def assert_not_contains(path: Path, text: str) -> None:
         raise AssertionError(f"{path.relative_to(ROOT)} must not contain: {text}")
 
 
+def assert_occurs_before(path: Path, first: str, second: str) -> None:
+    content = read(path)
+    first_index = content.find(first)
+    second_index = content.find(second)
+    if first_index < 0:
+        raise AssertionError(f"{path.relative_to(ROOT)} must contain: {first}")
+    if second_index < 0:
+        raise AssertionError(f"{path.relative_to(ROOT)} must contain: {second}")
+    if first_index > second_index:
+        raise AssertionError(f"{path.relative_to(ROOT)} must place {first!r} before {second!r}")
+
+
 def main() -> int:
     info = json.loads(read(SRC / "info.json"))
     if info["name"] != "expend-toolbar":
@@ -181,6 +193,8 @@ def main() -> int:
     assert_not_contains(SRC / "panel.lua", "selected_tab_index")
     assert_contains(SRC / "panel.lua", "local function toolbar_rows(player, bar)")
     assert_contains(SRC / "panel.lua", "local page = bar.pages[bar.active or 1] or bar.pages[1] or fresh_page()")
+    assert_contains(SRC / "panel.lua", "local function page_rows(player, page)")
+    assert_contains(SRC / "panel.lua", "local rows = page_rows(player, page)")
     assert_not_contains(SRC / "panel.lua", "for _, page in ipairs(bar.pages) do\n    local _, page_rows = trim_page(player, page)")
     assert_contains(SRC / "panel.lua", 'type = "table"')
     assert_contains(SRC / "panel.lua", "column_count = wide")
@@ -248,16 +262,36 @@ def main() -> int:
     assert_contains(SRC / "panel.lua", "local function set_cursor_ghost(player, slot)")
     assert_contains(SRC / "panel.lua", "local function slot_from_stack(stack)")
     assert_not_contains(SRC / "panel.lua", 'stack.type ~= "item"')
-    assert_contains(SRC / "panel.lua", "local function slot_from_record(player, record)")
+    assert_contains(SRC / "panel.lua", "local function slot_from_record(player, record, include_data)")
     assert_contains(SRC / "panel.lua", 'slot.kind = "exported-stack"')
     assert_contains(SRC / "panel.lua", 'kind = "record"')
     assert_contains(SRC / "panel.lua", "stack.export_stack()")
     assert_contains(SRC / "panel.lua", "record.export_record()")
+    assert_contains(SRC / "panel.lua", "if include_data then")
+    assert_contains(SRC / "panel.lua", "record.blueprint_description")
+    assert_contains(SRC / "panel.lua", "record.contents_size")
     assert_contains(SRC / "panel.lua", "player.cursor_record")
     assert_contains(SRC / "panel.lua", "player.cursor_stack.import_stack(slot.data)")
     assert_contains(SRC / "panel.lua", "local ok, result = pcall(function() return player.cursor_stack.import_stack(slot.data) end)")
+    assert_occurs_before(
+        SRC / "panel.lua",
+        "local stack = safe_value(function() return player.cursor_stack end)",
+        "local record_slot = slot_from_record(player, safe_value(function() return player.cursor_record end), include_record_data)",
+    )
+    assert_occurs_before(
+        SRC / "panel.lua",
+        'if (slot.kind == "exported-stack" or slot.kind == "record") and slot.data',
+        "if player.cursor_stack.set_stack({ name = slot.name, count = 1, quality = normalize_grade(slot.grade) }) then",
+    )
+    assert_contains(SRC / "panel.lua", "slot.record_type or \"\"")
+    assert_contains(SRC / "panel.lua", "tostring(slot.entity_count or \"\")")
+    assert_contains(SRC / "panel.lua", "tostring(slot.contents_size or \"\")")
     assert_contains(SRC / "panel.lua", "local function ghost_slot(player)")
-    assert_contains(SRC / "panel.lua", "local function cursor_slot(player)")
+    assert_contains(SRC / "panel.lua", "local function cursor_slot(player, include_record_data)")
+    assert_contains(SRC / "panel.lua", "local function slot_from_elem_value(value)")
+    assert_contains(SRC / "panel.lua", "local function slot_from_choice(player, value)")
+    assert_contains(SRC / "panel.lua", "if same_named_slot(cursor, basic) then")
+    assert_contains(SRC / "panel.lua", "local picked = slot_from_choice(player, value)")
     assert_contains(SRC / "panel.lua", "local function place_carried_slot(player, state, tag, page)")
     assert_contains(SRC / "panel.lua", "elseif moving or state.copying or cursor_slot(player) then")
     assert_contains(SRC / "panel.lua", 'style = chosen and "expend_toolbar_slot_selected" or "expend_toolbar_slot"')
@@ -317,6 +351,9 @@ def main() -> int:
     assert_contains(SRC / "stock.lua", 'quality == "quality-unknown"')
     assert_contains(SRC / "stock.lua", "local normal = prototypes.quality.normal")
     assert_contains(SRC / "stock.lua", 'current == "normal" and normal and normal.next and step > 0')
+    assert_contains(SRC / "stock.lua", "player.character.get_inventory(defines.inventory.character_trash)")
+    assert_contains(SRC / "panel.lua", "player.controller_type ~= defines.controllers.remote and slot.kind == \"item\" and stock.lift_to_cursor(player, slot)")
+    assert_contains(SRC / "panel.lua", "player.cursor_stack.set_stack({ name = slot.name, count = 1, quality = normalize_grade(slot.grade) })")
     assert_not_contains(SRC / "data.lua", 'type = "tabbed_pane_style"')
     assert_contains(SRC / "data.lua", 'type = "table_style"')
     assert_contains(SRC / "data.lua", 'styles.expend_toolbar_quality')
@@ -327,12 +364,16 @@ def main() -> int:
     assert_contains(SRC / "panel.lua", "local function can_show_in_context(player)")
     assert_contains(SRC / "panel.lua", "player.controller_type ~= defines.controllers.remote")
     assert_contains(SRC / "panel.lua", "player.centered_on")
+    assert_contains(SRC / "panel.lua", "player.render_mode")
+    assert_contains(SRC / "panel.lua", "defines.render_mode.chart")
     assert_contains(SRC / "panel.lua", "player.surface.platform")
     assert_contains(SRC / "panel.lua", "player.surface.planet")
     assert_contains(SRC / "panel.lua", "not can_show_in_context(player)")
     assert_contains(SRC / "panel.lua", "function M.forget_hover(event)")
     assert_contains(SRC / "runtime.lua", "local watched_settings = {")
     assert_contains(SRC / "runtime.lua", "local function refresh_now(player)")
+    assert_contains(SRC / "runtime.lua", "local function repaint_for_cursor(player)")
+    assert_contains(SRC / "runtime.lua", "repaint_for_cursor(player)")
     assert_contains(SRC / "runtime.lua", "local function repaint_dirty()")
     assert_contains(SRC / "runtime.lua", "local function mark_polling_players()")
     assert_contains(SRC / "runtime.lua", "panel.ensure_default(player)")
@@ -356,7 +397,12 @@ def main() -> int:
     assert_contains(MOD_ROOT / "README.md", "较窄时显示页码，较宽时显示页面标题")
     assert_contains(MOD_ROOT / "README.md", "blueprints, blueprint books, deconstruction planners, upgrade planners")
     assert_contains(MOD_ROOT / "README.md", "蓝图、蓝图书、红图、绿图")
+    assert_contains(MOD_ROOT / "README.md", "cursor records in toolbar slots")
+    assert_contains(MOD_ROOT / "README.md", "真实光标物品会保留导出的内容")
+    assert_contains(MOD_ROOT / "README.md", "book size")
+    assert_contains(MOD_ROOT / "README.md", "蓝图书大小")
     assert_contains(MOD_ROOT / "README.md", "remote starmap")
+    assert_contains(MOD_ROOT / "README.md", "chart view")
     assert_contains(MOD_ROOT / "README.md", "星图")
     assert_not_contains(MOD_ROOT / "README.md", "`Create a toolbar`")
     assert_not_contains(MOD_ROOT / "README.md", "Create a toolbar")

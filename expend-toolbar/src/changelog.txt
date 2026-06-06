@@ -5,3 +5,7 @@ Date: 25. 05. 2026
     - Added movable custom item bars with dynamic pages, live inventory counts, blueprint-aware slots, and quality controls.
   Changes:
     - Started the standalone Expend Toolbar changelog.
+  Bugfixes:
+    - Improved remote starmap hiding, cursor-record slot handling, and normal-view item pickup behavior.
+    - Preserved blueprint-like slot contents by preferring cursor stacks over cursor records and importing saved record exports before falling back to empty tool items.
+    - Repainted empty slots after cursor changes so held blueprints and blueprint books are stored as full cursor payloads instead of plain empty tool names.

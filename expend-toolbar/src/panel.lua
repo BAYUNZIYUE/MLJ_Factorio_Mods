@@ -86,6 +86,26 @@ local function record_item_name(record_type)
   return nil
 end
 
+local function record_label(record)
+  return safe_value(function() return record.blueprint_description end)
+end
+
+local function record_entity_count(record)
+  return safe_value(function() return record.get_blueprint_entity_count() end)
+end
+
+local function record_active_index(player, record)
+  return safe_value(function() return record.get_active_index(player) end)
+end
+
+local function record_contents_size(record)
+  return safe_value(function() return record.contents_size end)
+end
+
+local function record_export(record)
+  return safe_value(function() return record.export_record() end)
+end
+
 local function nth_bar(state, id)
   for index, bar in ipairs(state.bars) do
     if bar.id == id then
@@ -163,6 +183,11 @@ local function trim_page(player, page)
   return wide, rows
 end
 
+local function page_rows(player, page)
+  local _, rows = trim_page(player, page)
+  return rows
+end
+
 local function page_title(player, page, index)
   if page.title and page.title ~= "" then
     return page.title
@@ -177,7 +202,7 @@ end
 local function toolbar_rows(player, bar)
   local wide = wanted_width(player)
   local page = bar.pages[bar.active or 1] or bar.pages[1] or fresh_page()
-  local _, rows = trim_page(player, page)
+  local rows = page_rows(player, page)
   return wide, rows
 end
 
@@ -277,6 +302,7 @@ local function add_item_details(lines, slot)
   add_detail_line(lines, "record", slot.record_type)
   add_detail_line(lines, "entities", slot.entity_count)
   add_detail_line(lines, "book index", slot.active_index)
+  add_detail_line(lines, "book size", slot.contents_size)
   add_detail_line(lines, "export", slot.data and "saved" or nil)
 end
 
@@ -319,7 +345,7 @@ local function slot_from_stack(stack)
   return slot
 end
 
-local function slot_from_record(player, record)
+local function slot_from_record(player, record, include_data)
   if not record or record.valid == false then
     return nil
   end
@@ -328,16 +354,20 @@ local function slot_from_record(player, record)
   if not name then
     return nil
   end
-  return {
+  local slot = {
     kind = "record",
     name = name,
     grade = "normal",
     record_type = record_type,
-    data = safe_value(function() return record.export_record() end),
-    label = safe_value(function() return record.label end),
-    entity_count = safe_value(function() return record.get_blueprint_entity_count() end),
-    active_index = safe_value(function() return record.get_active_index(player) end),
+    label = record_label(record),
+    entity_count = record_entity_count(record),
+    active_index = record_active_index(player, record),
+    contents_size = record_contents_size(record),
   }
+  if include_data then
+    slot.data = record_export(record)
+  end
+  return slot
 end
 
 local function hint_text(player, main, side, slot, cache)
@@ -345,7 +375,17 @@ local function hint_text(player, main, side, slot, cache)
     return nil
   end
   slot.grade = normalize_grade(slot.grade)
-  local key = slot.name .. "\t" .. slot.grade .. "\t" .. (slot.data or "")
+  local key = table.concat({
+    slot.name,
+    slot.grade,
+    slot.kind or "",
+    slot.data or "",
+    slot.record_type or "",
+    slot.label or "",
+    tostring(slot.entity_count or ""),
+    tostring(slot.active_index or ""),
+    tostring(slot.contents_size or ""),
+  }, "\t")
   if cache and cache[key] then
     return cache[key]
   end
@@ -408,6 +448,7 @@ local function clone_slot(slot)
     record_type = slot.record_type,
     entity_count = slot.entity_count,
     active_index = slot.active_index,
+    contents_size = slot.contents_size,
   }
 end
 
@@ -421,6 +462,20 @@ end
 
 local function same_slot(a, b)
   return a and b and a.name == b.name and normalize_grade(a.grade) == normalize_grade(b.grade) and (a.data or "") == (b.data or "")
+end
+
+local function same_named_slot(a, b)
+  return a and b and a.name == b.name and normalize_grade(a.grade) == normalize_grade(b.grade)
+end
+
+local function slot_from_elem_value(value)
+  if type(value) == "string" then
+    return { kind = "item", name = value, grade = "normal" }
+  end
+  if value and value.name then
+    return { kind = "item", name = value.name, grade = normalize_grade(value.quality) }
+  end
+  return nil
 end
 
 local function slot_row(player, position)
@@ -451,17 +506,26 @@ local function ghost_slot(player)
   return { name = name, grade = normalize_grade(ghost.quality) }
 end
 
-local function cursor_slot(player)
-  local record_slot = slot_from_record(player, safe_value(function() return player.cursor_record end))
-  if record_slot then
-    return record_slot
-  end
+local function cursor_slot(player, include_record_data)
   local stack = safe_value(function() return player.cursor_stack end)
   local stack_slot = slot_from_stack(stack)
   if stack_slot then
     return stack_slot
   end
+  local record_slot = slot_from_record(player, safe_value(function() return player.cursor_record end), include_record_data)
+  if record_slot then
+    return record_slot
+  end
   return ghost_slot(player)
+end
+
+local function slot_from_choice(player, value)
+  local basic = slot_from_elem_value(value)
+  local cursor = cursor_slot(player, true)
+  if same_named_slot(cursor, basic) then
+    return cursor
+  end
+  return basic
 end
 
 local function cursor_busy(player)
@@ -488,6 +552,11 @@ local function can_show_in_context(player)
   local centered = safe_value(function() return player.centered_on end)
   if centered and centered.valid then
     return true
+  end
+  local mode = safe_value(function() return player.render_mode end)
+  if mode == defines.render_mode.chart then
+    -- 远程星图只显示天体/航线总览；没有聚焦实体或物流上下文时隐藏工具栏。
+    return has_remote_logistic_context(player)
   end
   if safe_value(function() return player.surface.platform end) then
     return true
@@ -593,11 +662,19 @@ local function sync_cursor_state(player, state)
 end
 
 local function set_cursor_ghost(player, slot)
-  if slot.kind == "exported-stack" and slot.data and player.cursor_stack and player.cursor_stack.valid then
+  if (slot.kind == "exported-stack" or slot.kind == "record") and slot.data and player.cursor_stack and player.cursor_stack.valid then
     clear_cursor(player)
     local ok, result = pcall(function() return player.cursor_stack.import_stack(slot.data) end)
     if ok and result == 0 then
       return true
+    end
+  end
+  if slot.kind == "record" then
+    if player.cursor_stack and player.cursor_stack.valid and prototypes.item[slot.name] then
+      clear_cursor(player)
+      if player.cursor_stack.set_stack({ name = slot.name, count = 1, quality = normalize_grade(slot.grade) }) then
+        return true
+      end
     end
   end
   player.cursor_ghost = { name = slot.name, quality = normalize_grade(slot.grade) }
@@ -615,7 +692,7 @@ local function carried_slot(player, state)
   if state.copying then
     return clone_slot(state.copying.slot), "copy"
   end
-  return cursor_slot(player), "cursor"
+  return cursor_slot(player, true), "cursor"
 end
 
 local function place_carried_slot(player, state, tag, page)
@@ -1336,7 +1413,10 @@ function M.handle_choice(event)
   local page = bar.pages[tag.page or bar.active]
   local value = event.element.elem_value
   if value then
-    local picked = { name = value.name, grade = normalize_grade(value.quality) }
+    local picked = slot_from_choice(player, value)
+    if not picked or not picked.name then
+      return
+    end
     page.slots[tag.pos] = picked
     if state.moving and not same_place(state.moving, tag.bar, tag.page or bar.active, tag.pos) and same_slot(picked, state.moving.slot) then
       clear_moved_source(state, state.moving)
@@ -1423,6 +1503,10 @@ function M.take(player, slot)
   end
   if player.cursor_stack and player.cursor_stack.valid_for_read then
     return false
+  end
+  if player.controller_type ~= defines.controllers.remote and slot.kind == "item" and stock.lift_to_cursor(player, slot) then
+    player.play_sound { path = "utility/inventory_click" }
+    return true
   end
   set_cursor_ghost(player, slot)
   player.play_sound { path = "utility/cannot_build" }
