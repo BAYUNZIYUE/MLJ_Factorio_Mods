@@ -24,7 +24,10 @@ This mod is a Lua-first Factorio 2.0 mod that lets players create movable custom
 - This mod intentionally does not keep compatibility with the previous Toolbars-style OOP runtime. Do not restore `core/`, `factorio/`, `gui/`, `lang/`, `model/`, `player/`, `control/`, `data/`, or `settings/` runtime subtrees.
 - Keep runtime logic compact and process-oriented. The expected custom Lua files are `names.lua`, `stock.lua`, `panel.lua`, and `runtime.lua`, plus Factorio entry files.
 - Personal-view logistic networks are side tooltip data, not part of the slot count overlay. Remote planet logistic networks are main count data.
-- Each toolbar keeps exactly 10 numbered pages. Page switching uses bottom number buttons, not Factorio `tabbed-pane`, overflow paging, add-page, or delete-page controls.
+- Each toolbar starts with one page. Players may add or delete pages, and the maximum page count is the per-user `columns` value so the narrowest bottom tab is one slot wide.
+- Page switching uses bottom self-drawn tab buttons, not Factorio `tabbed-pane`, overflow paging, drop-down page pickers, or header arrows.
+- Bottom page tabs show page titles when there is enough width and page numbers when space is tight. Tooltips must keep the full page title.
+- Slot payloads must preserve special tools when possible: normal items use `name` plus `grade`, exported blueprint-like stacks use `LuaItemStack.export_stack()`, and cursor records use `LuaRecord.export_record()` snapshots rather than storing live LuaObjects.
 - Toolbar pages use the per-user `columns` value as their configured width. Rows grow when the last slot is occupied and shrink when the tail rows are no longer needed.
 - Guard quality reads from `prototypes.quality[...]` because removed quality mods or stale item records can contain quality names that no longer exist.
 - Keep player-facing behavior documented in this directory's `README.md` when controls, settings, visible counts, remote view, or tooltip behavior changes.

@@ -27,6 +27,7 @@ M.sprite = {
   cancel = M.id("cancel"),
   ok = M.id("confirm"),
   blank = M.id("empty"),
+  trash = M.id("trash"),
 }
 
 M.gui = {
@@ -44,9 +45,13 @@ M.gui = {
 M.action = {
   move = "move",
   pick_page = "pick_page",
+  add_page = "add_page",
+  delete_page = "delete_page",
   rename_page = "rename_page",
   confirm_rename_page = "confirm_rename_page",
   cancel_rename_page = "cancel_rename_page",
+  confirm_delete_page = "confirm_delete_page",
+  cancel_delete_page = "cancel_delete_page",
   choose_item = "choose_item",
   take_item = "take_item",
 }

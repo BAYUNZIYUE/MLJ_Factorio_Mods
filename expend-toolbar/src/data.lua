@@ -46,6 +46,7 @@ data:extend({
   gui_sprite(names.sprite.cancel, "_graphics/icons/cancel.png"),
   gui_sprite(names.sprite.ok, "_graphics/icons/confirm.png"),
   gui_sprite(names.sprite.blank, "_graphics/icons/empty.png", 64),
+  gui_sprite(names.sprite.trash, "_graphics/icons/trash.png"),
 })
 
 styles.expend_toolbar_frame = {

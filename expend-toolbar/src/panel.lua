@@ -2,7 +2,6 @@ local names = require("names")
 local stock = require("stock")
 
 local M = {}
-local PAGE_COUNT = 10
 local SLOT_SIZE = 40
 local PAGE_TITLE_MIN_WIDTH = 72
 local SNAP_QUIET_TICKS = 20
@@ -34,15 +33,7 @@ local function fresh_page()
 end
 
 local function fresh_bar()
-  local bar = {
-    id = next_bar_id(),
-    active = 1,
-    pages = {},
-  }
-  for index = 1, PAGE_COUNT do
-    bar.pages[index] = fresh_page()
-  end
-  return bar
+  return { id = next_bar_id(), active = 1, pages = { fresh_page() } }
 end
 
 local function read_tags(element)
@@ -57,6 +48,10 @@ local function rename_name(bar_id)
   return names.gui.rename .. "_" .. tostring(bar_id)
 end
 
+local function delete_name(bar_id)
+  return names.gui.confirm .. "_delete_" .. tostring(bar_id)
+end
+
 local function normalize_grade(grade)
   if type(grade) == "table" then
     grade = grade.name
@@ -65,6 +60,30 @@ local function normalize_grade(grade)
     return "normal"
   end
   return grade
+end
+
+local function safe_value(reader)
+  local ok, value = pcall(reader)
+  if ok then
+    return value
+  end
+  return nil
+end
+
+local function record_item_name(record_type)
+  if record_type == "blueprint" then
+    return "blueprint"
+  end
+  if record_type == "blueprint-book" then
+    return "blueprint-book"
+  end
+  if record_type == "deconstruction-planner" then
+    return "deconstruction-planner"
+  end
+  if record_type == "upgrade-planner" then
+    return "upgrade-planner"
+  end
+  return nil
 end
 
 local function nth_bar(state, id)
@@ -76,31 +95,43 @@ local function nth_bar(state, id)
   return nil, nil
 end
 
-local function clamp_page(bar)
+local function wanted_width(player)
+  return math.max(1, tonumber(setting(player, names.setting.wide)) or 10)
+end
+
+local function max_pages(player)
+  return wanted_width(player)
+end
+
+local function clamp_page(player, bar)
   bar.pages = bar.pages or {}
-  for index = 1, PAGE_COUNT do
-    if not bar.pages[index] then
-      bar.pages[index] = fresh_page()
-    end
+  if #bar.pages == 0 then
+    bar.pages[1] = fresh_page()
   end
-  for index = #bar.pages, PAGE_COUNT + 1, -1 do
-    if bar.pages[index] and bar.pages[index].slots then
-      for position, slot in pairs(bar.pages[index].slots) do
-        if slot and slot.name then
-          local target = ((index - 1) % PAGE_COUNT) + 1
-          bar.pages[target].slots[position] = bar.pages[target].slots[position] or slot
+  local limit = player and max_pages(player) or #bar.pages
+  for index = #bar.pages, limit + 1, -1 do
+    local overflow = bar.pages[index]
+    if overflow and overflow.slots then
+      for position, slot in pairs(overflow.slots) do
+        if slot and slot.name and not bar.pages[limit].slots[position] then
+          bar.pages[limit].slots[position] = slot
         end
       end
     end
     bar.pages[index] = nil
   end
-  if not bar.active or bar.active < 1 or bar.active > PAGE_COUNT then
+  for _, page in ipairs(bar.pages) do
+    page.slots = page.slots or {}
+  end
+  if not bar.active or bar.active < 1 or bar.active > #bar.pages then
     bar.active = 1
   end
-end
-
-local function wanted_width(player)
-  return math.max(1, tonumber(setting(player, names.setting.wide)) or 10)
+  if bar.rename and (bar.rename < 1 or bar.rename > #bar.pages) then
+    bar.rename = nil
+  end
+  if bar.deleting and (bar.deleting < 1 or bar.deleting > #bar.pages) then
+    bar.deleting = nil
+  end
 end
 
 local function trim_page(player, page)
@@ -150,12 +181,12 @@ local function toolbar_rows(player, bar)
   return wide, rows
 end
 
-local function page_button_width(wide)
-  return math.max(SLOT_SIZE, math.floor((math.max(1, wide) * SLOT_SIZE) / PAGE_COUNT))
+local function page_button_width(wide, page_count)
+  return math.max(SLOT_SIZE, math.floor((math.max(1, wide) * SLOT_SIZE) / math.max(1, page_count)))
 end
 
-local function toolbar_body_width(wide)
-  return math.max(math.max(1, wide) * SLOT_SIZE, page_button_width(wide) * PAGE_COUNT)
+local function toolbar_body_width(wide, page_count)
+  return math.max(math.max(1, wide) * SLOT_SIZE, page_button_width(wide, page_count) * math.max(1, page_count))
 end
 
 local function ui_text(player, zh, en)
@@ -199,10 +230,10 @@ local function dim_text(value)
   return "[color=0.7,0.7,0.7]" .. value .. "[/color]"
 end
 
-local function wanted_items(state)
+local function wanted_items(state, player)
   local wanted = {}
   for _, bar in ipairs(state.bars) do
-    clamp_page(bar)
+    clamp_page(player, bar)
     for _, page in ipairs(bar.pages) do
       for _, slot in pairs(page.slots) do
         if slot and slot.name and stock.item_known(slot.name) then
@@ -214,12 +245,100 @@ local function wanted_items(state)
   return next(wanted) and wanted or nil
 end
 
+local function add_detail_line(lines, label, value)
+  if value == nil or value == "" then
+    return
+  end
+  lines[#lines + 1] = "\n"
+  lines[#lines + 1] = dim_text(label .. ": " .. tostring(value))
+end
+
+local function add_item_details(lines, slot)
+  local prototype = prototypes.item[slot.name] or prototypes.fluid[slot.name]
+  add_detail_line(lines, "name", slot.name)
+  add_detail_line(lines, "kind", slot.kind or "item")
+  if prototype then
+    add_detail_line(lines, "type", safe_value(function() return prototype.type end))
+    add_detail_line(lines, "stack", safe_value(function() return prototype.stack_size end))
+    local place_result = safe_value(function() return prototype.place_result and prototype.place_result.name end)
+    local place_tile = safe_value(function() return prototype.place_as_tile and prototype.place_as_tile.result and prototype.place_as_tile.result.name end)
+    add_detail_line(lines, "place", place_result or place_tile)
+    add_detail_line(lines, "fuel", safe_value(function() return prototype.fuel_category end))
+    add_detail_line(lines, "module", safe_value(function() return prototype.category end))
+  end
+  add_detail_line(lines, "label", slot.label)
+  add_detail_line(lines, "record", slot.record_type)
+  add_detail_line(lines, "entities", slot.entity_count)
+  add_detail_line(lines, "book index", slot.active_index)
+  add_detail_line(lines, "export", slot.data and "saved" or nil)
+end
+
+local function stack_label(stack)
+  return safe_value(function() return stack.label end)
+end
+
+local function stack_export(stack)
+  return safe_value(function() return stack.export_stack() end)
+end
+
+local function stack_entity_count(stack)
+  return safe_value(function() return stack.get_blueprint_entity_count() end)
+end
+
+local function stack_active_index(stack)
+  return safe_value(function() return stack.get_active_index() end)
+end
+
+local function slot_from_stack(stack)
+  if not stack or not stack.valid_for_read or not stack.name then
+    return nil
+  end
+  local slot = {
+    kind = "item",
+    name = stack.name,
+    grade = normalize_grade(stack.quality),
+  }
+  if safe_value(function() return stack.is_blueprint end)
+      or safe_value(function() return stack.is_blueprint_book end)
+      or safe_value(function() return stack.is_deconstruction_item end)
+      or safe_value(function() return stack.is_upgrade_item end)
+      or safe_value(function() return stack.is_item_with_tags end) then
+    slot.kind = "exported-stack"
+    slot.data = stack_export(stack)
+    slot.label = stack_label(stack)
+    slot.entity_count = stack_entity_count(stack)
+    slot.active_index = stack_active_index(stack)
+  end
+  return slot
+end
+
+local function slot_from_record(player, record)
+  if not record or record.valid == false then
+    return nil
+  end
+  local record_type = safe_value(function() return record.type end)
+  local name = record_item_name(record_type)
+  if not name then
+    return nil
+  end
+  return {
+    kind = "record",
+    name = name,
+    grade = "normal",
+    record_type = record_type,
+    data = safe_value(function() return record.export_record() end),
+    label = safe_value(function() return record.label end),
+    entity_count = safe_value(function() return record.get_blueprint_entity_count() end),
+    active_index = safe_value(function() return record.get_active_index(player) end),
+  }
+end
+
 local function hint_text(player, main, side, slot, cache)
   if not slot or not slot.name then
     return nil
   end
   slot.grade = normalize_grade(slot.grade)
-  local key = slot.name .. "\t" .. slot.grade
+  local key = slot.name .. "\t" .. slot.grade .. "\t" .. (slot.data or "")
   if cache and cache[key] then
     return cache[key]
   end
@@ -241,6 +360,7 @@ local function hint_text(player, main, side, slot, cache)
       lines[#lines + 1] = dim_text("+" .. short_count(nearby) .. quality_icon(grade))
     end
   end
+  add_item_details(lines, slot)
 
   if setting(player, names.setting.hint_keys) then
     lines[#lines + 1] = "\n"
@@ -274,7 +394,16 @@ local function clone_slot(slot)
   if not slot or not slot.name then
     return nil
   end
-  return { name = slot.name, grade = normalize_grade(slot.grade) }
+  return {
+    kind = slot.kind or "item",
+    name = slot.name,
+    grade = normalize_grade(slot.grade),
+    data = slot.data,
+    label = slot.label,
+    record_type = slot.record_type,
+    entity_count = slot.entity_count,
+    active_index = slot.active_index,
+  }
 end
 
 local function clone_slots(slots)
@@ -286,7 +415,7 @@ local function clone_slots(slots)
 end
 
 local function same_slot(a, b)
-  return a and b and a.name == b.name and normalize_grade(a.grade) == normalize_grade(b.grade)
+  return a and b and a.name == b.name and normalize_grade(a.grade) == normalize_grade(b.grade) and (a.data or "") == (b.data or "")
 end
 
 local function slot_row(player, position)
@@ -318,16 +447,50 @@ local function ghost_slot(player)
 end
 
 local function cursor_slot(player)
-  local stack = player.cursor_stack
-  if stack and stack.valid_for_read and stack.type == "item" then
-    return { name = stack.name, grade = normalize_grade(stack.quality) }
+  local record_slot = slot_from_record(player, safe_value(function() return player.cursor_record end))
+  if record_slot then
+    return record_slot
+  end
+  local stack = safe_value(function() return player.cursor_stack end)
+  local stack_slot = slot_from_stack(stack)
+  if stack_slot then
+    return stack_slot
   end
   return ghost_slot(player)
 end
 
 local function cursor_busy(player)
-  local stack = player.cursor_stack
-  return (stack and stack.valid_for_read) or player.cursor_ghost ~= nil
+  local stack = safe_value(function() return player.cursor_stack end)
+  local ghost = safe_value(function() return player.cursor_ghost end)
+  local record = safe_value(function() return player.cursor_record end)
+  return (stack and stack.valid_for_read) or ghost ~= nil or record ~= nil
+end
+
+local function has_remote_logistic_context(player)
+  if not settings.get_player_settings(player)[names.setting.network_on].value then
+    return false
+  end
+  local networks = safe_value(function()
+    return player.surface.find_logistic_networks_by_construction_area(player.position, player.force)
+  end)
+  return networks and #networks > 0
+end
+
+local function can_show_in_context(player)
+  if player.controller_type ~= defines.controllers.remote then
+    return true
+  end
+  local centered = safe_value(function() return player.centered_on end)
+  if centered and centered.valid then
+    return true
+  end
+  if safe_value(function() return player.surface.platform end) then
+    return true
+  end
+  if safe_value(function() return player.surface.planet end) then
+    return true
+  end
+  return has_remote_logistic_context(player)
 end
 
 local function screen_size(player)
@@ -369,7 +532,7 @@ end
 local function frame_size(player, bar)
   local wide, rows = toolbar_rows(player, bar)
   -- 按当前控件树估算：外框 padding、标题行、内容框边、格子表、底部页按钮。
-  return math.max(toolbar_body_width(wide) + 4, 136), rows * SLOT_SIZE + 64
+  return math.max(toolbar_body_width(wide, #bar.pages) + 4, 136), rows * SLOT_SIZE + 64
 end
 
 local function location_changed(a, b)
@@ -425,7 +588,15 @@ local function sync_cursor_state(player, state)
 end
 
 local function set_cursor_ghost(player, slot)
+  if slot.kind == "exported-stack" and slot.data and player.cursor_stack and player.cursor_stack.valid then
+    clear_cursor(player)
+    local ok, result = pcall(function() return player.cursor_stack.import_stack(slot.data) end)
+    if ok and result == 0 then
+      return true
+    end
+  end
   player.cursor_ghost = { name = slot.name, quality = normalize_grade(slot.grade) }
+  return true
 end
 
 local function selected_slot(state, bar_id, page_index, position, slot)
@@ -459,6 +630,15 @@ local function place_carried_slot(player, state, tag, page)
     set_cursor_ghost(player, carried)
   end
   return true
+end
+
+local function clear_page_marks(state)
+  state.moving = nil
+  state.copying = nil
+  state.page_focus = nil
+  state.row_focus = nil
+  state.focus = nil
+  state.last_tab_click = nil
 end
 
 local function draw_slot(parent, player, state, bar, page, page_index, position, main, side, hint_cache, moving)
@@ -582,13 +762,65 @@ local function draw_rename_prompt(player, frame, bar)
   cancel.style.height = 28
 end
 
+local function draw_delete_prompt(player, frame, bar)
+  if not bar.deleting then
+    return
+  end
+  local page = bar.pages[bar.deleting]
+  if not page then
+    bar.deleting = nil
+    return
+  end
+  local location = frame.location or { x = 40, y = 40 }
+  local x = location.x or location[1] or 40
+  local y = location.y or location[2] or 40
+  local prompt = player.gui.screen.add {
+    type = "frame",
+    direction = "vertical",
+    name = delete_name(bar.id),
+    caption = ui_text(player, "删除分组", "Delete group"),
+    tags = { mod = names.mod, act = names.action.cancel_delete_page, bar = bar.id, page = bar.deleting },
+  }
+  prompt.auto_center = false
+  prompt.location = { x + 28, y + 48 }
+  prompt.add {
+    type = "label",
+    caption = ui_text(
+      player,
+      "确认删除“" .. page_title(player, page, bar.deleting) .. "”？",
+      "Delete \"" .. page_title(player, page, bar.deleting) .. "\"?"
+    ),
+  }
+  local buttons = prompt.add { type = "flow", direction = "horizontal" }
+  buttons.style.horizontal_spacing = 8
+  local ok = buttons.add {
+    type = "sprite-button",
+    sprite = names.sprite.trash,
+    style = "red_button",
+    tooltip = ui_text(player, "确认删除", "Confirm delete"),
+    tags = { mod = names.mod, act = names.action.confirm_delete_page, bar = bar.id, page = bar.deleting },
+  }
+  ok.style.width = 28
+  ok.style.height = 28
+  local cancel = buttons.add {
+    type = "sprite-button",
+    sprite = names.sprite.cancel,
+    style = "green_button",
+    tooltip = ui_text(player, "取消", "Cancel"),
+    tags = { mod = names.mod, act = names.action.cancel_delete_page, bar = bar.id, page = bar.deleting },
+  }
+  cancel.style.width = 28
+  cancel.style.height = 28
+end
+
 local function draw_page_buttons(parent, player, bar, wide)
-  local button_width = page_button_width(wide)
+  local page_count = math.max(1, #bar.pages)
+  local button_width = page_button_width(wide, page_count)
   local show_titles = button_width >= PAGE_TITLE_MIN_WIDTH
-  local table_box = parent.add { type = "table", column_count = PAGE_COUNT }
+  local table_box = parent.add { type = "table", column_count = page_count }
   table_box.style.horizontal_spacing = 0
   table_box.style.vertical_spacing = 0
-  for index = 1, PAGE_COUNT do
+  for index = 1, page_count do
     local title = page_title(player, bar.pages[index], index)
     local button = table_box.add {
       type = "button",
@@ -605,7 +837,7 @@ local function draw_page_buttons(parent, player, bar, wide)
 end
 
 local function redraw_bar(player, order, bar, main, side, hint_cache, moving)
-  clamp_page(bar)
+  clamp_page(player, bar)
   local state = board(player.index)
   local wide, rows = toolbar_rows(player, bar)
 
@@ -635,13 +867,36 @@ local function redraw_bar(player, order, bar, main, side, hint_cache, moving)
     style = "draggable_space",
   }
   drag.drag_target = frame
-  drag.style.size = { math.max(40, toolbar_body_width(wide) - 152), 20 }
+  drag.style.size = { math.max(40, toolbar_body_width(wide, #bar.pages) - 182), 20 }
+  local add = head.add {
+    type = "button",
+    caption = "+",
+    style = "green_button",
+    tooltip = ui_text(player, "创建新分组", "Create new group"),
+    tags = { mod = names.mod, act = names.action.add_page, bar = bar.id },
+    mouse_button_filter = { "left" },
+  }
+  add.style.width = 28
+  add.style.height = 28
+  add.enabled = #bar.pages < max_pages(player)
+  local delete = head.add {
+    type = "sprite-button",
+    sprite = names.sprite.trash,
+    style = "red_button",
+    tooltip = ui_text(player, "删除当前分组", "Delete current group"),
+    tags = { mod = names.mod, act = names.action.delete_page, bar = bar.id, page = bar.active },
+    mouse_button_filter = { "left" },
+  }
+  delete.style.width = 28
+  delete.style.height = 28
+  delete.enabled = #bar.pages > 1
 
   local content = frame.add { type = "frame", direction = "vertical", style = "expend_toolbar_page" }
   local cells = content.add { type = "frame", direction = "vertical", style = "expend_toolbar_cells" }
   draw_cells(cells, player, state, bar, bar.pages[bar.active], bar.active, rows, main, side, hint_cache, moving)
   draw_page_buttons(content, player, bar, wide)
   draw_rename_prompt(player, frame, bar)
+  draw_delete_prompt(player, frame, bar)
 end
 
 function M.ensure_storage()
@@ -681,8 +936,11 @@ function M.paint(player)
   if state.shown == false or #state.bars == 0 then
     return
   end
+  if not can_show_in_context(player) then
+    return
+  end
 
-  local wanted = wanted_items(state)
+  local wanted = wanted_items(state, player)
   local main, side = {}, {}
   if wanted then
     main, side = stock.snapshot(player, wanted)
@@ -708,7 +966,7 @@ end
 function M.needs_polling(player)
   M.ensure_storage()
   local state = storage.expend_toolbar.players[player.index]
-  if not state or state.shown == false or not wanted_items(state) then
+  if not state or state.shown == false or not can_show_in_context(player) or not wanted_items(state, player) then
     return false
   end
   if player.controller_type == defines.controllers.remote then
@@ -740,7 +998,11 @@ function M.refresh(player)
   if not state or state.shown == false or #state.bars == 0 then
     return
   end
-  local wanted = wanted_items(state)
+  if not can_show_in_context(player) then
+    M.paint(player)
+    return
+  end
+  local wanted = wanted_items(state, player)
   if not wanted then
     return
   end
@@ -859,12 +1121,41 @@ function M.handle_click(event)
   if not bar then
     return
   end
-  clamp_page(bar)
+  clamp_page(player, bar)
   local page = bar.pages[tag.page or bar.active]
   local changed = false
 
-  if tag.act == names.action.pick_page and tag.page then
+  if tag.act == names.action.add_page then
+    if #bar.pages < max_pages(player) then
+      bar.pages[#bar.pages + 1] = fresh_page()
+      bar.active = #bar.pages
+      bar.rename = bar.active
+      bar.deleting = nil
+      clear_page_marks(state)
+      changed = true
+    end
+  elseif tag.act == names.action.delete_page then
+    if #bar.pages > 1 then
+      bar.deleting = bar.active
+      bar.rename = nil
+      changed = true
+    end
+  elseif tag.act == names.action.confirm_delete_page then
+    if #bar.pages > 1 then
+      local target = math.min(math.max(1, tag.page or bar.active), #bar.pages)
+      table.remove(bar.pages, target)
+      bar.active = math.min(target, #bar.pages)
+      bar.deleting = nil
+      bar.rename = nil
+      clear_page_marks(state)
+      changed = true
+    end
+  elseif tag.act == names.action.cancel_delete_page then
+    bar.deleting = nil
+    changed = true
+  elseif tag.act == names.action.pick_page and tag.page and bar.pages[tag.page] then
     bar.active = tag.page
+    bar.deleting = nil
     local last = state.last_tab_click
     if last and last.bar == tag.bar and last.page == tag.page and event.tick - last.tick <= 30 then
       bar.rename = tag.page
@@ -879,7 +1170,7 @@ function M.handle_click(event)
   elseif tag.act == names.action.cancel_rename_page then
     bar.rename = nil
     changed = true
-  elseif tag.act == names.action.take_item then
+  elseif tag.act == names.action.take_item and page then
     if event.button == defines.mouse_button_type.right or event.button == defines.mouse_button_type.middle then
       page.slots[tag.pos] = nil
       if same_place(state.moving, tag.bar, tag.page or bar.active, tag.pos) then
@@ -899,7 +1190,7 @@ function M.handle_click(event)
         changed = true
       end
     end
-  elseif tag.act == names.action.choose_item and (state.moving or cursor_slot(player)) then
+  elseif tag.act == names.action.choose_item and page and (state.moving or cursor_slot(player)) then
     place_carried_slot(player, state, tag, page)
     changed = true
   end
@@ -1036,7 +1327,7 @@ function M.handle_choice(event)
   if not bar then
     return
   end
-  clamp_page(bar)
+  clamp_page(player, bar)
   local page = bar.pages[tag.page or bar.active]
   local value = event.element.elem_value
   if value then
