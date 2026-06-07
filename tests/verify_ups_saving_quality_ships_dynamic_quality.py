@@ -28,6 +28,7 @@ def require_contains(text: str, needle: str, label: str) -> None:
 
 
 def main() -> int:
+    info = require_file(ROOT / "ups_saving_quality_ships" / "src" / "info.json")
     hub_quality = require_file(SCRIPT_DIR / "hub_quality_change.lua")
     cargo_pods = require_file(SCRIPT_DIR / "cargo_pods.lua")
     logistics = require_file(SCRIPT_DIR / "logistic_section_change.lua")
@@ -40,6 +41,14 @@ def main() -> int:
     require_contains(hub_quality, "next_quality", "hub_quality_change.lua")
     require_contains(hub_quality, "highest quality", "hub_quality_change.lua")
     require_contains(hub_quality, "hub_quality_changed", "hub_quality_change.lua")
+    require_contains(hub_quality, 'MQS_ENTITY_CLONES_DATA_NAME = "entity-clones"', "hub_quality_change.lua")
+    require_contains(hub_quality, 'HUB_ENTITY_NAME = "space-platform-hub"', "hub_quality_change.lua")
+    require_contains(hub_quality, "prototypes.mod_data", "hub_quality_change.lua")
+    require_contains(hub_quality, "mod_data.get(HUB_ENTITY_NAME)", "hub_quality_change.lua")
+    require_contains(hub_quality, "clone_quality_from_hub_entity_name", "hub_quality_change.lua")
+    require_contains(hub_quality, "hub_entity_name_for_quality(target_quality)", "hub_quality_change.lua")
+    require_contains(hub_quality, "bp_entity.name = hub_entity_name_for_quality(target_quality)", "hub_quality_change.lua")
+    require_contains(info, "? more-quality-scaling", "info.json")
 
     if 'bp_entity.quality = "uncommon"' in hub_quality:
         fail("hub_quality_change.lua must not hard-code vanilla quality steps")
@@ -47,6 +56,8 @@ def main() -> int:
         fail("hub_quality_change.lua must not wrap maximum quality back to normal")
     if 'elseif bp_entity.quality == "legendary"' in hub_quality:
         fail("hub_quality_change.lua must not special-case legendary as the maximum")
+    if 'bp_entity.name == "space-platform-hub"' in hub_quality:
+        fail("hub_quality_change.lua must not only recognize the base hub entity name")
 
     for label, text in (
         ("cargo_pods.lua", cargo_pods),

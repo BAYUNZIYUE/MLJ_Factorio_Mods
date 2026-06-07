@@ -1,3 +1,6 @@
+local HUB_ENTITY_NAME = "space-platform-hub"
+local MQS_ENTITY_CLONES_DATA_NAME = "entity-clones"
+
 local function normalize_blueprint_quality(quality)
     if quality == nil then
         return "normal"
@@ -40,9 +43,107 @@ local function build_next_quality_map()
     return next_quality
 end
 
+local function is_known_quality(quality)
+    return quality ~= nil
+            and quality ~= "quality-unknown"
+            and prototypes.quality[quality] ~= nil
+end
+
+local function clone_quality_from_hub_entity_name(entity_name)
+    if entity_name == HUB_ENTITY_NAME then
+        return "normal"
+    end
+    if entity_name == nil then
+        return nil
+    end
+
+    local suffix = "-" .. HUB_ENTITY_NAME
+    if string.sub(entity_name, -#suffix) ~= suffix then
+        return nil
+    end
+
+    local quality = string.sub(entity_name, 1, #entity_name - #suffix)
+    if is_known_quality(quality) then
+        return quality
+    end
+    return nil
+end
+
+local function add_hub_clone_name(quality_to_name, clone_name)
+    local quality = clone_quality_from_hub_entity_name(clone_name)
+    if quality ~= nil and quality ~= "normal" and prototypes.entity[clone_name] ~= nil then
+        quality_to_name[quality] = clone_name
+    end
+end
+
+local function add_mqs_mod_data_clones(quality_to_name)
+    local mod_data = prototypes.mod_data and prototypes.mod_data[MQS_ENTITY_CLONES_DATA_NAME]
+    if mod_data == nil or not mod_data.valid then
+        return
+    end
+
+    local ok, clones = pcall(function()
+        return mod_data.get(HUB_ENTITY_NAME)
+    end)
+    if not ok or type(clones) ~= "table" then
+        ok, clones = pcall(function()
+            return mod_data.data and mod_data.data[HUB_ENTITY_NAME]
+        end)
+    end
+    if not ok or type(clones) ~= "table" then
+        return
+    end
+
+    for _, clone_name in pairs(clones) do
+        add_hub_clone_name(quality_to_name, clone_name)
+    end
+end
+
+local function build_hub_clone_map()
+    local quality_to_name = {
+        normal = HUB_ENTITY_NAME,
+    }
+
+    add_mqs_mod_data_clones(quality_to_name)
+
+    for quality in pairs(prototypes.quality) do
+        if quality ~= "normal" and quality ~= "quality-unknown" then
+            add_hub_clone_name(quality_to_name, quality .. "-" .. HUB_ENTITY_NAME)
+        end
+    end
+
+    return quality_to_name
+end
+
+local function hub_entity_name_for_quality(quality)
+    quality = normalize_blueprint_quality(quality)
+    if quality == "normal" then
+        return HUB_ENTITY_NAME
+    end
+
+    local quality_to_name = build_hub_clone_map()
+    return quality_to_name[quality] or HUB_ENTITY_NAME
+end
+
+local function blueprint_hub_quality(bp_entity)
+    local clone_quality = clone_quality_from_hub_entity_name(bp_entity.name)
+    if clone_quality == nil then
+        return nil
+    end
+
+    local stored_quality = normalize_blueprint_quality(bp_entity.quality)
+    if is_known_quality(stored_quality) and stored_quality ~= "normal" then
+        return stored_quality
+    end
+    return clone_quality
+end
+
 local function upgrade_hub_quality(bp_entity)
     local next_quality = build_next_quality_map()
-    local current_quality = normalize_blueprint_quality(bp_entity.quality)
+    local current_quality = blueprint_hub_quality(bp_entity)
+    if current_quality == nil then
+        return false
+    end
     local target_quality = next_quality[current_quality]
     if target_quality == nil then
         -- Boundary control: highest quality stays at highest quality.
@@ -51,6 +152,7 @@ local function upgrade_hub_quality(bp_entity)
     end
 
     bp_entity.quality = store_blueprint_quality(target_quality)
+    bp_entity.name = hub_entity_name_for_quality(target_quality)
     game.print({ "hub_quality_change.hub_quality_changed", current_quality, target_quality })
     return true
 end
@@ -62,7 +164,7 @@ local function convert_bp(bp)
         if blueprint_entities and #blueprint_entities > 0 then
             for _, bp_entity in pairs(blueprint_entities) do
                 -- BlueprintEntity :: table
-                if bp_entity.name == "space-platform-hub" then
+                if blueprint_hub_quality(bp_entity) ~= nil then
                     -- 修改hub品质，普通品质在蓝图内通常为nil。
                     local quality_changed = upgrade_hub_quality(bp_entity)
                     -- 移除所有未命名（sec.group=nil）且为空（sec.filters=nil）的编组
