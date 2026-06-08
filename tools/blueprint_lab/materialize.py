@@ -400,6 +400,7 @@ def add_boundary_connectors(
         *,
         record_collisions: bool = True,
     ) -> tuple[int, list[dict[str, Any]]]:
+        positions = visible_route_positions(positions)
         route_collisions: list[dict[str, Any]] = []
         seen: set[tuple[float, float]] = set()
         for x, belt_y, reason, direction, belt_name in positions:
@@ -433,6 +434,7 @@ def add_boundary_connectors(
         return len(connectors) - before, route_collisions
 
     def add_positions_reusing_existing_belts(positions: list[RoutePosition]) -> tuple[int, list[dict[str, Any]], int]:
+        positions = visible_route_positions(positions)
         route_collisions: list[dict[str, Any]] = []
         seen: set[tuple[float, float]] = set()
         existing_belts_used = 0
@@ -480,6 +482,37 @@ def add_boundary_connectors(
             positions.append((round(x, 3), y, reason, DIR_EAST, belt_name))
             x += 1.0
         return positions
+
+    def visible_route_positions(positions: list[RoutePosition]) -> list[RoutePosition]:
+        visible: list[RoutePosition] = []
+        index = 0
+        while index < len(positions):
+            position = positions[index]
+            x, belt_y, _reason, direction, belt_name = position
+            visible.append(position)
+            entity = occupied_entities.get((round(x, 3), round(belt_y, 3)))
+            if (
+                entity is not None
+                and str(entity.get("name") or "").endswith("underground-belt")
+                and entity.get("type") == "input"
+                and entity.get("direction") == direction
+                and canonical_transport_belt_name(str(entity.get("name") or "")) == belt_name
+            ):
+                for pair_index in range(index + 1, len(positions)):
+                    pair_x, pair_y, _pair_reason, pair_direction, _pair_belt_name = positions[pair_index]
+                    pair_entity = occupied_entities.get((round(pair_x, 3), round(pair_y, 3)))
+                    if pair_entity is None:
+                        continue
+                    if str(pair_entity.get("name") or "") != str(entity.get("name") or ""):
+                        continue
+                    if pair_entity.get("type") != "output" or pair_entity.get("direction") != pair_direction:
+                        continue
+                    if canonical_transport_belt_name(str(pair_entity.get("name") or "")) != belt_name:
+                        continue
+                    index = pair_index
+                    break
+            index += 1
+        return visible
 
     def route_candidate(
         *,
@@ -1158,19 +1191,40 @@ def add_boundary_connectors(
     ) -> dict[str, Any]:
         unresolved: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
+        underground_pairs: list[dict[str, Any]] = []
         positions = horizontal_span_positions(start_x, end_x, y)
         last_index = len(positions) - 1
-        for index, (x, belt_y) in enumerate(positions):
+
+        def find_underground_output_pair(start_index: int, entity_name: str) -> int | None:
+            for pair_index in range(start_index + 1, len(positions)):
+                pair_x, pair_y = positions[pair_index]
+                pair_entity = occupied_entities.get((pair_x, pair_y))
+                if pair_entity is None:
+                    continue
+                if str(pair_entity.get("name") or "") != entity_name:
+                    continue
+                if pair_entity.get("direction") != DIR_EAST:
+                    continue
+                if pair_entity.get("type") == "output":
+                    return pair_index
+            return None
+
+        index = 0
+        while index < len(positions):
+            x, belt_y = positions[index]
             entity = occupied_entities.get((x, belt_y))
             if entity is None:
                 failures.append({"x": x, "y": belt_y, "reason": "missing-belt"})
+                index += 1
                 continue
             entity_name = str(entity.get("name") or "")
             if not is_belt_like_entity_name(entity_name):
                 failures.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "non-belt-entity"})
+                index += 1
                 continue
             if canonical_transport_belt_name(entity_name) != belt_name:
                 failures.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "belt-tier-mismatch"})
+                index += 1
                 continue
             direction = entity.get("direction")
             if direction != DIR_EAST:
@@ -1183,16 +1237,36 @@ def add_boundary_connectors(
                         "reason": "wrong-flow-direction",
                     }
                 )
+                index += 1
                 continue
             if entity_name.endswith("splitter"):
                 unresolved.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "splitter-semantics"})
+                index += 1
                 continue
             if entity_name.endswith("underground-belt"):
                 underground_type = entity.get("type")
                 if underground_type == "output" and index == 0:
+                    index += 1
                     continue
                 if underground_type == "input" and index == last_index:
+                    index += 1
                     continue
+                if underground_type == "input":
+                    pair_index = find_underground_output_pair(index, entity_name)
+                    if pair_index is not None:
+                        pair_x, pair_y = positions[pair_index]
+                        underground_pairs.append(
+                            {
+                                "input_x": x,
+                                "input_y": belt_y,
+                                "output_x": pair_x,
+                                "output_y": pair_y,
+                                "entity_name": entity_name,
+                                "hidden_positions": max(0, pair_index - index - 1),
+                            }
+                        )
+                        index = pair_index + 1
+                        continue
                 unresolved.append(
                     {
                         "x": x,
@@ -1203,6 +1277,9 @@ def add_boundary_connectors(
                         "reason": "underground-belt-endpoint-not-proven",
                     }
                 )
+                index += 1
+                continue
+            index += 1
         status = "failed" if failures else "unresolved" if unresolved else "pass"
         result: dict[str, Any] = {
             "segment_type": segment_type,
@@ -1212,6 +1289,7 @@ def add_boundary_connectors(
             "end_x": round(end_x, 3),
             "y": round(y, 3),
             "positions_checked": len(positions),
+            "underground_pairs": underground_pairs,
             "unresolved": unresolved,
             "failures": failures,
         }

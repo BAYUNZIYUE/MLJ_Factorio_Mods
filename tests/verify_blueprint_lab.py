@@ -859,6 +859,42 @@ def main() -> int:
     if not any(item["status"] == "unresolved" and any(entry.get("reason") == "underground-belt-endpoint-not-proven" for entry in item["unresolved"]) for item in underground_input_summary["belt_flow_audit"]):
         print(f"FAIL: expected east-facing underground input to remain unresolved without pair tracing: {underground_input_summary}")
         return 1
+    underground_pair_layout = deepcopy(replicated_layout)
+    underground_pair_layout["estimated_width"] = 25
+    underground_pair_layout["nodes"][0]["source_width"] = 8
+    underground_pair_layout["nodes"][0]["planned_width"] = 20
+    underground_pair_mappings = [
+        {
+            "fingerprint": "replicated-port-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 0, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 1, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-underground-belt", "x": 2, "y": 1, "direction": DIR_EAST, "entity_type": "input", "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-underground-belt", "x": 6, "y": 1, "direction": DIR_EAST, "entity_type": "output", "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, underground_pair_summary = materialize_layout_with_summary(
+        underground_pair_layout,
+        underground_pair_mappings,
+        label="fixture-underground-pair",
+        connect_boundaries=True,
+    )
+    pair_audit = [
+        item
+        for item in underground_pair_summary["belt_flow_audit"]
+        if item["segment_type"] == "inter-instance-bridge" and item.get("underground_pairs")
+    ]
+    if not pair_audit or any(item["status"] != "pass" for item in pair_audit):
+        print(f"FAIL: expected explicit underground input/output pair to pass belt flow audit: {underground_pair_summary}")
+        return 1
+    pair_positions = pair_audit[0]["underground_pairs"][0]
+    if pair_positions["input_x"] != 6.0 or pair_positions["output_x"] != 10.0 or pair_positions["hidden_positions"] != 3:
+        print(f"FAIL: expected underground pair tracing to record hidden span: {underground_pair_summary}")
+        return 1
 
     print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, materializes a blueprint skeleton, and generates a seed blueprint.")
     return 0

@@ -211,12 +211,15 @@ occupied position is a same-tier belt-like entity pointing east. A segment is
 is `failed` when a belt is missing, the tier differs, a non-belt entity occupies
 the path, or the direction is wrong. East-facing underground-belt `output` ends
 can pass at the start of a visible segment, and east-facing underground-belt
-`input` ends can pass at the end of one. Underground belts in the middle of a
-visible segment, underground belts without a preserved type, and splitters stay
-`unresolved` until a dedicated pairing or splitter parser can prove their
-semantics. This is still not a full belt simulation: it does not understand lane
-filters, splitter balancing, stacked belts, underground-belt pairing semantics,
-or inserter timing.
+`input` ends can pass at the end of one. A same-segment east-facing
+underground-belt `input` followed by a matching `output` can also pass; the
+route generator treats the tiles between that pair as hidden tunnel span instead
+of filling them with visible connector belts. Underground endpoints that do not
+form such an explicit input-to-output pair, underground belts without a
+preserved type, and splitters stay `unresolved` until a stronger parser can
+prove their semantics. This is still not a full belt simulation: it does not
+understand lane filters, splitter balancing, stacked belts, cross-segment
+underground-belt pairing, or inserter timing.
 
 The machine I/O audit is the next conservative semantic pass. It imports
 entity selection boxes and inserter pickup/insert positions from the current
