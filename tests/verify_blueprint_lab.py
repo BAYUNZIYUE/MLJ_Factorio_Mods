@@ -347,6 +347,69 @@ def main() -> int:
         print("FAIL: connected blueprint did not round-trip through Factorio string encoding")
         return 1
 
+    detour_layout = {
+        "target_item": "copper-plate",
+        "target_rate_per_minute": 60,
+        "spacing": 1,
+        "estimated_width": 10,
+        "estimated_height": 10,
+        "boundary_inputs": [],
+        "boundary_outputs": [{"item": "copper-plate", "rate_per_minute": 60, "side": "right"}],
+        "nodes": [
+            {
+                "item": "copper-plate",
+                "recipe": "fixture-copper",
+                "fingerprint": "detour-template",
+                "instances": 1,
+                "source_width": 4,
+                "source_height": 3,
+                "source_entity_count": 2,
+                "source_tile_count": 0,
+                "columns": 1,
+                "rows": 1,
+                "planned_width": 4,
+                "planned_height": 3,
+                "x": 4,
+                "y": 4,
+                "ports": [{"side": "right", "role": "output", "entity_name": "transport-belt", "x": 1, "y": 1}],
+                "port_counts": [("right:output", 1)],
+                "source": "fixture",
+                "path": "/detour",
+            }
+        ],
+    }
+    detour_mappings = [
+        {
+            "fingerprint": "detour-template",
+            "layout": {
+                "entities": [
+                    {"name": "transport-belt", "x": 1, "y": 1, "direction": 2, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "stone-furnace", "x": 2, "y": 1, "direction": None, "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    detoured, detour_summary = materialize_layout_with_summary(
+        detour_layout,
+        detour_mappings,
+        label="fixture-detoured",
+        connect_boundaries=True,
+    )
+    detour_route = detour_summary["routes"][0]
+    if detour_route["status"] != "connected" or detour_route["route_kind"] != "detour-y-1":
+        print(f"FAIL: expected output route to detour around a straight-line collision: {detour_summary}")
+        return 1
+    if not detour_route["blocked_attempts"] or detour_route["blocked_attempts"][0]["route_kind"] != "direct":
+        print(f"FAIL: expected detour report to retain the blocked direct attempt: {detour_summary}")
+        return 1
+    if detour_summary["collisions"]:
+        print(f"FAIL: successful detour should not keep collisions in the connector summary: {detour_summary}")
+        return 1
+    if decode_blueprint_string(encode_blueprint_string(detoured)) != detoured:
+        print("FAIL: detoured blueprint did not round-trip through Factorio string encoding")
+        return 1
+
     print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, materializes a blueprint skeleton, and generates a seed blueprint.")
     return 0
 
