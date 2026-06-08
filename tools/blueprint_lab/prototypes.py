@@ -79,6 +79,20 @@ class BeltPrototype:
 
 
 @dataclass(frozen=True)
+class EntityBox:
+    name: str
+    type: str
+    selection_box: tuple[tuple[float, float], tuple[float, float]]
+
+
+@dataclass(frozen=True)
+class InserterPrototype:
+    name: str
+    pickup_position: tuple[float, float]
+    insert_position: tuple[float, float]
+
+
+@dataclass(frozen=True)
 class PrototypeKnowledge:
     recipes: dict[str, Recipe]
     crafting_entities: dict[str, CraftingEntity]
@@ -86,6 +100,8 @@ class PrototypeKnowledge:
     qualities: dict[str, QualityPrototype]
     beacons: dict[str, BeaconPrototype]
     belts: dict[str, BeltPrototype]
+    entity_boxes: dict[str, EntityBox]
+    inserters: dict[str, InserterPrototype]
 
     def recipe(self, name: str) -> Recipe | None:
         return self.recipes.get(name)
@@ -109,6 +125,12 @@ class PrototypeKnowledge:
 
     def belt(self, name: str) -> BeltPrototype | None:
         return self.belts.get(name)
+
+    def entity_box(self, name: str) -> EntityBox | None:
+        return self.entity_boxes.get(name)
+
+    def inserter(self, name: str) -> InserterPrototype | None:
+        return self.inserters.get(name)
 
 
 def value_amount(value: Any, default: float = 1.0) -> float:
@@ -251,6 +273,40 @@ def normalize_belt(name: str, entity_type: str, proto: dict[str, Any]) -> BeltPr
     )
 
 
+def normalize_box(value: Any) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    first, second = value
+    if not isinstance(first, list) or not isinstance(second, list) or len(first) != 2 or len(second) != 2:
+        return None
+    if not all(isinstance(item, (int, float)) for item in [*first, *second]):
+        return None
+    return ((float(first[0]), float(first[1])), (float(second[0]), float(second[1])))
+
+
+def normalize_entity_box(name: str, entity_type: str, proto: dict[str, Any]) -> EntityBox | None:
+    box = normalize_box(proto.get("selection_box") or proto.get("collision_box"))
+    if box is None:
+        return None
+    return EntityBox(name=name, type=entity_type, selection_box=box)
+
+
+def normalize_position(value: Any) -> tuple[float, float] | None:
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    if not all(isinstance(item, (int, float)) for item in value):
+        return None
+    return (float(value[0]), float(value[1]))
+
+
+def normalize_inserter(name: str, proto: dict[str, Any]) -> InserterPrototype | None:
+    pickup = normalize_position(proto.get("pickup_position"))
+    insert = normalize_position(proto.get("insert_position"))
+    if pickup is None or insert is None:
+        return None
+    return InserterPrototype(name=name, pickup_position=pickup, insert_position=insert)
+
+
 def load_data_raw(path: Path) -> PrototypeKnowledge:
     raw = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw, dict):
@@ -307,6 +363,22 @@ def load_data_raw(path: Path) -> PrototypeKnowledge:
             if belt is not None:
                 belts[name] = belt
 
+    entity_boxes: dict[str, EntityBox] = {}
+    inserters: dict[str, InserterPrototype] = {}
+    for entity_type, table in raw.items():
+        if not isinstance(table, dict):
+            continue
+        for name, proto in table.items():
+            if not isinstance(proto, dict):
+                continue
+            entity_box = normalize_entity_box(name, entity_type, proto)
+            if entity_box is not None:
+                entity_boxes[name] = entity_box
+            if entity_type == "inserter":
+                inserter = normalize_inserter(name, proto)
+                if inserter is not None:
+                    inserters[name] = inserter
+
     return PrototypeKnowledge(
         recipes=recipes,
         crafting_entities=crafting_entities,
@@ -314,11 +386,22 @@ def load_data_raw(path: Path) -> PrototypeKnowledge:
         qualities=qualities,
         beacons=beacons,
         belts=belts,
+        entity_boxes=entity_boxes,
+        inserters=inserters,
     )
 
 
 def empty_knowledge() -> PrototypeKnowledge:
-    return PrototypeKnowledge(recipes={}, crafting_entities={}, modules={}, qualities={}, beacons={}, belts={})
+    return PrototypeKnowledge(
+        recipes={},
+        crafting_entities={},
+        modules={},
+        qualities={},
+        beacons={},
+        belts={},
+        entity_boxes={},
+        inserters={},
+    )
 
 
 def target_rate_basis_from_args(

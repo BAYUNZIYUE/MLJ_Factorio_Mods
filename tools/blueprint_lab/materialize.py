@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from .production_dag import (
     default_boundary_items,
     template_options_from_mappings,
 )
-from .prototypes import load_data_raw, target_rate_basis_from_args
+from .prototypes import PrototypeKnowledge, load_data_raw, target_rate_basis_from_args
 from .template_knowledge import map_template_library
 
 
@@ -82,6 +83,169 @@ def is_belt_like_entity_name(name: str) -> bool:
 
 def canonical_transport_belt_name(name: str) -> str:
     return connector_belt_name_for_port({"entity_name": name})
+
+
+def rotate_vector(vector: tuple[float, float], direction: int | None) -> tuple[float, float]:
+    angle = (int(direction or 0) % 16) * math.pi / 8
+    x, y = vector
+    return (
+        round(x * math.cos(angle) - y * math.sin(angle), 3),
+        round(x * math.sin(angle) + y * math.cos(angle), 3),
+    )
+
+
+def entity_position(entity: dict[str, Any]) -> tuple[float, float]:
+    position = entity.get("position") or {}
+    return (float(position.get("x", 0.0)), float(position.get("y", 0.0)))
+
+
+def point_in_entity_box(point: tuple[float, float], entity: dict[str, Any], knowledge: PrototypeKnowledge) -> bool:
+    box = knowledge.entity_box(str(entity.get("name") or ""))
+    if box is None:
+        return False
+    entity_x, entity_y = entity_position(entity)
+    (min_x, min_y), (max_x, max_y) = box.selection_box
+    point_x, point_y = point
+    tolerance = 0.05
+    return (
+        entity_x + min_x - tolerance <= point_x <= entity_x + max_x + tolerance
+        and entity_y + min_y - tolerance <= point_y <= entity_y + max_y + tolerance
+    )
+
+
+def endpoint_targets(
+    point: tuple[float, float],
+    entities: list[dict[str, Any]],
+    *,
+    source_entity_number: int,
+    knowledge: PrototypeKnowledge,
+) -> list[dict[str, Any]]:
+    targets: list[dict[str, Any]] = []
+    for entity in entities:
+        if int(entity.get("entity_number") or 0) == source_entity_number:
+            continue
+        name = str(entity.get("name") or "")
+        role = None
+        if entity.get("recipe") and knowledge.entity(name):
+            role = "machine"
+        elif is_belt_like_entity_name(name):
+            role = "belt"
+        if role is None or not point_in_entity_box(point, entity, knowledge):
+            continue
+        targets.append(
+            {
+                "entity_number": int(entity.get("entity_number") or 0),
+                "name": name,
+                "role": role,
+                "recipe": entity.get("recipe"),
+            }
+        )
+    return targets
+
+
+def audit_machine_io(wrapper: dict[str, Any], knowledge: PrototypeKnowledge | None) -> list[dict[str, Any]]:
+    if knowledge is None:
+        return []
+    entities = list((wrapper.get("blueprint") or {}).get("entities") or [])
+    if not entities:
+        return []
+
+    machine_state: dict[int, dict[str, Any]] = {}
+    for entity in entities:
+        name = str(entity.get("name") or "")
+        if not entity.get("recipe") or knowledge.entity(name) is None:
+            continue
+        number = int(entity.get("entity_number") or 0)
+        recipe_name = str(entity.get("recipe") or "")
+        recipe = knowledge.recipe(recipe_name)
+        machine_state[number] = {
+            "entity_number": number,
+            "name": name,
+            "recipe": recipe_name,
+            "input_inserters": set(),
+            "output_inserters": set(),
+            "input_required": True if recipe is None else any(item.type == "item" and item.amount > 0 for item in recipe.ingredients),
+            "output_required": True if recipe is None else any(item.type == "item" and item.amount > 0 for item in recipe.products),
+        }
+
+    unresolved_inserters: list[dict[str, Any]] = []
+    for entity in entities:
+        name = str(entity.get("name") or "")
+        inserter = knowledge.inserter(name)
+        if inserter is None:
+            continue
+        number = int(entity.get("entity_number") or 0)
+        origin_x, origin_y = entity_position(entity)
+        pickup_dx, pickup_dy = rotate_vector(inserter.pickup_position, entity.get("direction"))
+        insert_dx, insert_dy = rotate_vector(inserter.insert_position, entity.get("direction"))
+        pickup_targets = endpoint_targets(
+            (round(origin_x + pickup_dx, 3), round(origin_y + pickup_dy, 3)),
+            entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        insert_targets = endpoint_targets(
+            (round(origin_x + insert_dx, 3), round(origin_y + insert_dy, 3)),
+            entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        pickup_machines = [target for target in pickup_targets if target["role"] == "machine" and target["entity_number"] in machine_state]
+        insert_machines = [target for target in insert_targets if target["role"] == "machine" and target["entity_number"] in machine_state]
+        pickup_belts = [target for target in pickup_targets if target["role"] == "belt"]
+        insert_belts = [target for target in insert_targets if target["role"] == "belt"]
+        for machine in insert_machines:
+            if pickup_belts:
+                machine_state[machine["entity_number"]]["input_inserters"].add(number)
+        for machine in pickup_machines:
+            if insert_belts:
+                machine_state[machine["entity_number"]]["output_inserters"].add(number)
+        if not ((pickup_machines and insert_belts) or (pickup_belts and insert_machines)):
+            unresolved_inserters.append(
+                {
+                    "entity_number": number,
+                    "name": name,
+                    "pickup_targets": pickup_targets,
+                    "insert_targets": insert_targets,
+                }
+            )
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for state in machine_state.values():
+        grouped.setdefault(str(state["recipe"]), []).append(state)
+
+    audit: list[dict[str, Any]] = []
+    for recipe, machines in sorted(grouped.items()):
+        input_required = any(bool(machine["input_required"]) for machine in machines)
+        output_required = any(bool(machine["output_required"]) for machine in machines)
+        machines_with_input = sum(1 for machine in machines if machine["input_inserters"])
+        machines_with_output = sum(1 for machine in machines if machine["output_inserters"])
+        input_covered = not input_required or machines_with_input == len(machines)
+        output_covered = not output_required or machines_with_output == len(machines)
+        audit.append(
+            {
+                "recipe": recipe,
+                "status": "covered" if input_covered and output_covered else "partial",
+                "machine_count": len(machines),
+                "input_required": input_required,
+                "output_required": output_required,
+                "machines_with_input": machines_with_input,
+                "machines_with_output": machines_with_output,
+                "input_inserter_count": sum(len(machine["input_inserters"]) for machine in machines),
+                "output_inserter_count": sum(len(machine["output_inserters"]) for machine in machines),
+            }
+        )
+    if unresolved_inserters:
+        audit.append(
+            {
+                "recipe": "__unresolved_inserters__",
+                "status": "unresolved",
+                "machine_count": 0,
+                "unresolved_inserter_count": len(unresolved_inserters),
+                "samples": unresolved_inserters[:8],
+            }
+        )
+    return audit
 
 
 def materialized_tile(raw: dict[str, Any], *, x: float, y: float) -> dict[str, Any]:
@@ -1070,7 +1234,13 @@ def build_materialized_blueprint(
     return materialize_layout(layout, mappings, label=label, connect_boundaries=connect_boundaries)
 
 
-def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_summary: dict[str, Any] | None = None) -> dict[str, Any]:
+def render_summary(
+    wrapper: dict[str, Any],
+    layout: dict[str, Any],
+    connector_summary: dict[str, Any] | None = None,
+    *,
+    knowledge: PrototypeKnowledge | None = None,
+) -> dict[str, Any]:
     blueprint = wrapper["blueprint"]
     metrics = blueprint_metrics("/", blueprint)
     summary = connector_summary or {
@@ -1120,10 +1290,12 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
         "layout_nodes": layout_nodes,
         "connector_summary": summary,
         "route_status_counts": dict(route_status_counts),
+        "machine_io_audit": audit_machine_io(wrapper, knowledge),
         "lessons": [
             "Materialization copies learned local template geometry into the planned rectangle instead of inventing machines from scratch.",
             "Boundary connectors are generated only in reserved lanes and checked for exact entity-position collisions.",
-            "The generated blueprint is still not production-ready: pipe routing, power, full belt routing, cross-template beacon modeling, and in-game validation remain separate steps.",
+            "Machine I/O audit checks inserter endpoints against data.raw entity boxes; it is an adjacency guard, not a full inserter throughput simulation.",
+            "The generated blueprint is still not production-ready: pipe routing, power, splitter/lane semantics, cross-template beacon modeling, and in-game validation remain separate steps.",
         ],
     }
 
@@ -1145,6 +1317,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Belt flow status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('belt_flow_audit') or []))}",
+        f"- Machine I/O status counts: {dict(Counter(item.get('status', 'unknown') for item in summary.get('machine_io_audit') or []))}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
         f"- Layout estimate: {summary['layout_estimated_width']:g} x {summary['layout_estimated_height']:g}",
         f"- Density: {summary['density']:g}",
@@ -1263,6 +1436,20 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             if item.get("unresolved"):
                 line += f" unresolved={len(item['unresolved'])}"
             lines.append(line)
+    if summary.get("machine_io_audit"):
+        lines.extend(["", "## Machine I/O Audit", ""])
+        for item in summary["machine_io_audit"]:
+            if item.get("recipe") == "__unresolved_inserters__":
+                lines.append(
+                    f"- unresolved inserters: status={item['status']} count={item.get('unresolved_inserter_count', 0)}"
+                )
+                continue
+            lines.append(
+                f"- {item['recipe']}: status={item['status']} machines={item['machine_count']} "
+                f"input={item['machines_with_input']}/{item['machine_count']} "
+                f"output={item['machines_with_output']}/{item['machine_count']} "
+                f"inserters={item['input_inserter_count']} in/{item['output_inserter_count']} out"
+            )
     if summary["connector_summary"]["collisions"]:
         lines.extend(["", "## Connector Collisions", ""])
         for item in summary["connector_summary"]["collisions"]:
@@ -1347,7 +1534,7 @@ def main(argv: list[str] | None = None) -> int:
         connect_boundaries=args.connect_boundaries,
     )
     save_blueprint_file(args.output, wrapper)
-    summary = render_summary(wrapper, layout, connector_summary)
+    summary = render_summary(wrapper, layout, connector_summary, knowledge=knowledge)
     summary["output"] = str(args.output)
     summary["template_mapping_status_counts"] = template_summary["status_counts"]
     summary["template_mapping_failed_files"] = template_summary["failed_files"]

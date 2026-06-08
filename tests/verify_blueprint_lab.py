@@ -20,7 +20,7 @@ from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import build_materialized_blueprint, materialize_layout_with_summary
+from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary
 
 
 def main() -> int:
@@ -118,7 +118,15 @@ def main() -> int:
     "assembling-machine-3": {
       "crafting_categories": ["crafting"],
       "crafting_speed": 1.25,
-      "module_slots": 4
+      "module_slots": 4,
+      "selection_box": [[-0.5, -0.5], [0.5, 0.5]]
+    }
+  },
+  "inserter": {
+    "fast-inserter": {
+      "pickup_position": [0, -1],
+      "insert_position": [0, 1],
+      "selection_box": [[-0.4, -0.4], [0.4, 0.4]]
     }
   },
   "module": {
@@ -132,8 +140,8 @@ def main() -> int:
     "legendary": {"level": 5}
   },
   "transport-belt": {
-    "transport-belt": {"speed": 0.03125},
-    "turbo-transport-belt": {"speed": 0.125}
+    "transport-belt": {"speed": 0.03125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]},
+    "turbo-transport-belt": {"speed": 0.125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]}
   }
 }
 """,
@@ -142,6 +150,38 @@ def main() -> int:
     knowledge = load_data_raw(data_raw_path)
     if knowledge.quality_effect_multiplier("legendary") != 2.5:
         print(f"FAIL: expected legendary quality to scale positive module effects by 2.5: {knowledge.qualities}")
+        return 1
+    if knowledge.inserter("fast-inserter") is None or knowledge.entity_box("assembling-machine-3") is None:
+        print(f"FAIL: expected data.raw fixture to import inserter endpoints and entity boxes: {knowledge}")
+        return 1
+    io_audit = audit_machine_io(
+        {
+            "blueprint": {
+                "entities": [
+                    {"entity_number": 1, "name": "transport-belt", "position": {"x": 2, "y": 0}, "direction": DIR_EAST},
+                    {"entity_number": 2, "name": "fast-inserter", "position": {"x": 2, "y": 1}, "direction": 0},
+                    {"entity_number": 3, "name": "assembling-machine-3", "position": {"x": 2, "y": 2}, "recipe": "iron-gear-wheel"},
+                    {"entity_number": 4, "name": "fast-inserter", "position": {"x": 2, "y": 3}, "direction": 0},
+                    {"entity_number": 5, "name": "transport-belt", "position": {"x": 2, "y": 4}, "direction": DIR_EAST},
+                ]
+            }
+        },
+        knowledge,
+    )
+    if io_audit != [
+        {
+            "recipe": "iron-gear-wheel",
+            "status": "covered",
+            "machine_count": 1,
+            "input_required": True,
+            "output_required": True,
+            "machines_with_input": 1,
+            "machines_with_output": 1,
+            "input_inserter_count": 1,
+            "output_inserter_count": 1,
+        }
+    ]:
+        print(f"FAIL: expected inserter endpoint audit to prove one machine input and output: {io_audit}")
         return 1
     target_rate, target_rate_basis = target_rate_basis_from_args(
         knowledge,

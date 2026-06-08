@@ -19,6 +19,7 @@ tree.
 - Turn a production DAG seed into a rectangular layout plan with repeated template grids, estimated module dimensions, and left/right black-box boundaries.
 - Materialize a layout plan into an importable blueprint skeleton by copying learned normalized template entities and tiles into the planned rectangle.
 - Connect same-row copied input ports with a conservative fanout pass that can reuse existing same-tier belt, underground-belt, and splitter entities as bus evidence instead of overwriting them.
+- Audit production-machine inserter endpoints against data.raw entity boxes, so generated reports can distinguish target machines with belt-fed input/output from copied but disconnected machines.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -190,6 +191,18 @@ visible segment, underground belts without a preserved type, and splitters stay
 semantics. This is still not a full belt simulation: it does not understand lane
 filters, splitter balancing, stacked belts, underground-belt pairing semantics,
 or inserter timing.
+
+The machine I/O audit is the next conservative semantic pass. It imports
+entity selection boxes and inserter pickup/insert positions from the current
+data.raw export, rotates inserter endpoint vectors by blueprint direction, and
+checks whether each recipe machine has at least one belt-to-machine input
+inserter and one machine-to-belt output inserter when the recipe has item inputs
+and products. This is weaker than a Factorio simulation: it does not prove
+inserter throughput, stack size, filters, lane choice, item identity, or whether
+unrelated recipe machines copied from the learned cell should remain in the
+generated target box. It is still useful because it exposes when a learned
+template copies extra recipe machines that are not attached to the selected
+target bus.
 
 ## Commands
 
