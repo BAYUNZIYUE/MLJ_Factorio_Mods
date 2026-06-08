@@ -69,6 +69,9 @@ def main() -> int:
         "runtime_audit_wait_ticks=",
         "recipe_machine_audit",
         "recipe_machine_runtime",
+        "input_injection items=",
+        "line.force_insert_at",
+        "transport_item_audit",
         "script.on_event(defines.events.on_tick",
     ]:
         if expected not in validation_lua:

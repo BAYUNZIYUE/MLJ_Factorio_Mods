@@ -104,6 +104,146 @@ local function audit_recipe_machines(surface)
   log("BLUEPRINT_LAB_VALIDATION recipe_machine_runtime crafting_speed_positive=" .. tostring(crafting_speed_positive) .. " electric_connected=" .. tostring(electric_connected_count) .. "/" .. tostring(electric_checked_count) .. " products_finished=" .. tostring(products_finished_total) .. " module_items=" .. tostring(module_item_total) .. " output_items=" .. tostring(output_item_total))
 end
 
+local function collect_recipe_input_items(surface)
+  local input_items = {{}}
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_recipe, recipe = pcall(function()
+      return entity.get_recipe()
+    end)
+    if ok_recipe and recipe ~= nil then
+      for _, ingredient in pairs(recipe.ingredients or {{}}) do
+        if ingredient.name ~= nil and ingredient.type ~= "fluid" then
+          input_items[ingredient.name] = true
+        end
+      end
+    end
+  end
+  return input_items
+end
+
+local function collect_recipe_product_items(surface)
+  local product_items = {{}}
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_recipe, recipe = pcall(function()
+      return entity.get_recipe()
+    end)
+    if ok_recipe and recipe ~= nil then
+      for _, product in pairs(recipe.products or {{}}) do
+        if product.name ~= nil and product.type ~= "fluid" then
+          product_items[product.name] = true
+        end
+      end
+    end
+  end
+  return product_items
+end
+
+local function sorted_keys(values)
+  local keys = {{}}
+  for key, _ in pairs(values) do
+    keys[#keys + 1] = key
+  end
+  table.sort(keys)
+  return keys
+end
+
+local function audit_transport_items(surface)
+  local input_items = collect_recipe_input_items(surface)
+  local product_items = collect_recipe_product_items(surface)
+  local item_counts = {{}}
+  local belt_count = 0
+  local line_count = 0
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_line_count, max_line_index = pcall(function()
+      return entity.get_max_transport_line_index()
+    end)
+    if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+      belt_count = belt_count + 1
+      for line_index = 1, max_line_index do
+        local line = entity.get_transport_line(line_index)
+        if line ~= nil then
+          line_count = line_count + 1
+          for item_name, _ in pairs(input_items) do
+            local ok_count, item_count = pcall(function()
+              return line.get_item_count(item_name)
+            end)
+            if ok_count and item_count ~= nil and item_count > 0 then
+              item_counts[item_name] = (item_counts[item_name] or 0) + item_count
+            end
+          end
+          for item_name, _ in pairs(product_items) do
+            local ok_count, item_count = pcall(function()
+              return line.get_item_count(item_name)
+            end)
+            if ok_count and item_count ~= nil and item_count > 0 then
+              item_counts[item_name] = (item_counts[item_name] or 0) + item_count
+            end
+          end
+        end
+      end
+    end
+  end
+  log("BLUEPRINT_LAB_VALIDATION transport_item_audit belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count) .. " items=" .. sorted_count_string(item_counts))
+end
+
+local function inject_input_items_to_left_belts(surface)
+  local input_items = collect_recipe_input_items(surface)
+  local item_names = sorted_keys(input_items)
+  if #item_names == 0 then
+    log("BLUEPRINT_LAB_VALIDATION input_injection items= belts=0 lines=0 inserted=0 failures=0")
+    return
+  end
+
+  local belt_candidates = {{}}
+  local min_x = nil
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_line_count, line_count = pcall(function()
+      return entity.get_max_transport_line_index()
+    end)
+    if ok_line_count and line_count ~= nil and line_count > 0 and entity.direction == defines.direction.east then
+      local x = entity.position.x
+      if min_x == nil or x < min_x then
+        min_x = x
+      end
+      belt_candidates[#belt_candidates + 1] = {{entity = entity, line_count = line_count, x = x}}
+    end
+  end
+
+  local belt_count = 0
+  local line_count_total = 0
+  local inserted_count = 0
+  local insertion_failures = 0
+  if min_x ~= nil then
+    for _, candidate in pairs(belt_candidates) do
+      if candidate.x <= min_x + 6 then
+        belt_count = belt_count + 1
+        for line_index = 1, candidate.line_count do
+          local line = candidate.entity.get_transport_line(line_index)
+          if line ~= nil then
+            line_count_total = line_count_total + 1
+            local line_length = line.line_length or 1
+            local position = 0
+            while position <= line_length do
+              for _, item_name in pairs(item_names) do
+                local ok_insert = pcall(function()
+                  line.force_insert_at(position, {{name = item_name, count = 1}}, 1)
+                end)
+                if ok_insert then
+                  inserted_count = inserted_count + 1
+                else
+                  insertion_failures = insertion_failures + 1
+                end
+              end
+              position = position + 0.25
+            end
+          end
+        end
+      end
+    end
+  end
+  log("BLUEPRINT_LAB_VALIDATION input_injection items=" .. table.concat(item_names, ",") .. " belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count_total) .. " inserted=" .. tostring(inserted_count) .. " failures=" .. tostring(insertion_failures))
+end
+
 local validation_started = false
 local pending_audit_surface = nil
 local pending_audit_tick = nil
@@ -349,6 +489,7 @@ local function run_validation()
 
   local surface_entities = surface.find_entities_filtered{{force = game.forces.player}}
   log("BLUEPRINT_LAB_VALIDATION surface_entities=" .. tostring(#surface_entities))
+  inject_input_items_to_left_belts(surface)
   pending_audit_surface = surface
   pending_audit_tick = game.tick + runtime_audit_wait_ticks
   log("BLUEPRINT_LAB_VALIDATION runtime_audit_wait_ticks=" .. tostring(runtime_audit_wait_ticks))
@@ -363,6 +504,7 @@ script.on_event(defines.events.on_tick, function(event)
   if pending_audit_surface ~= nil and game.tick >= pending_audit_tick then
     script.on_event(defines.events.on_tick, nil)
     audit_recipe_machines(pending_audit_surface)
+    audit_transport_items(pending_audit_surface)
     log("BLUEPRINT_LAB_VALIDATION success")
     validation_fail("completed")
   end

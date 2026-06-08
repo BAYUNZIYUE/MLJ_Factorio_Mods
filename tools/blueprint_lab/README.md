@@ -271,6 +271,21 @@ items installed, and electric network connection. Their current status is
 asteroid-chunk input flow rather than placement, recipe unlock, module, or
 power availability.
 
+The runtime validator now includes a first input-flow probe. It collects item
+ingredients from recipe machines, force-inserts those items onto east-facing
+transport lines near the left edge of the built surface, waits for the same
+runtime audit tick, then counts both recipe input items and recipe products on
+all transport lines. This is deliberately a diagnostic probe rather than a
+success criterion. In the current platform sample, inserting
+`metallic-asteroid-chunk` onto left-edge belts leaves the crushers in
+`item_ingredient_shortage` and the transport audit sees chunks but no
+`iron-ore`. The latest runtime probe injected `metallic-asteroid-chunk` across
+20 belts and 40 transport lines with 200 successful insertion attempts; the
+later audit still reported `products_finished=0` and saw 400 chunks on
+transport lines. That proves the next generator problem is not just external
+boundary capacity; the generated boundary route must connect to the belt lane
+that a crusher input inserter actually picks from.
+
 ## Commands
 
 Analyze a blueprint directory:
