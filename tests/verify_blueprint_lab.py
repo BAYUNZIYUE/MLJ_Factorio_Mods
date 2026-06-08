@@ -65,6 +65,10 @@ def main() -> int:
         "surface.create_entity",
         "manual_underground_types=",
         "manual_modules_inserted=",
+        "manual_splitter_settings=",
+        "created.splitter_filter",
+        "created.splitter_input_priority",
+        "created.splitter_output_priority",
         "created.set_recipe(entity.recipe, entity.recipe_quality)",
         "runtime_audit_wait_ticks=",
         "recipe_machine_audit",
@@ -84,6 +88,7 @@ def main() -> int:
         "transport_item_y_distribution",
         "transport_item_samples",
         "right_boundary_transport_item_audit",
+        "right_boundary_item_samples",
         "right_boundary_cleanliness",
         "script.on_event(defines.events.on_tick",
     ]:
@@ -1204,6 +1209,47 @@ def main() -> int:
     pair_positions = pair_audit[0]["underground_pairs"][0]
     if pair_positions["input_x"] != 6.0 or pair_positions["output_x"] != 10.0 or pair_positions["hidden_positions"] != 3:
         print(f"FAIL: expected underground pair tracing to record hidden span: {underground_pair_summary}")
+        return 1
+
+    splitter_mapping = [
+        {
+            "fingerprint": "splitter-template",
+            "layout": {
+                "entities": [
+                    {
+                        "name": "turbo-splitter",
+                        "x": 0,
+                        "y": 0,
+                        "direction": DIR_EAST,
+                        "filter": {"name": "iron-ore", "quality": "normal", "comparator": "="},
+                        "output_priority": "left",
+                        "input_priority": "right",
+                    },
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    splitter_layout = deepcopy(replicated_layout)
+    splitter_layout["nodes"][0]["fingerprint"] = "splitter-template"
+    splitter_layout["nodes"][0]["instances"] = 1
+    splitter_layout["nodes"][0]["columns"] = 1
+    splitter_layout["nodes"][0]["rows"] = 1
+    splitter_layout["boundary_inputs"] = []
+    splitter_layout["boundary_outputs"] = []
+    splitter_wrapper, _ = materialize_layout_with_summary(
+        splitter_layout,
+        splitter_mapping,
+        label="fixture-splitter-fields",
+        connect_boundaries=False,
+    )
+    splitter_entity = splitter_wrapper["blueprint"]["entities"][0]
+    if (
+        splitter_entity.get("filter", {}).get("name") != "iron-ore"
+        or splitter_entity.get("output_priority") != "left"
+        or splitter_entity.get("input_priority") != "right"
+    ):
+        print(f"FAIL: expected materializer to preserve splitter filter and priorities: {splitter_wrapper}")
         return 1
 
     print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, materializes a blueprint skeleton, and generates a seed blueprint.")

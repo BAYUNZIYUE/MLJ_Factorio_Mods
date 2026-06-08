@@ -21,8 +21,9 @@ tree.
 - Connect same-row copied input ports with a conservative fanout pass that can reuse existing same-tier belt, underground-belt, and splitter entities as bus evidence instead of overwriting them.
 - Audit connected boundary belt capacity against data.raw belt speed, so generated reports can catch cases where machine coverage is high enough but the final boundary has too few belt lanes.
 - Audit production-machine inserter endpoints against data.raw entity boxes, so generated reports can distinguish target machines with belt-fed input/output from copied but disconnected machines.
+- Audit target recipes for item byproducts that are not the requested output, so generated reports can explain when a clean black-box output boundary needs filtering, recycling, or another separation strategy.
 - Import a generated blueprint through a real Factorio runtime scenario and attempt to build it on the matching surface type. Space platform blueprints are validated on a temporary space platform with foundation tiles pre-placed before entity building is attempted; if `build_blueprint` returns zero entities, the validator can fall back to direct `surface.create_entity` placement to prove the entity names, qualities, recipe qualities, underground-belt endpoint types, module item stacks, and occupied positions are accepted by the current game runtime.
-- Audit the generated right boundary in the runtime scenario as a separate cleanliness check, distinguishing a boundary that contains target products from one that also leaks recipe input items.
+- The runtime fallback also restores splitter filters and input/output priorities, so future item-separation passes can be validated on platform blueprints that still require direct placement. Runtime boundary audit records right-boundary samples and cleanliness separately, distinguishing a boundary that contains target products from one that also leaks recipe input or byproduct items.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full

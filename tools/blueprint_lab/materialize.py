@@ -47,6 +47,9 @@ def materialized_entity(raw: dict[str, Any], entity_number: int, *, x: float, y:
         entity["quality"] = raw["quality"]
     if raw.get("items"):
         entity["items"] = copy.deepcopy(raw["items"])
+    for field in ("filter", "input_priority", "output_priority"):
+        if raw.get(field) is not None:
+            entity[field] = copy.deepcopy(raw[field])
     return entity
 
 
@@ -477,6 +480,7 @@ def add_boundary_connectors(
             "boundary_coverage": [],
             "boundary_capacity_audit": [],
             "boundary_contract_audit": [],
+            "output_byproduct_audit": [],
             "belt_flow_audit": [],
         }
 
@@ -1568,6 +1572,43 @@ def add_boundary_connectors(
             }
         ]
 
+    def output_byproduct_audit() -> list[dict[str, Any]]:
+        if knowledge is None:
+            return []
+        target_item = str(layout_plan.get("target_item") or "")
+        audits: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for node in layout_plan.get("nodes") or []:
+            recipe_name = str(node.get("recipe") or "")
+            if not recipe_name or recipe_name in seen:
+                continue
+            seen.add(recipe_name)
+            recipe = knowledge.recipe(recipe_name)
+            if recipe is None:
+                continue
+            byproducts = []
+            for product in recipe.products:
+                if product.type != "item" or product.name == target_item:
+                    continue
+                byproducts.append(
+                    {
+                        "item": product.name,
+                        "amount": product.amount,
+                        "probability": product.probability,
+                    }
+                )
+            if not byproducts:
+                continue
+            audits.append(
+                {
+                    "recipe": recipe_name,
+                    "target_item": target_item,
+                    "status": "requires-separation",
+                    "byproducts": byproducts,
+                }
+            )
+        return audits
+
     def bridge_edges_for_node(fingerprint: str, y: float) -> list[tuple[int, int]]:
         edges: list[tuple[int, int]] = []
         for bridge in bridges:
@@ -1985,6 +2026,7 @@ def add_boundary_connectors(
     flow_audit = belt_flow_audit()
     capacity_audit = boundary_capacity_audit(flow_audit)
     contract_audit = boundary_contract_audit()
+    byproduct_audit = output_byproduct_audit()
     entities.extend(connectors)
     return {
         "connectors_added": len(connectors),
@@ -1999,6 +2041,7 @@ def add_boundary_connectors(
         "boundary_coverage": coverage,
         "boundary_capacity_audit": capacity_audit,
         "boundary_contract_audit": contract_audit,
+        "output_byproduct_audit": byproduct_audit,
         "belt_flow_audit": flow_audit,
     }
 
@@ -2096,6 +2139,7 @@ def materialize_layout_with_summary(
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
+        "output_byproduct_audit": [],
         "belt_flow_audit": [],
     }
     if connect_boundaries:
@@ -2532,6 +2576,18 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"- {item.get('boundary')}: status={item.get('status')} "
                 f"expected={item.get('expected_belt_count')}x {item.get('expected_belt_name')} "
                 f"routes={item.get('route_count')} lanes={item.get('route_ys')}"
+            )
+    if summary["connector_summary"].get("output_byproduct_audit"):
+        lines.extend(["", "## Output Byproduct Audit", ""])
+        for item in summary["connector_summary"]["output_byproduct_audit"]:
+            byproducts = ", ".join(
+                f"{byproduct['item']}:{byproduct.get('amount', 0):g}"
+                + (f"@{byproduct['probability']:g}" if byproduct.get("probability") is not None else "")
+                for byproduct in item.get("byproducts") or []
+            )
+            lines.append(
+                f"- {item.get('recipe')}: status={item.get('status')} "
+                f"target={item.get('target_item')} byproducts={byproducts}"
             )
     if summary["connector_summary"].get("belt_flow_audit"):
         lines.extend(["", "## Belt Flow Audit", ""])

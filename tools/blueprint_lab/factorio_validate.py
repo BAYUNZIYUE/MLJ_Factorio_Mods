@@ -304,6 +304,7 @@ local function audit_right_boundary_transport_items(surface)
     end
   end
   local item_counts = {{}}
+  local item_samples = {{}}
   local input_item_count = 0
   local product_item_count = 0
   local belt_count = 0
@@ -326,6 +327,12 @@ local function audit_right_boundary_transport_items(surface)
               if ok_count and item_count ~= nil and item_count > 0 then
                 item_counts[item_name] = (item_counts[item_name] or 0) + item_count
                 input_item_count = input_item_count + item_count
+                if item_samples[item_name] == nil then
+                  item_samples[item_name] = {{}}
+                end
+                if #item_samples[item_name] < 8 then
+                  item_samples[item_name][#item_samples[item_name] + 1] = tostring(entity.name) .. "@x" .. tostring(entity.position.x) .. "y" .. tostring(entity.position.y) .. "l" .. tostring(line_index) .. ":" .. tostring(item_count)
+                end
               end
             end
             for item_name, _ in pairs(product_items) do
@@ -335,6 +342,12 @@ local function audit_right_boundary_transport_items(surface)
               if ok_count and item_count ~= nil and item_count > 0 then
                 item_counts[item_name] = (item_counts[item_name] or 0) + item_count
                 product_item_count = product_item_count + item_count
+                if item_samples[item_name] == nil then
+                  item_samples[item_name] = {{}}
+                end
+                if #item_samples[item_name] < 8 then
+                  item_samples[item_name][#item_samples[item_name] + 1] = tostring(entity.name) .. "@x" .. tostring(entity.position.x) .. "y" .. tostring(entity.position.y) .. "l" .. tostring(line_index) .. ":" .. tostring(item_count)
+                end
               end
             end
           end
@@ -343,6 +356,11 @@ local function audit_right_boundary_transport_items(surface)
     end
   end
   log("BLUEPRINT_LAB_VALIDATION right_boundary_transport_item_audit max_x=" .. tostring(max_x) .. " belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count) .. " items=" .. sorted_count_string(item_counts))
+  local sample_parts = {{}}
+  for _, item_name in pairs(sorted_keys(item_samples)) do
+    sample_parts[#sample_parts + 1] = item_name .. "=" .. table.concat(item_samples[item_name] or {{}}, "|")
+  end
+  log("BLUEPRINT_LAB_VALIDATION right_boundary_item_samples items=" .. table.concat(sample_parts, ";"))
   local cleanliness_status = "empty"
   if max_x == nil then
     cleanliness_status = "no-boundary"
@@ -708,6 +726,8 @@ local function run_validation()
     local underground_type_failures = 0
     local module_inserted_count = 0
     local module_insert_failures = 0
+    local splitter_setting_count = 0
+    local splitter_setting_failures = 0
     for _, entity in pairs(blueprint_entities) do
       local entity_direction = entity.direction or defines.direction.north
       local ok_create, created = pcall(function()
@@ -761,6 +781,45 @@ local function run_validation()
             recipe_set_count = recipe_set_count + 1
           end
         end
+        if entity.filter ~= nil then
+          local ok_splitter_filter, splitter_filter_result = pcall(function()
+            created.splitter_filter = entity.filter
+          end)
+          if ok_splitter_filter then
+            splitter_setting_count = splitter_setting_count + 1
+          else
+            splitter_setting_failures = splitter_setting_failures + 1
+            if splitter_setting_failures <= 8 then
+              log("BLUEPRINT_LAB_VALIDATION manual_splitter_filter_failed " .. entity.name .. "=" .. tostring(splitter_filter_result))
+            end
+          end
+        end
+        if entity.input_priority ~= nil then
+          local ok_splitter_input_priority, splitter_input_priority_result = pcall(function()
+            created.splitter_input_priority = entity.input_priority
+          end)
+          if ok_splitter_input_priority then
+            splitter_setting_count = splitter_setting_count + 1
+          else
+            splitter_setting_failures = splitter_setting_failures + 1
+            if splitter_setting_failures <= 8 then
+              log("BLUEPRINT_LAB_VALIDATION manual_splitter_input_priority_failed " .. entity.name .. "=" .. tostring(splitter_input_priority_result))
+            end
+          end
+        end
+        if entity.output_priority ~= nil then
+          local ok_splitter_output_priority, splitter_output_priority_result = pcall(function()
+            created.splitter_output_priority = entity.output_priority
+          end)
+          if ok_splitter_output_priority then
+            splitter_setting_count = splitter_setting_count + 1
+          else
+            splitter_setting_failures = splitter_setting_failures + 1
+            if splitter_setting_failures <= 8 then
+              log("BLUEPRINT_LAB_VALIDATION manual_splitter_output_priority_failed " .. entity.name .. "=" .. tostring(splitter_output_priority_result))
+            end
+          end
+        end
         if entity.items ~= nil then
           local module_inventory = created.get_module_inventory()
           if module_inventory ~= nil then
@@ -801,7 +860,8 @@ local function run_validation()
     end
     log("BLUEPRINT_LAB_VALIDATION manual_entities=" .. tostring(manual_count) .. " manual_failures=" .. tostring(manual_failures) .. " manual_recipe_set=" .. tostring(recipe_set_count) .. " manual_recipe_failures=" .. tostring(recipe_failures))
     log("BLUEPRINT_LAB_VALIDATION manual_underground_types=" .. tostring(underground_type_count) .. " manual_underground_type_failures=" .. tostring(underground_type_failures) .. " manual_modules_inserted=" .. tostring(module_inserted_count) .. " manual_module_failures=" .. tostring(module_insert_failures))
-    if manual_failures > 0 or recipe_failures > 0 or underground_type_failures > 0 or module_insert_failures > 0 then
+    log("BLUEPRINT_LAB_VALIDATION manual_splitter_settings=" .. tostring(splitter_setting_count) .. " manual_splitter_setting_failures=" .. tostring(splitter_setting_failures))
+    if manual_failures > 0 or recipe_failures > 0 or underground_type_failures > 0 or module_insert_failures > 0 or splitter_setting_failures > 0 then
       validation_fail("manual fallback failed to place all entities")
     end
   end
