@@ -1451,6 +1451,11 @@ def add_boundary_connectors(
         if knowledge is None:
             return []
         target_item = str(layout_plan.get("target_item") or "")
+        boundary_inputs_by_item = {
+            str(item.get("item") or ""): item
+            for item in layout_plan.get("boundary_inputs") or []
+            if item.get("item")
+        }
         audits: list[dict[str, Any]] = []
         seen: set[str] = set()
         for node in layout_plan.get("nodes") or []:
@@ -1461,24 +1466,58 @@ def add_boundary_connectors(
             recipe = knowledge.recipe(recipe_name)
             if recipe is None:
                 continue
+            ingredient_by_item = {
+                ingredient.name: ingredient
+                for ingredient in recipe.ingredients
+                if ingredient.type == "item"
+            }
             byproducts = []
             for product in recipe.products:
                 if product.type != "item" or product.name == target_item:
                     continue
+                same_recipe_input = ingredient_by_item.get(product.name)
+                boundary_input = boundary_inputs_by_item.get(product.name)
                 byproducts.append(
                     {
                         "item": product.name,
                         "amount": product.amount,
                         "probability": product.probability,
+                        "same_recipe_input": same_recipe_input is not None,
+                        "recipe_input_amount": same_recipe_input.amount if same_recipe_input is not None else None,
+                        "input_boundary_rate_per_minute": (
+                            float(boundary_input["rate_per_minute"])
+                            if isinstance((boundary_input or {}).get("rate_per_minute"), (int, float))
+                            else None
+                        ),
+                        "input_boundary_side": str((boundary_input or {}).get("side") or "") or None,
                     }
                 )
             if not byproducts:
                 continue
+            recyclable_byproducts = [
+                item["item"]
+                for item in byproducts
+                if item.get("same_recipe_input")
+            ]
+            non_recyclable_byproducts = [
+                item["item"]
+                for item in byproducts
+                if not item.get("same_recipe_input")
+            ]
+            if recyclable_byproducts and not non_recyclable_byproducts:
+                recommended_handling = "recycle-to-input-boundary"
+            elif recyclable_byproducts:
+                recommended_handling = "mixed-recycle-and-separate"
+            else:
+                recommended_handling = "separate-or-export"
             audits.append(
                 {
                     "recipe": recipe_name,
                     "target_item": target_item,
                     "status": "requires-separation",
+                    "recommended_handling": recommended_handling,
+                    "recyclable_byproducts": recyclable_byproducts,
+                    "non_recyclable_byproducts": non_recyclable_byproducts,
                     "byproducts": byproducts,
                 }
             )
@@ -1507,6 +1546,23 @@ def add_boundary_connectors(
             target_item = boundary.split(":", 1)[1]
             if target_item not in target_items:
                 continue
+            matching_audits = [
+                item
+                for item in byproduct_audit
+                if str(item.get("target_item") or "") == target_item
+            ]
+            recommended_handling = (
+                str(matching_audits[0].get("recommended_handling") or "separate-or-export")
+                if matching_audits
+                else "separate-or-export"
+            )
+            recyclable_byproducts = sorted(
+                {
+                    str(byproduct)
+                    for audit in matching_audits
+                    for byproduct in audit.get("recyclable_byproducts") or []
+                }
+            )
             port = route.get("port") or {}
             belt_name = connector_belt_name_for_port(port)
             splitter_name = splitter_name_for_belt_name(belt_name)
@@ -1523,6 +1579,9 @@ def add_boundary_connectors(
                         "boundary": boundary,
                         "status": "blocked",
                         "reason": "route-too-short-for-overflow-separation",
+                        "recommended_handling": recommended_handling,
+                        "current_handling": "none",
+                        "recyclable_byproducts": recyclable_byproducts,
                         "route_y": route_y,
                     }
                 )
@@ -1544,6 +1603,9 @@ def add_boundary_connectors(
                         "boundary": boundary,
                         "status": "blocked",
                         "reason": "splitter-input-position-not-removable-east-connector-belt",
+                        "recommended_handling": recommended_handling,
+                        "current_handling": "none",
+                        "recyclable_byproducts": recyclable_byproducts,
                         "route_y": route_y,
                         "splitter_x": splitter_x,
                         "entity_name": existing_name,
@@ -1562,6 +1624,9 @@ def add_boundary_connectors(
                         "boundary": boundary,
                         "status": "blocked",
                         "reason": "splitter-center-position-occupied",
+                        "recommended_handling": recommended_handling,
+                        "current_handling": "none",
+                        "recyclable_byproducts": recyclable_byproducts,
                         "route_y": route_y,
                         "splitter_x": splitter_x,
                         "splitter_y": splitter_y,
@@ -1603,6 +1668,9 @@ def add_boundary_connectors(
                     "splitter_name": splitter_name,
                     "splitter_x": splitter_x,
                     "splitter_y": splitter_y,
+                    "recommended_handling": recommended_handling,
+                    "current_handling": "finite-overflow-buffer",
+                    "recyclable_byproducts": recyclable_byproducts,
                     "overflow_y": round(route_y + 1.0, 3),
                     "overflow_belts_added": belts_added,
                     "existing_belts_used": existing_belts_used,
@@ -2773,11 +2841,12 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             byproducts = ", ".join(
                 f"{byproduct['item']}:{byproduct.get('amount', 0):g}"
                 + (f"@{byproduct['probability']:g}" if byproduct.get("probability") is not None else "")
+                + (" recyclable" if byproduct.get("same_recipe_input") else "")
                 for byproduct in item.get("byproducts") or []
             )
             lines.append(
                 f"- {item.get('recipe')}: status={item.get('status')} "
-                f"target={item.get('target_item')} byproducts={byproducts}"
+                f"target={item.get('target_item')} handling={item.get('recommended_handling')} byproducts={byproducts}"
             )
     if summary["connector_summary"].get("output_separations"):
         lines.extend(["", "## Output Separations", ""])
@@ -2785,8 +2854,11 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             line = (
                 f"- {item.get('boundary')}: status={item.get('status')} "
                 f"splitter={item.get('splitter_name')} at=({item.get('splitter_x')},{item.get('splitter_y')}) "
+                f"current={item.get('current_handling')} recommended={item.get('recommended_handling')} "
                 f"overflow_y={item.get('overflow_y')} overflow_belts={item.get('overflow_belts_added', 0)}"
             )
+            if item.get("recyclable_byproducts"):
+                line += f" recyclable={','.join(item['recyclable_byproducts'])}"
             if item.get("existing_belts_used"):
                 line += f" existing_belts={item['existing_belts_used']}"
             if item.get("reason"):

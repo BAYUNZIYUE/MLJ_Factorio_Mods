@@ -1005,7 +1005,7 @@ def main() -> int:
         "spacing": 2,
         "estimated_width": 20,
         "estimated_height": 12,
-        "boundary_inputs": [],
+        "boundary_inputs": [{"item": "metallic-asteroid-chunk", "rate_per_minute": 180, "side": "left", "reason": "fixture-input"}],
         "boundary_outputs": [{"item": "iron-ore", "rate_per_minute": 3600, "side": "right"}],
         "nodes": [
             {
@@ -1054,16 +1054,28 @@ def main() -> int:
         for entity in byproduct_wrapper["blueprint"]["entities"]
         if entity["name"] == "turbo-splitter"
     ]
+    byproduct_audit = byproduct_summary["output_byproduct_audit"][0]
+    byproduct_item = byproduct_audit["byproducts"][0]
+    byproduct_separation = byproduct_summary["output_separations"][0]
     if (
         byproduct_summary["output_separation_splitters"] != 1
         or byproduct_summary["output_separation_overflow_belts"] <= 0
         or len(byproduct_splitters) != 1
         or byproduct_splitters[0].get("filter", {}).get("name") != "iron-ore"
         or byproduct_splitters[0].get("output_priority") != "left"
-        or byproduct_summary["output_separations"][0]["status"] != "connected"
+        or byproduct_separation["status"] != "connected"
+        or byproduct_audit["recommended_handling"] != "recycle-to-input-boundary"
+        or byproduct_audit["recyclable_byproducts"] != ["metallic-asteroid-chunk"]
+        or byproduct_item["same_recipe_input"] is not True
+        or byproduct_item["recipe_input_amount"] != 1
+        or byproduct_item["input_boundary_rate_per_minute"] != 180
+        or byproduct_item["input_boundary_side"] != "left"
+        or byproduct_separation["recommended_handling"] != "recycle-to-input-boundary"
+        or byproduct_separation["current_handling"] != "finite-overflow-buffer"
+        or byproduct_separation["recyclable_byproducts"] != ["metallic-asteroid-chunk"]
         or Counter(item["status"] for item in byproduct_summary["belt_flow_audit"]) != {"pass": 1}
     ):
-        print(f"FAIL: expected byproduct output route to get a target filter splitter and overflow lane: {byproduct_summary} {byproduct_wrapper}")
+        print(f"FAIL: expected byproduct output route to expose recycle recommendation while using current overflow lane: {byproduct_summary} {byproduct_wrapper}")
         return 1
     capacity_unresolved_lane_mappings = deepcopy(capacity_multi_lane_mappings)
     capacity_unresolved_lane_mappings[0]["layout"]["entities"][-1] = {

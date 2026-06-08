@@ -21,8 +21,8 @@ tree.
 - Connect same-row copied input ports with a conservative fanout pass that can reuse existing same-tier belt, underground-belt, and splitter entities as bus evidence instead of overwriting them.
 - Audit connected boundary belt capacity against data.raw belt speed, so generated reports can catch cases where machine coverage is high enough but the final boundary has too few belt lanes.
 - Audit production-machine inserter endpoints against data.raw entity boxes, so generated reports can distinguish target machines with belt-fed input/output from copied but disconnected machines.
-- Audit target recipes for item byproducts that are not the requested output, so generated reports can explain when a clean black-box output boundary needs filtering, recycling, or another separation strategy.
-- Insert target-item filter splitters on output routes when a target recipe has item byproducts; the current separator keeps the target item on the main output route and sends byproducts into a non-boundary overflow lane.
+- Audit target recipes for item byproducts that are not the requested output, including whether a byproduct is also a same-recipe input that should be recycled to the input boundary.
+- Insert target-item filter splitters on output routes when a target recipe has item byproducts; the current separator keeps the target item on the main output route and sends byproducts into a non-boundary overflow lane while reporting whether that overflow is only a temporary stand-in for recycling.
 - Import a generated blueprint through a real Factorio runtime scenario and attempt to build it on the matching surface type. Space platform blueprints are validated on a temporary space platform with foundation tiles pre-placed before entity building is attempted; if `build_blueprint` returns zero entities, the validator can fall back to direct `surface.create_entity` placement to prove the entity names, qualities, recipe qualities, underground-belt endpoint types, module item stacks, and occupied positions are accepted by the current game runtime.
 - The runtime fallback also restores splitter filters and input/output priorities, so future item-separation passes can be validated on platform blueprints that still require direct placement. Runtime boundary audit records right-boundary samples and cleanliness separately, distinguishing a boundary that contains target products from one that also leaks recipe input or byproduct items.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
@@ -310,7 +310,10 @@ using `turbo-transport-belt`; the current `iron-ore` 2x turbo sample reports
 `metallic-asteroid-crushing` can return `metallic-asteroid-chunk` as a 0.2
 probability item byproduct. The materializer inserts two target-item filter
 splitters, keeps `iron-ore` on the main output routes, and sends byproduct chunks
-into non-boundary overflow lanes.
+into non-boundary overflow lanes. Because that byproduct is also the recipe input,
+the materialization report now marks the recommended handling as
+`recycle-to-input-boundary`; the current generated geometry is still
+`finite-overflow-buffer`, not a proven recycle loop.
 
 Left-only runtime probes against that generated blueprint import 656 entities,
 place them through the direct-placement fallback, insert
@@ -321,8 +324,8 @@ right-boundary samples containing only `iron-ore`, while byproduct chunks remain
 off-boundary with max x below the output boundary. This proves the current sample
 can feed crushers from the external input boundary, produce `iron-ore`, and keep
 the audited right output boundary free of the recipe byproduct for the tested
-runtime window. It still does not prove sustained full-belt throughput, infinite
-byproduct handling, long-run stability, or player `build_blueprint` success on a
+runtime window. It still does not prove sustained full-belt throughput, physical
+byproduct recycling, long-run stability, or player `build_blueprint` success on a
 platform surface.
 
 ## Commands
