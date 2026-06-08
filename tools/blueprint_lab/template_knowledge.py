@@ -22,6 +22,11 @@ class RecipeMapping:
     products: list[tuple[str, float]]
     machine_names: list[str]
     machine_count: int
+    machine_speeds: list[tuple[str, float]]
+    unknown_machine_names: list[str]
+    base_crafts_per_minute: float | None
+    base_ingredients_per_minute: list[tuple[str, float]]
+    base_products_per_minute: list[tuple[str, float]]
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,39 @@ def recipe_machines(template: TemplateCandidate, recipe: str) -> list[str]:
     )
 
 
+def recipe_machine_speed_sum(
+    template: TemplateCandidate,
+    recipe: str,
+    knowledge: PrototypeKnowledge,
+) -> tuple[list[tuple[str, float]], list[str], float]:
+    speed_counts: Counter[tuple[str, float]] = Counter()
+    unknown: Counter[str] = Counter()
+    total_speed = 0.0
+    for entity in template.normalized_entities:
+        if entity.recipe != recipe:
+            continue
+        prototype = knowledge.entity(entity.name)
+        if prototype is None:
+            unknown[entity.name] += 1
+            continue
+        speed_counts[(entity.name, prototype.crafting_speed)] += 1
+        total_speed += prototype.crafting_speed
+
+    machine_speeds = [
+        (f"{count}x {name}", speed)
+        for (name, speed), count in sorted(speed_counts.items(), key=lambda item: item[0][0])
+    ]
+    unknown_names = [
+        f"{count}x {name}"
+        for name, count in sorted(unknown.items())
+    ]
+    return machine_speeds, unknown_names, total_speed
+
+
+def scaled_rates(items: list[tuple[str, float]], crafts_per_minute: float) -> list[tuple[str, float]]:
+    return [(name, amount * crafts_per_minute) for name, amount in items]
+
+
 def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> TemplateKnowledgeMapping:
     mappings: list[RecipeMapping] = []
     unresolved: list[str] = []
@@ -57,6 +95,11 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
         recipe = knowledge.recipe(recipe_name)
         machine_names = recipe_machines(template, recipe_name)
         machine_count = sum(1 for entity in template.normalized_entities if entity.recipe == recipe_name)
+        machine_speeds, unknown_machine_names, base_speed_sum = recipe_machine_speed_sum(
+            template,
+            recipe_name,
+            knowledge,
+        )
         if recipe is None:
             unresolved.append(recipe_name)
             mappings.append(
@@ -69,19 +112,38 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
                     products=[],
                     machine_names=machine_names,
                     machine_count=machine_count,
+                    machine_speeds=machine_speeds,
+                    unknown_machine_names=unknown_machine_names,
+                    base_crafts_per_minute=None,
+                    base_ingredients_per_minute=[],
+                    base_products_per_minute=[],
                 )
             )
         else:
+            ingredients = [(item.name, item.amount) for item in recipe.ingredients]
+            products = [(item.name, item.amount * item.probability) for item in recipe.products]
+            base_crafts = None
+            base_ingredients: list[tuple[str, float]] = []
+            base_products: list[tuple[str, float]] = []
+            if recipe.energy_required > 0 and base_speed_sum > 0 and not unknown_machine_names:
+                base_crafts = base_speed_sum * 60 / recipe.energy_required
+                base_ingredients = scaled_rates(ingredients, base_crafts)
+                base_products = scaled_rates(products, base_crafts)
             mappings.append(
                 RecipeMapping(
                     recipe=recipe_name,
                     status="resolved",
                     category=recipe.category,
                     energy_required=recipe.energy_required,
-                    ingredients=[(item.name, item.amount) for item in recipe.ingredients],
-                    products=[(item.name, item.amount * item.probability) for item in recipe.products],
+                    ingredients=ingredients,
+                    products=products,
                     machine_names=machine_names,
                     machine_count=machine_count,
+                    machine_speeds=machine_speeds,
+                    unknown_machine_names=unknown_machine_names,
+                    base_crafts_per_minute=base_crafts,
+                    base_ingredients_per_minute=base_ingredients,
+                    base_products_per_minute=base_products,
                 )
             )
 
@@ -166,6 +228,7 @@ def map_template_library(
         "mappings": [asdict(item) for item in mappings],
         "lessons": [
             "Templates with resolved recipes can be checked against production DAG requirements.",
+            "Base throughput is computed from recipe time and machine crafting speed only; module and beacon effects are recorded as evidence but not applied yet.",
             "Templates without recipes are still useful as support, routing, platform, or power fill material.",
             "Unresolved recipes mean data.raw knowledge is missing or stale; import the current game/mod data before claiming throughput.",
         ],
@@ -209,6 +272,31 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 lines.append(
                     f"  category={mapping['category']} time={mapping['energy_required']:g} ingredients=[{ingredients}] products=[{products}]"
                 )
+                if mapping["machine_speeds"]:
+                    speeds = ", ".join(f"{name}@{speed:g}" for name, speed in mapping["machine_speeds"])
+                    lines.append(f"  base_machine_speeds={speeds}")
+                if mapping["base_crafts_per_minute"] is not None:
+                    base_inputs = (
+                        ", ".join(
+                            f"{name}:{amount:g}/min"
+                            for name, amount in mapping["base_ingredients_per_minute"]
+                        )
+                        or "none"
+                    )
+                    base_outputs = (
+                        ", ".join(
+                            f"{name}:{amount:g}/min"
+                            for name, amount in mapping["base_products_per_minute"]
+                        )
+                        or "none"
+                    )
+                    lines.append(
+                        f"  base_without_modules={mapping['base_crafts_per_minute']:g} crafts/min inputs=[{base_inputs}] outputs=[{base_outputs}]"
+                    )
+                elif mapping["unknown_machine_names"]:
+                    lines.append(
+                        f"  base_without_modules=unknown unknown_machines={', '.join(mapping['unknown_machine_names'])}"
+                    )
         lines.append(f"- source={item['source']} path={item['path']}")
         lines.append("")
 

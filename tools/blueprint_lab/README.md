@@ -13,7 +13,7 @@ tree.
 - Classify blueprint families and choose representative examples for later template extraction.
 - Decompose learned black-box candidates into boundary ports, coarse grid signatures, and repeated module candidates.
 - Extract normalized entity subgraph templates from repeated grid signatures.
-- Import data.raw JSON and map recipe-bearing templates to recipe inputs, outputs, machine names, modules, and requests.
+- Import data.raw JSON and map recipe-bearing templates to recipe inputs, outputs, machine names, base machine speeds, conservative per-template-instance throughput, modules, and requests.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -77,7 +77,12 @@ entity subgraphs:
 The prototype knowledge layer accepts a current game or mod `data.raw` JSON
 export. Without that export, recipe-bearing templates remain unresolved by
 design; with it, the report can show recipe category, craft time, ingredients,
-products, machine names, module items, and request items.
+products, machine names, base machine speeds, conservative input/output rates
+per minute for one normalized template instance, module items, and request
+items. The current throughput estimate is deliberately conservative: it uses
+only recipe time and machine crafting speed, and records modules or beacons as
+evidence without applying their effects yet. Observed `occurrence_count` is kept
+separate so later DAG planning can decide how many template instances to place.
 
 ## Commands
 

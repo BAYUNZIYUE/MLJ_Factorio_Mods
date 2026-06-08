@@ -127,8 +127,23 @@ def main() -> int:
     if mapped.recipe_mappings[0].ingredients != [("iron-plate", 2.0)]:
         print(f"FAIL: expected recipe ingredients to normalize: {mapped.recipe_mappings[0]}")
         return 1
+    if recipe_templates[0].occurrence_count != 2:
+        print(f"FAIL: expected recipe template to record two observed occurrences: {recipe_templates[0]}")
+        return 1
+    if mapped.recipe_mappings[0].machine_speeds != [("1x assembling-machine-3", 1.25)]:
+        print(f"FAIL: expected recipe machine speeds to normalize: {mapped.recipe_mappings[0]}")
+        return 1
+    if mapped.recipe_mappings[0].base_crafts_per_minute != 150:
+        print(f"FAIL: expected base crafts/min to be 150 per template instance: {mapped.recipe_mappings[0]}")
+        return 1
+    if mapped.recipe_mappings[0].base_ingredients_per_minute != [("iron-plate", 300.0)]:
+        print(f"FAIL: expected base input rate to normalize: {mapped.recipe_mappings[0]}")
+        return 1
+    if mapped.recipe_mappings[0].base_products_per_minute != [("iron-gear-wheel", 150.0)]:
+        print(f"FAIL: expected base output rate to normalize: {mapped.recipe_mappings[0]}")
+        return 1
 
-    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, and generates a seed blueprint.")
+    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, and generates a seed blueprint.")
     return 0
 
 
