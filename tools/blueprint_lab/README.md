@@ -16,6 +16,7 @@ tree.
 - Import data.raw JSON and map recipe-bearing templates to recipe inputs, outputs, machine names, base machine speeds, conservative per-template-instance throughput, modules, and requests.
 - Plan a production DAG seed from learned production templates: target item rate, whole-template instance counts, upstream template needs, and external black-box inputs.
 - Turn a production DAG seed into a rectangular layout plan with repeated template grids, estimated module dimensions, and left/right black-box boundaries.
+- Materialize a layout plan into an importable blueprint skeleton by copying learned normalized template entities and tiles into the planned rectangle.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -106,6 +107,15 @@ matches the corpus lesson that integrated black boxes usually preserve local
 module geometry first, then use long boundary buses to make the final rectangle
 manageable.
 
+The materializer is the first step that writes a generated blueprint string from
+learned corpus templates. It copies normalized entities and tiles into the
+planned rectangle, preserves recipe/direction/quality fields that were learned
+from the source blueprint, reassigns entity numbers, and de-duplicates identical
+tile placements. It intentionally does not generate connector belts, pipes,
+power, module item stacks, or collision repairs yet; those must be separate
+passes so they can be validated instead of hidden in the first generated
+skeleton.
+
 ## Commands
 
 Analyze a blueprint directory:
@@ -155,6 +165,12 @@ Plan a rectangular layout from learned templates:
 
 ```bash
 python3 -m tools.blueprint_lab.layout_plan /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-layout-plan-summary.json --markdown-output .codex/tests/blueprint-layout-plan-report.md
+```
+
+Materialize a blueprint skeleton from learned templates:
+
+```bash
+python3 -m tools.blueprint_lab.materialize /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --output .codex/tests/blueprint-materialized-iron-ore.txt --json-output .codex/tests/blueprint-materialized-iron-ore-summary.json --markdown-output .codex/tests/blueprint-materialized-iron-ore-report.md
 ```
 
 Generate the current seed blueprint:

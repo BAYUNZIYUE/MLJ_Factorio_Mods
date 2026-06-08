@@ -31,6 +31,13 @@ class NormalizedEntity:
 
 
 @dataclass(frozen=True)
+class NormalizedTile:
+    name: str
+    x: float
+    y: float
+
+
+@dataclass(frozen=True)
 class TemplateCandidate:
     source: str
     path: str
@@ -51,6 +58,7 @@ class TemplateCandidate:
     control_behavior_count: int
     connection_count: int
     normalized_entities: list[NormalizedEntity]
+    normalized_tiles: list[NormalizedTile]
     lesson: str
 
 
@@ -143,6 +151,20 @@ def normalize_entities(entities: list[dict[str, Any]], origin: tuple[float, floa
     return sorted(normalized, key=lambda item: (item.family, item.name, item.x, item.y, item.direction or -1))
 
 
+def normalize_tiles(tiles: list[dict[str, Any]], origin: tuple[float, float]) -> list[NormalizedTile]:
+    normalized: list[NormalizedTile] = []
+    for tile in tiles:
+        position = tile.get("position") or {}
+        normalized.append(
+            NormalizedTile(
+                name=str(tile.get("name") or ""),
+                x=round(float(position.get("x", 0)) - origin[0], 3),
+                y=round(float(position.get("y", 0)) - origin[1], 3),
+            )
+        )
+    return sorted(normalized, key=lambda item: (item.name, item.x, item.y))
+
+
 def fingerprint_entities(entities: list[NormalizedEntity]) -> str:
     payload = [
         {
@@ -191,6 +213,7 @@ def extract_templates_from_blueprint(
         sample_cell = sorted(cell_list)[0]
         entities, tiles, origin = cell_entities_and_tiles(blueprint, sample_cell, cell_size)
         normalized = normalize_entities(entities, origin)
+        normalized_tiles = normalize_tiles(tiles, origin)
         family_counts = Counter(entity.family for entity in normalized)
         entity_counts = Counter(entity.name for entity in normalized)
         recipes = sorted({entity.recipe for entity in normalized if entity.recipe})
@@ -228,7 +251,8 @@ def extract_templates_from_blueprint(
                 requests=requests,
                 control_behavior_count=control_count,
                 connection_count=connection_count,
-                normalized_entities=normalized[:80],
+                normalized_entities=normalized,
+                normalized_tiles=normalized_tiles,
                 lesson=lesson,
             )
         )
@@ -361,4 +385,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

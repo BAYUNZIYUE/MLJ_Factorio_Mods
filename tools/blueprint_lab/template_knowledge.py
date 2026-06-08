@@ -40,6 +40,24 @@ class TemplatePortHint:
 
 
 @dataclass(frozen=True)
+class TemplateEntityHint:
+    name: str
+    x: float
+    y: float
+    direction: int | None
+    recipe: str | None
+    recipe_quality: str | None
+    quality: str | None
+
+
+@dataclass(frozen=True)
+class TemplateTileHint:
+    name: str
+    x: float
+    y: float
+
+
+@dataclass(frozen=True)
 class TemplateLayoutHint:
     width: float
     height: float
@@ -48,6 +66,8 @@ class TemplateLayoutHint:
     cell_size: int
     ports: list[TemplatePortHint]
     port_counts: list[tuple[str, int]]
+    entities: list[TemplateEntityHint]
+    tiles: list[TemplateTileHint]
 
 
 @dataclass(frozen=True)
@@ -155,6 +175,8 @@ def template_layout_hint(template: TemplateCandidate) -> TemplateLayoutHint:
             cell_size=template.cell_size,
             ports=[],
             port_counts=[],
+            entities=[],
+            tiles=[],
         )
 
     min_x = min(entity.x for entity in entities)
@@ -195,6 +217,26 @@ def template_layout_hint(template: TemplateCandidate) -> TemplateLayoutHint:
         cell_size=template.cell_size,
         ports=ports,
         port_counts=sorted(counts.items()),
+        entities=[
+            TemplateEntityHint(
+                name=entity.name,
+                x=entity.x,
+                y=entity.y,
+                direction=entity.direction,
+                recipe=entity.recipe,
+                recipe_quality=entity.recipe_quality,
+                quality=entity.quality,
+            )
+            for entity in entities
+        ],
+        tiles=[
+            TemplateTileHint(
+                name=tile.name,
+                x=tile.x,
+                y=tile.y,
+            )
+            for tile in template.normalized_tiles
+        ],
     )
 
 
@@ -294,7 +336,7 @@ def map_template_library(
     # dataclasses nested through asdict become dictionaries; restore only fields
     # needed by the mapper.
     restored: list[TemplateCandidate] = []
-    from .templates import NormalizedEntity
+    from .templates import NormalizedEntity, NormalizedTile
 
     for raw in template_summary["templates"]:
         restored.append(
@@ -318,6 +360,7 @@ def map_template_library(
                 control_behavior_count=raw["control_behavior_count"],
                 connection_count=raw["connection_count"],
                 normalized_entities=[NormalizedEntity(**entity) for entity in raw["normalized_entities"]],
+                normalized_tiles=[NormalizedTile(**tile) for tile in raw.get("normalized_tiles") or []],
                 lesson=raw["lesson"],
             )
         )

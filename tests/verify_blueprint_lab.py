@@ -17,6 +17,7 @@ from tools.blueprint_lab.prototypes import load_data_raw
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
+from tools.blueprint_lab.materialize import build_materialized_blueprint
 
 
 def main() -> int:
@@ -159,6 +160,18 @@ def main() -> int:
                 "height": 3.0,
                 "entity_count": 1,
                 "tile_count": 0,
+                "entities": [
+                    {
+                        "name": "assembling-machine-3",
+                        "x": 0,
+                        "y": 0,
+                        "direction": None,
+                        "recipe": "iron-gear-wheel",
+                        "recipe_quality": None,
+                        "quality": None,
+                    }
+                ],
+                "tiles": [],
                 "ports": [],
                 "port_counts": [],
             },
@@ -185,7 +198,19 @@ def main() -> int:
                 "width": 2.0,
                 "height": 2.0,
                 "entity_count": 1,
-                "tile_count": 0,
+                "tile_count": 1,
+                "entities": [
+                    {
+                        "name": "stone-furnace",
+                        "x": 0,
+                        "y": 0,
+                        "direction": None,
+                        "recipe": "iron-plate",
+                        "recipe_quality": None,
+                        "quality": None,
+                    }
+                ],
+                "tiles": [{"name": "stone-path", "x": 0, "y": 1}],
                 "ports": [{"side": "left", "role": "input", "entity_name": "transport-belt"}],
                 "port_counts": [("left:input", 1)],
             },
@@ -213,6 +238,18 @@ def main() -> int:
                 "height": 3.0,
                 "entity_count": 1,
                 "tile_count": 0,
+                "entities": [
+                    {
+                        "name": "assembling-machine-3",
+                        "x": 0,
+                        "y": 0,
+                        "direction": None,
+                        "recipe": "gear-reprocessing",
+                        "recipe_quality": None,
+                        "quality": None,
+                    }
+                ],
+                "tiles": [],
                 "ports": [],
                 "port_counts": [],
             },
@@ -259,8 +296,34 @@ def main() -> int:
     if layout["boundary_outputs"] != [{"item": "iron-gear-wheel", "rate_per_minute": 150, "side": "right"}]:
         print(f"FAIL: expected layout boundary output on the right side: {layout}")
         return 1
+    materialized = build_materialized_blueprint(
+        dag_mappings,
+        target_item="iron-gear-wheel",
+        target_rate_per_minute=150,
+        max_depth=4,
+        max_columns=8,
+        spacing=1,
+        lane_width=4,
+        label="fixture-materialized",
+    )
+    materialized_blueprint = materialized["blueprint"]
+    if materialized_blueprint["label"] != "fixture-materialized":
+        print(f"FAIL: expected materialized blueprint label: {materialized}")
+        return 1
+    if len(materialized_blueprint["entities"]) != 17:
+        print(f"FAIL: expected one gear machine plus sixteen plate furnaces: {materialized}")
+        return 1
+    if len(materialized_blueprint.get("tiles") or []) != 16:
+        print(f"FAIL: expected materialized blueprint to copy repeated template tiles: {materialized}")
+        return 1
+    if materialized_blueprint["entities"][0].get("recipe") != "iron-gear-wheel":
+        print(f"FAIL: expected materialized blueprint to preserve recipe: {materialized}")
+        return 1
+    if decode_blueprint_string(encode_blueprint_string(materialized)) != materialized:
+        print("FAIL: materialized blueprint did not round-trip through Factorio string encoding")
+        return 1
 
-    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, and generates a seed blueprint.")
+    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, materializes a blueprint skeleton, and generates a seed blueprint.")
     return 0
 
 
