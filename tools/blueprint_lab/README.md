@@ -316,12 +316,12 @@ belts when a collision-free lane is available; otherwise it falls back to a
 finite non-boundary overflow lane and reports that fallback explicitly.
 
 For the current `iron-ore` 2x turbo sample, both output separations are
-`recycle-return-to-input-boundary`. The report shows zero overflow belts, 106
-recycle-return belts, and per-route `recycle_flow=pass` audits over 80 and 26
-checked belt positions. This is a structural return-to-input-boundary route, not
-yet a proven internal merge back into the input bus.
+`recycle-merge-to-input-boundary`. The report shows zero overflow belts, 119
+recycle/merge belts, and per-route `recycle_flow=pass` audits over 93 and 26
+checked belt positions. The merge targets are side-loads into the existing
+left-side `metallic-asteroid-chunk` input lanes at `(0.5,23.5)` and `(0.5,38.0)`.
 
-Left-only runtime probes against the current recycle-return blueprint import 704
+Left-only runtime probes against the current recycle-merge blueprint import 717
 entities, place them through the direct-placement fallback, insert
 `metallic-asteroid-chunk` only on left-edge transport lines, and restore splitter
 filters/priorities with zero splitter-setting failures. A 2400-tick runtime audit
@@ -329,9 +329,9 @@ reports `right_boundary_cleanliness status=clean` with `iron-ore` on the right
 boundary and no input/byproduct items there. The same probe still observes some
 `metallic-asteroid-chunk` on internal transport lines, so this proves the audited
 right output boundary is clean for the tested window, not that the internal
-recycle loop is fully drained, perfectly merged, or long-run stable. It also
-still does not prove sustained full-belt throughput or player `build_blueprint`
-success on a platform surface.
+recycle loop is fully drained or long-run stable. It also still does not prove
+sustained full-belt throughput or player `build_blueprint` success on a platform
+surface.
 
 ## Commands
 
