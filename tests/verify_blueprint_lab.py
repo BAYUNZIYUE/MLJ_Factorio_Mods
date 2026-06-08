@@ -17,7 +17,7 @@ from tools.blueprint_lab.prototypes import load_data_raw
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import build_materialized_blueprint
+from tools.blueprint_lab.materialize import build_materialized_blueprint, materialize_layout_with_summary
 
 
 def main() -> int:
@@ -321,6 +321,24 @@ def main() -> int:
         return 1
     if decode_blueprint_string(encode_blueprint_string(materialized)) != materialized:
         print("FAIL: materialized blueprint did not round-trip through Factorio string encoding")
+        return 1
+    connected, connector_summary = materialize_layout_with_summary(
+        layout,
+        dag_mappings,
+        label="fixture-connected",
+        connect_boundaries=True,
+    )
+    if connector_summary != {"connectors_added": 27, "collisions": []}:
+        print(f"FAIL: expected connector belts without collisions: {connector_summary}")
+        return 1
+    if len(connected["blueprint"]["entities"]) != 44:
+        print(f"FAIL: expected connected blueprint to add connector belts: {connected}")
+        return 1
+    if "blueprint_lab_connector_summary" in connected["blueprint"]:
+        print(f"FAIL: connector summary must not be written into importable blueprint JSON: {connected}")
+        return 1
+    if decode_blueprint_string(encode_blueprint_string(connected)) != connected:
+        print("FAIL: connected blueprint did not round-trip through Factorio string encoding")
         return 1
 
     print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, materializes a blueprint skeleton, and generates a seed blueprint.")

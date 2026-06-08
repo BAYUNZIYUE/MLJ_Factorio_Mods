@@ -111,10 +111,12 @@ The materializer is the first step that writes a generated blueprint string from
 learned corpus templates. It copies normalized entities and tiles into the
 planned rectangle, preserves recipe/direction/quality fields that were learned
 from the source blueprint, reassigns entity numbers, and de-duplicates identical
-tile placements. It intentionally does not generate connector belts, pipes,
-power, module item stacks, or collision repairs yet; those must be separate
-passes so they can be validated instead of hidden in the first generated
-skeleton.
+tile placements. With `--connect-boundaries`, it also adds conservative
+transport-belt stubs in the reserved left/right lanes and reports exact
+entity-position collisions. It intentionally does not generate full internal
+belt routing, pipes, power, module item stacks, or collision repairs yet; those
+must be separate passes so they can be validated instead of hidden in the first
+generated skeleton.
 
 ## Commands
 
@@ -170,7 +172,7 @@ python3 -m tools.blueprint_lab.layout_plan /mnt/d/Desktop/游戏/异星工厂/�
 Materialize a blueprint skeleton from learned templates:
 
 ```bash
-python3 -m tools.blueprint_lab.materialize /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --output .codex/tests/blueprint-materialized-iron-ore.txt --json-output .codex/tests/blueprint-materialized-iron-ore-summary.json --markdown-output .codex/tests/blueprint-materialized-iron-ore-report.md
+python3 -m tools.blueprint_lab.materialize /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --connect-boundaries --output .codex/tests/blueprint-connected-iron-ore.txt --json-output .codex/tests/blueprint-connected-iron-ore-summary.json --markdown-output .codex/tests/blueprint-connected-iron-ore-report.md
 ```
 
 Generate the current seed blueprint:

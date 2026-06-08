@@ -18,6 +18,9 @@ from .prototypes import load_data_raw
 from .template_knowledge import map_template_library
 
 
+DIR_EAST = 2
+
+
 def materialized_entity(raw: dict[str, Any], entity_number: int, *, x: float, y: float) -> dict[str, Any]:
     entity: dict[str, Any] = {
         "entity_number": entity_number,
@@ -38,6 +41,20 @@ def materialized_entity(raw: dict[str, Any], entity_number: int, *, x: float, y:
     return entity
 
 
+def entity_position_key(entity: dict[str, Any]) -> tuple[float, float]:
+    position = entity.get("position") or {}
+    return (round(float(position.get("x", 0)), 3), round(float(position.get("y", 0)), 3))
+
+
+def connector_belt(entity_number: int, x: float, y: float) -> dict[str, Any]:
+    return {
+        "entity_number": entity_number,
+        "name": "transport-belt",
+        "position": {"x": round(x, 3), "y": round(y, 3)},
+        "direction": DIR_EAST,
+    }
+
+
 def materialized_tile(raw: dict[str, Any], *, x: float, y: float) -> dict[str, Any]:
     return {
         "name": raw["name"],
@@ -48,7 +65,52 @@ def materialized_tile(raw: dict[str, Any], *, x: float, y: float) -> dict[str, A
     }
 
 
-def materialize_layout(layout_plan: dict[str, Any], mappings: list[dict[str, Any]], *, label: str | None = None) -> dict[str, Any]:
+def add_boundary_connectors(
+    entities: list[dict[str, Any]],
+    layout_plan: dict[str, Any],
+    *,
+    occupied: set[tuple[float, float]],
+) -> dict[str, Any]:
+    connectors: list[dict[str, Any]] = []
+    collisions: list[dict[str, Any]] = []
+    if not layout_plan.get("nodes"):
+        return {"connectors_added": 0, "collisions": collisions}
+
+    root = layout_plan["nodes"][0]
+    y = round(float(root["y"]) + float(root["source_height"]) / 2, 3)
+    left_start = 0
+    left_end = int(max(0, float(root["x"]) - 1))
+    right_start = int(float(root["x"]) + float(root["planned_width"]) + 1)
+    right_end = int(max(right_start - 1, float(layout_plan["estimated_width"]) - 1))
+
+    planned_positions: list[tuple[float, float, str]] = []
+    for boundary in layout_plan.get("boundary_inputs") or []:
+        for x in range(left_start, left_end + 1):
+            planned_positions.append((float(x), y, f"input:{boundary['item']}"))
+    for boundary in layout_plan.get("boundary_outputs") or []:
+        for x in range(right_start, right_end + 1):
+            planned_positions.append((float(x), y, f"output:{boundary['item']}"))
+
+    for x, belt_y, reason in planned_positions:
+        key = (round(x, 3), round(belt_y, 3))
+        if key in occupied:
+            collisions.append({"x": key[0], "y": key[1], "reason": reason})
+            continue
+        belt = connector_belt(len(entities) + len(connectors) + 1, x, belt_y)
+        connectors.append(belt)
+        occupied.add(key)
+
+    entities.extend(connectors)
+    return {"connectors_added": len(connectors), "collisions": collisions}
+
+
+def materialize_layout_with_summary(
+    layout_plan: dict[str, Any],
+    mappings: list[dict[str, Any]],
+    *,
+    label: str | None = None,
+    connect_boundaries: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     mapping_index = mapping_by_fingerprint(mappings)
     entities: list[dict[str, Any]] = []
     tiles: list[dict[str, Any]] = []
@@ -86,6 +148,11 @@ def materialize_layout(layout_plan: dict[str, Any], mappings: list[dict[str, Any
                 tile_positions.add(key)
                 tiles.append(tile)
 
+    connector_result = {"connectors_added": 0, "collisions": []}
+    if connect_boundaries:
+        occupied = {entity_position_key(entity) for entity in entities}
+        connector_result = add_boundary_connectors(entities, layout_plan, occupied=occupied)
+
     target_item = str(layout_plan["target_item"])
     wrapper = make_blueprint_wrapper(
         label or f"blueprint-lab-{target_item}-{layout_plan['target_rate_per_minute']:g}-per-min",
@@ -96,6 +163,22 @@ def materialize_layout(layout_plan: dict[str, Any], mappings: list[dict[str, Any
             "Blueprint Lab materialized skeleton from learned templates. "
             "Connector belts, pipes, power, modules, and in-game validation are still required before production use."
         ),
+    )
+    return wrapper, connector_result
+
+
+def materialize_layout(
+    layout_plan: dict[str, Any],
+    mappings: list[dict[str, Any]],
+    *,
+    label: str | None = None,
+    connect_boundaries: bool = False,
+) -> dict[str, Any]:
+    wrapper, _ = materialize_layout_with_summary(
+        layout_plan,
+        mappings,
+        label=label,
+        connect_boundaries=connect_boundaries,
     )
     return wrapper
 
@@ -112,6 +195,7 @@ def build_materialized_blueprint(
     spacing: float = 2.0,
     lane_width: float = 4.0,
     label: str | None = None,
+    connect_boundaries: bool = False,
 ) -> dict[str, Any]:
     production_plan = build_production_plan(
         mappings,
@@ -128,10 +212,10 @@ def build_materialized_blueprint(
         spacing=spacing,
         lane_width=lane_width,
     )
-    return materialize_layout(layout, mappings, label=label)
+    return materialize_layout(layout, mappings, label=label, connect_boundaries=connect_boundaries)
 
 
-def render_summary(wrapper: dict[str, Any], layout: dict[str, Any]) -> dict[str, Any]:
+def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     blueprint = wrapper["blueprint"]
     metrics = blueprint_metrics("/", blueprint)
     return {
@@ -147,10 +231,11 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any]) -> dict[str,
         "layout_estimated_height": layout["estimated_height"],
         "boundary_inputs": layout["boundary_inputs"],
         "boundary_outputs": layout["boundary_outputs"],
+        "connector_summary": connector_summary or {"connectors_added": 0, "collisions": []},
         "lessons": [
             "Materialization copies learned local template geometry into the planned rectangle instead of inventing machines from scratch.",
-            "The generated blueprint is intentionally a skeleton: it proves entity placement and blueprint encoding, while connector routing remains a separate step.",
-            "Keeping connector routing separate avoids hiding unverified belt, pipe, power, and collision assumptions in the first generated black box.",
+            "Boundary connectors are generated only in reserved lanes and checked for exact entity-position collisions.",
+            "The generated blueprint is still not production-ready: pipe routing, power, module item stacks, full belt routing, and in-game validation remain separate steps.",
         ],
     }
 
@@ -164,6 +249,8 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Target rate: {summary['target_rate_per_minute']:g}/min",
         f"- Entities: {summary['entity_count']}",
         f"- Tiles: {summary['tile_count']}",
+        f"- Connector belts: {summary['connector_summary']['connectors_added']}",
+        f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
         f"- Layout estimate: {summary['layout_estimated_width']:g} x {summary['layout_estimated_height']:g}",
         f"- Density: {summary['density']:g}",
@@ -179,6 +266,10 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
     lines.extend(["", "## Boundary Outputs", ""])
     for item in summary["boundary_outputs"]:
         lines.append(f"- {item['item']}: {item['rate_per_minute']:g}/min side={item['side']}")
+    if summary["connector_summary"]["collisions"]:
+        lines.extend(["", "## Connector Collisions", ""])
+        for item in summary["connector_summary"]["collisions"]:
+            lines.append(f"- ({item['x']}, {item['y']}) reason={item['reason']}")
     lines.extend(["", "## Generator Implications", ""])
     for lesson in summary["lessons"]:
         lines.append(f"- {lesson}")
@@ -201,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--spacing", type=float, default=2.0)
     parser.add_argument("--lane-width", type=float, default=4.0)
     parser.add_argument("--label")
+    parser.add_argument("--connect-boundaries", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)
@@ -230,9 +322,14 @@ def main(argv: list[str] | None = None) -> int:
         spacing=args.spacing,
         lane_width=args.lane_width,
     )
-    wrapper = materialize_layout(layout, template_summary["mappings"], label=args.label)
+    wrapper, connector_summary = materialize_layout_with_summary(
+        layout,
+        template_summary["mappings"],
+        label=args.label,
+        connect_boundaries=args.connect_boundaries,
+    )
     save_blueprint_file(args.output, wrapper)
-    summary = render_summary(wrapper, layout)
+    summary = render_summary(wrapper, layout, connector_summary)
     summary["output"] = str(args.output)
     summary["template_mapping_status_counts"] = template_summary["status_counts"]
     summary["template_mapping_failed_files"] = template_summary["failed_files"]
