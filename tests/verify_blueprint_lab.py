@@ -15,6 +15,7 @@ from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
 from tools.blueprint_lab.prototypes import load_data_raw
 from tools.blueprint_lab.template_knowledge import map_template
+from tools.blueprint_lab.production_dag import build_production_plan
 
 
 def main() -> int:
@@ -143,7 +144,85 @@ def main() -> int:
         print(f"FAIL: expected base output rate to normalize: {mapped.recipe_mappings[0]}")
         return 1
 
-    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, and generates a seed blueprint.")
+    dag_mappings = [
+        {
+            "candidate_role": "production-template",
+            "fingerprint": "gear-template",
+            "label": "gear",
+            "source": "fixture",
+            "path": "/gear",
+            "occurrence_count": 2,
+            "module_items": ["speed-module-3"],
+            "recipe_mappings": [
+                {
+                    "recipe": "iron-gear-wheel",
+                    "status": "resolved",
+                    "base_crafts_per_minute": 150.0,
+                    "base_ingredients_per_minute": [("iron-plate", 300.0)],
+                    "base_products_per_minute": [("iron-gear-wheel", 150.0)],
+                    "machine_speeds": [("1x assembling-machine-3", 1.25)],
+                }
+            ],
+        },
+        {
+            "candidate_role": "production-template",
+            "fingerprint": "plate-template",
+            "label": "plate",
+            "source": "fixture",
+            "path": "/plate",
+            "occurrence_count": 16,
+            "module_items": [],
+            "recipe_mappings": [
+                {
+                    "recipe": "iron-plate",
+                    "status": "resolved",
+                    "base_crafts_per_minute": 18.75,
+                    "base_ingredients_per_minute": [("iron-ore", 18.75)],
+                    "base_products_per_minute": [("iron-plate", 18.75)],
+                    "machine_speeds": [("1x stone-furnace", 1.0)],
+                }
+            ],
+        },
+        {
+            "candidate_role": "production-template",
+            "fingerprint": "gear-sink",
+            "label": "gear sink",
+            "source": "fixture",
+            "path": "/gear-sink",
+            "occurrence_count": 1,
+            "module_items": [],
+            "recipe_mappings": [
+                {
+                    "recipe": "gear-reprocessing",
+                    "status": "resolved",
+                    "base_crafts_per_minute": 5.0,
+                    "base_ingredients_per_minute": [("iron-gear-wheel", 10.0)],
+                    "base_products_per_minute": [("iron-gear-wheel", 5.0)],
+                    "machine_speeds": [("1x assembling-machine-3", 1.25)],
+                }
+            ],
+        },
+    ]
+    dag = build_production_plan(
+        dag_mappings,
+        target_item="iron-gear-wheel",
+        target_rate_per_minute=150,
+        max_depth=4,
+    )
+    if dag["node_count"] != 2:
+        print(f"FAIL: expected gear and plate nodes in DAG: {dag}")
+        return 1
+    if dag["root"]["recipe"] != "iron-gear-wheel" or dag["root"]["instances"] != 1:
+        print(f"FAIL: expected one gear template instance: {dag}")
+        return 1
+    if dag["root"]["children"][0]["recipe"] != "iron-plate" or dag["root"]["children"][0]["instances"] != 16:
+        print(f"FAIL: expected sixteen plate template instances: {dag}")
+        return 1
+    if dag["external_inputs"] != [{"item": "iron-ore", "rate_per_minute": 300.0, "reason": "boundary-input"}]:
+        print(f"FAIL: expected iron ore to become black-box boundary input: {dag}")
+        return 1
+
+    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG, and generates a seed blueprint.")
     return 0
 
 

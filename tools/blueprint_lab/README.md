@@ -14,6 +14,7 @@ tree.
 - Decompose learned black-box candidates into boundary ports, coarse grid signatures, and repeated module candidates.
 - Extract normalized entity subgraph templates from repeated grid signatures.
 - Import data.raw JSON and map recipe-bearing templates to recipe inputs, outputs, machine names, base machine speeds, conservative per-template-instance throughput, modules, and requests.
+- Plan a production DAG seed from learned production templates: target item rate, whole-template instance counts, upstream template needs, and external black-box inputs.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -84,6 +85,18 @@ only recipe time and machine crafting speed, and records modules or beacons as
 evidence without applying their effects yet. Observed `occurrence_count` is kept
 separate so later DAG planning can decide how many template instances to place.
 
+The production DAG seed uses those per-template rates to choose copyable
+production units, round them up to whole instances, and recursively expose
+upstream needs. Inputs with no learned production template become external
+black-box boundary inputs. This mirrors how strong corpus blueprints are built:
+repeat proven local modules, then define the box boundary around whatever the
+current module library cannot yet produce internally. Common raw inputs such as
+ore, stone, coal, water, crude oil, and asteroid chunks are treated as default
+boundary inputs for child nodes; pass `--external-item` to add more boundary
+items or `--no-default-boundary-items` to inspect deeper recursive chains. It
+still does not solve rectangle packing, belt routing, pipe routing, power, or
+in-game validation.
+
 ## Commands
 
 Analyze a blueprint directory:
@@ -121,6 +134,12 @@ and unresolved recipes:
 
 ```bash
 python3 -m tools.blueprint_lab.template_knowledge /mnt/d/Desktop/游戏/异星工厂/蓝图 --top 8 --cell-size 16
+```
+
+Plan a production DAG seed from learned templates:
+
+```bash
+python3 -m tools.blueprint_lab.production_dag /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-production-dag-summary.json --markdown-output .codex/tests/blueprint-production-dag-report.md
 ```
 
 Generate the current seed blueprint:
