@@ -20,7 +20,7 @@ from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary
+from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe
 
 
 def main() -> int:
@@ -182,6 +182,25 @@ def main() -> int:
         }
     ]:
         print(f"FAIL: expected inserter endpoint audit to prove one machine input and output: {io_audit}")
+        return 1
+    pruned_entities = prune_template_entities_for_recipe(
+        [
+            {"name": "transport-belt", "x": 2, "y": 0, "direction": DIR_EAST},
+            {"name": "fast-inserter", "x": 2, "y": 1, "direction": 0},
+            {"name": "assembling-machine-3", "x": 2, "y": 2, "recipe": "iron-gear-wheel"},
+            {"name": "fast-inserter", "x": 2, "y": 3, "direction": 0},
+            {"name": "transport-belt", "x": 2, "y": 4, "direction": DIR_EAST},
+            {"name": "fast-inserter", "x": 8, "y": 1, "direction": 0},
+            {"name": "assembling-machine-3", "x": 8, "y": 2, "recipe": "gear-reprocessing"},
+            {"name": "beacon", "x": 4, "y": 2},
+        ],
+        target_recipe="iron-gear-wheel",
+        knowledge=knowledge,
+    )
+    pruned_counts = Counter(entity["name"] for entity in pruned_entities)
+    pruned_recipes = Counter(entity.get("recipe") for entity in pruned_entities if entity.get("recipe"))
+    if pruned_recipes != {"iron-gear-wheel": 1} or pruned_counts["fast-inserter"] != 2 or pruned_counts["transport-belt"] != 2 or pruned_counts["beacon"] != 1:
+        print(f"FAIL: expected target-recipe pruning to keep target machine, target inserters, belts, and support entities: {pruned_entities}")
         return 1
     target_rate, target_rate_basis = target_rate_basis_from_args(
         knowledge,

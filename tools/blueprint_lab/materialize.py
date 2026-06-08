@@ -95,8 +95,10 @@ def rotate_vector(vector: tuple[float, float], direction: int | None) -> tuple[f
 
 
 def entity_position(entity: dict[str, Any]) -> tuple[float, float]:
-    position = entity.get("position") or {}
-    return (float(position.get("x", 0.0)), float(position.get("y", 0.0)))
+    position = entity.get("position")
+    if isinstance(position, dict):
+        return (float(position.get("x", 0.0)), float(position.get("y", 0.0)))
+    return (float(entity.get("x", 0.0)), float(entity.get("y", 0.0)))
 
 
 def point_in_entity_box(point: tuple[float, float], entity: dict[str, Any], knowledge: PrototypeKnowledge) -> bool:
@@ -246,6 +248,69 @@ def audit_machine_io(wrapper: dict[str, Any], knowledge: PrototypeKnowledge | No
             }
         )
     return audit
+
+
+def prune_template_entities_for_recipe(
+    template_entities: list[dict[str, Any]],
+    *,
+    target_recipe: str | None,
+    knowledge: PrototypeKnowledge | None,
+) -> list[dict[str, Any]]:
+    if knowledge is None or not target_recipe:
+        return template_entities
+
+    local_entities = [dict(entity, entity_number=index + 1) for index, entity in enumerate(template_entities)]
+    target_machine_numbers = {
+        int(entity["entity_number"])
+        for entity in local_entities
+        if entity.get("recipe") == target_recipe and knowledge.entity(str(entity.get("name") or "")) is not None
+    }
+    if not target_machine_numbers:
+        return template_entities
+
+    selected_inserters: set[int] = set()
+    for entity in local_entities:
+        name = str(entity.get("name") or "")
+        inserter = knowledge.inserter(name)
+        if inserter is None:
+            continue
+        number = int(entity["entity_number"])
+        origin_x, origin_y = entity_position(entity)
+        pickup_dx, pickup_dy = rotate_vector(inserter.pickup_position, entity.get("direction"))
+        insert_dx, insert_dy = rotate_vector(inserter.insert_position, entity.get("direction"))
+        pickup_targets = endpoint_targets(
+            (round(origin_x + pickup_dx, 3), round(origin_y + pickup_dy, 3)),
+            local_entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        insert_targets = endpoint_targets(
+            (round(origin_x + insert_dx, 3), round(origin_y + insert_dy, 3)),
+            local_entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        pickup_target_machine = any(target["role"] == "machine" and target["entity_number"] in target_machine_numbers for target in pickup_targets)
+        insert_target_machine = any(target["role"] == "machine" and target["entity_number"] in target_machine_numbers for target in insert_targets)
+        pickup_belt = any(target["role"] == "belt" for target in pickup_targets)
+        insert_belt = any(target["role"] == "belt" for target in insert_targets)
+        if (pickup_belt and insert_target_machine) or (pickup_target_machine and insert_belt):
+            selected_inserters.add(number)
+
+    pruned: list[dict[str, Any]] = []
+    for entity in local_entities:
+        number = int(entity["entity_number"])
+        name = str(entity.get("name") or "")
+        if entity.get("recipe"):
+            if entity.get("recipe") == target_recipe:
+                pruned.append({key: value for key, value in entity.items() if key != "entity_number"})
+            continue
+        if knowledge.inserter(name) is not None:
+            if number in selected_inserters:
+                pruned.append({key: value for key, value in entity.items() if key != "entity_number"})
+            continue
+        pruned.append({key: value for key, value in entity.items() if key != "entity_number"})
+    return pruned
 
 
 def materialized_tile(raw: dict[str, Any], *, x: float, y: float) -> dict[str, Any]:
@@ -1111,6 +1176,7 @@ def materialize_layout_with_summary(
     *,
     label: str | None = None,
     connect_boundaries: bool = False,
+    knowledge: PrototypeKnowledge | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     mapping_index = mapping_by_fingerprint(mappings)
     entities: list[dict[str, Any]] = []
@@ -1120,6 +1186,11 @@ def materialize_layout_with_summary(
         mapping = mapping_index.get(str(node["fingerprint"])) or {}
         layout = mapping.get("layout") or {}
         template_entities = layout.get("entities") or []
+        template_entities = prune_template_entities_for_recipe(
+            template_entities,
+            target_recipe=str(node.get("recipe") or ""),
+            knowledge=knowledge,
+        )
         template_tiles = layout.get("tiles") or []
         if not template_entities and not template_tiles:
             continue
@@ -1190,12 +1261,14 @@ def materialize_layout(
     *,
     label: str | None = None,
     connect_boundaries: bool = False,
+    knowledge: PrototypeKnowledge | None = None,
 ) -> dict[str, Any]:
     wrapper, _ = materialize_layout_with_summary(
         layout_plan,
         mappings,
         label=label,
         connect_boundaries=connect_boundaries,
+        knowledge=knowledge,
     )
     return wrapper
 
@@ -1214,6 +1287,7 @@ def build_materialized_blueprint(
     lane_width: float = 4.0,
     label: str | None = None,
     connect_boundaries: bool = False,
+    knowledge: PrototypeKnowledge | None = None,
 ) -> dict[str, Any]:
     production_plan = build_production_plan(
         mappings,
@@ -1231,7 +1305,7 @@ def build_materialized_blueprint(
         spacing=spacing,
         lane_width=lane_width,
     )
-    return materialize_layout(layout, mappings, label=label, connect_boundaries=connect_boundaries)
+    return materialize_layout(layout, mappings, label=label, connect_boundaries=connect_boundaries, knowledge=knowledge)
 
 
 def render_summary(
@@ -1532,6 +1606,7 @@ def main(argv: list[str] | None = None) -> int:
         template_summary["mappings"],
         label=args.label,
         connect_boundaries=args.connect_boundaries,
+        knowledge=knowledge,
     )
     save_blueprint_file(args.output, wrapper)
     summary = render_summary(wrapper, layout, connector_summary, knowledge=knowledge)
