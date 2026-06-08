@@ -488,6 +488,7 @@ def main() -> int:
                 "rows": 1,
                 "planned_width": 12,
                 "planned_height": 3,
+                "planned_net_output_per_minute": 3600,
                 "x": 4,
                 "y": 4,
                 "ports": [
@@ -526,6 +527,10 @@ def main() -> int:
         return 1
     if replicated_summary["bridges_added"] != 6 or replicated_summary["bridges"][0]["status"] != "connected":
         print(f"FAIL: expected replicated-port routing to bridge adjacent template instances: {replicated_summary}")
+        return 1
+    replicated_coverage = replicated_summary["boundary_coverage"][0]
+    if replicated_coverage["covered_instances"] != [0, 1] or not replicated_coverage["meets_required_rate"]:
+        print(f"FAIL: expected replicated output coverage to cover both instances and meet the boundary rate: {replicated_summary}")
         return 1
     if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 11:
         print(f"FAIL: expected replicated-port route and bridge to add turbo belts: {replicated}")

@@ -147,7 +147,12 @@ later port was chosen. Connector belts inherit the selected port belt tier when
 the port is a transport belt, underground belt, or splitter. Inter-instance
 bridges are reported separately from boundary routes so a generated full-belt
 box can show whether repeated module edge buses were connected before the final
-boundary output was attached.
+boundary output was attached. Boundary coverage then audits the route plus
+bridges as a graph: output coverage walks backward from the selected output
+port through connected instance bridges, while input coverage walks forward
+from the selected input port. This lets the report distinguish "the boundary
+belt touches one copied module" from "the boundary belt reaches every copied
+module needed to cover the requested target rate."
 
 ## Commands
 

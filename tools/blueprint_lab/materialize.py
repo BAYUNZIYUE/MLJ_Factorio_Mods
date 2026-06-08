@@ -96,7 +96,14 @@ def add_boundary_connectors(
     routes: list[dict[str, Any]] = []
     bridges: list[dict[str, Any]] = []
     if not layout_plan.get("nodes"):
-        return {"connectors_added": 0, "bridges_added": 0, "collisions": collisions, "routes": routes, "bridges": bridges}
+        return {
+            "connectors_added": 0,
+            "bridges_added": 0,
+            "collisions": collisions,
+            "routes": routes,
+            "bridges": bridges,
+            "boundary_coverage": [],
+        }
 
     root = layout_plan["nodes"][0]
     default_y = round(float(root["y"]) + float(root["source_height"]) / 2, 3)
@@ -193,6 +200,7 @@ def add_boundary_connectors(
                 {
                     "node_item": node.get("item"),
                     "node_recipe": node.get("recipe"),
+                    "node_fingerprint": node.get("fingerprint"),
                     "node_instance": instance,
                     "node_column": col,
                     "node_row": row,
@@ -272,6 +280,7 @@ def add_boundary_connectors(
                         {
                             "node_item": node.get("item"),
                             "node_recipe": node.get("recipe"),
+                            "node_fingerprint": node.get("fingerprint"),
                             "from_instance": instance,
                             "to_instance": next_instance,
                             "from_port": right_port,
@@ -397,6 +406,106 @@ def add_boundary_connectors(
             }
         )
 
+    def route_boundary_rate(route: dict[str, Any]) -> float | None:
+        boundary = str(route.get("boundary") or "")
+        if boundary.startswith("output:"):
+            item = boundary.split(":", 1)[1]
+            for output in layout_plan.get("boundary_outputs") or []:
+                if str(output.get("item")) == item:
+                    rate = output.get("rate_per_minute")
+                    return float(rate) if isinstance(rate, (int, float)) else None
+        if boundary.startswith("input:"):
+            item = boundary.split(":", 1)[1]
+            for input_item in layout_plan.get("boundary_inputs") or []:
+                if str(input_item.get("item")) == item:
+                    rate = input_item.get("rate_per_minute")
+                    return float(rate) if isinstance(rate, (int, float)) else None
+        return None
+
+    def bridge_edges_for_node(fingerprint: str) -> list[tuple[int, int]]:
+        edges: list[tuple[int, int]] = []
+        for bridge in bridges:
+            if bridge.get("status") != "connected":
+                continue
+            if str(bridge.get("node_fingerprint") or "") != fingerprint:
+                continue
+            edges.append((int(bridge["from_instance"]), int(bridge["to_instance"])))
+        return edges
+
+    def reachable_instances(start: int, edges: list[tuple[int, int]], *, direction: str) -> list[int]:
+        adjacency: dict[int, set[int]] = {}
+        for from_instance, to_instance in edges:
+            if direction == "forward":
+                adjacency.setdefault(from_instance, set()).add(to_instance)
+            else:
+                adjacency.setdefault(to_instance, set()).add(from_instance)
+        seen = {start}
+        frontier = [start]
+        while frontier:
+            current = frontier.pop()
+            for next_instance in adjacency.get(current, set()):
+                if next_instance in seen:
+                    continue
+                seen.add(next_instance)
+                frontier.append(next_instance)
+        return sorted(seen)
+
+    def boundary_coverage() -> list[dict[str, Any]]:
+        node_index = {
+            str(node.get("fingerprint")): node
+            for node in layout_plan.get("nodes") or []
+            if node.get("fingerprint") is not None
+        }
+        coverage: list[dict[str, Any]] = []
+        for route in routes:
+            port = route.get("port") or {}
+            fingerprint = str(port.get("node_fingerprint") or "")
+            node = node_index.get(fingerprint)
+            if route.get("status") != "connected" or not node:
+                coverage.append(
+                    {
+                        "boundary": route.get("boundary"),
+                        "status": "uncovered",
+                        "reason": "route-not-connected-or-node-missing",
+                    }
+                )
+                continue
+            start_instance = int(port.get("node_instance") or 0)
+            boundary = str(route.get("boundary") or "")
+            direction = "reverse" if boundary.startswith("output:") else "forward"
+            instances = max(1, int(node.get("instances") or 1))
+            covered_instances = reachable_instances(
+                start_instance,
+                bridge_edges_for_node(fingerprint),
+                direction=direction,
+            )
+            item: dict[str, Any] = {
+                "boundary": route.get("boundary"),
+                "status": "covered",
+                "direction": direction,
+                "node_item": node.get("item"),
+                "node_recipe": node.get("recipe"),
+                "node_fingerprint": fingerprint,
+                "start_instance": start_instance,
+                "covered_instances": covered_instances,
+                "covered_instance_count": len(covered_instances),
+                "total_instances": instances,
+            }
+            required_rate = route_boundary_rate(route)
+            if required_rate is not None:
+                item["required_rate_per_minute"] = required_rate
+            if boundary.startswith("output:"):
+                planned_net = float(node.get("planned_net_output_per_minute") or 0.0)
+                per_instance = planned_net / instances if instances else 0.0
+                covered_rate = per_instance * len(covered_instances)
+                item["covered_rate_per_minute"] = covered_rate
+                item["per_instance_net_output_per_minute"] = per_instance
+                if required_rate is not None:
+                    item["meets_required_rate"] = covered_rate >= required_rate
+            coverage.append(item)
+        return coverage
+
+    coverage = boundary_coverage()
     entities.extend(connectors)
     return {
         "connectors_added": len(connectors),
@@ -404,6 +513,7 @@ def add_boundary_connectors(
         "collisions": collisions,
         "routes": routes,
         "bridges": bridges,
+        "boundary_coverage": coverage,
     }
 
 
@@ -451,7 +561,14 @@ def materialize_layout_with_summary(
                 tile_positions.add(key)
                 tiles.append(tile)
 
-    connector_result = {"connectors_added": 0, "bridges_added": 0, "collisions": [], "routes": [], "bridges": []}
+    connector_result = {
+        "connectors_added": 0,
+        "bridges_added": 0,
+        "collisions": [],
+        "routes": [],
+        "bridges": [],
+        "boundary_coverage": [],
+    }
     if connect_boundaries:
         occupied = {entity_position_key(entity) for entity in entities}
         connector_result = add_boundary_connectors(entities, layout_plan, occupied=occupied)
@@ -523,7 +640,14 @@ def build_materialized_blueprint(
 def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     blueprint = wrapper["blueprint"]
     metrics = blueprint_metrics("/", blueprint)
-    summary = connector_summary or {"connectors_added": 0, "bridges_added": 0, "collisions": [], "routes": [], "bridges": []}
+    summary = connector_summary or {
+        "connectors_added": 0,
+        "bridges_added": 0,
+        "collisions": [],
+        "routes": [],
+        "bridges": [],
+        "boundary_coverage": [],
+    }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
     layout_nodes = [
         {
@@ -645,6 +769,24 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 )
             if item.get("route_kind"):
                 line += f" route={item['route_kind']}"
+            lines.append(line)
+    if summary["connector_summary"].get("boundary_coverage"):
+        lines.extend(["", "## Boundary Coverage", ""])
+        for item in summary["connector_summary"]["boundary_coverage"]:
+            line = (
+                f"- {item['boundary']}: status={item['status']} "
+                f"instances={item.get('covered_instance_count', 0)}/{item.get('total_instances', 0)}"
+            )
+            if item.get("covered_instances") is not None:
+                line += f" covered={item['covered_instances']}"
+            if item.get("covered_rate_per_minute") is not None:
+                line += f" covered_rate={item['covered_rate_per_minute']:g}/min"
+            if item.get("required_rate_per_minute") is not None:
+                line += f" required={item['required_rate_per_minute']:g}/min"
+            if item.get("meets_required_rate") is not None:
+                line += f" meets_required={item['meets_required_rate']}"
+            if item.get("reason"):
+                line += f" reason={item['reason']}"
             lines.append(line)
     if summary["connector_summary"]["collisions"]:
         lines.extend(["", "## Connector Collisions", ""])
