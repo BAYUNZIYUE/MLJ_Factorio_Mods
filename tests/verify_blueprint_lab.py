@@ -13,6 +13,8 @@ from tools.blueprint_lab.decompose import decompose_blueprint
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
+from tools.blueprint_lab.prototypes import load_data_raw
+from tools.blueprint_lab.template_knowledge import map_template
 
 
 def main() -> int:
@@ -71,7 +73,62 @@ def main() -> int:
         print(f"FAIL: expected template candidates to have fingerprints: {templates}")
         return 1
 
-    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, and generates a seed blueprint.")
+    recipe_blueprint = {
+        "entities": [
+            {
+                "entity_number": 1,
+                "name": "assembling-machine-3",
+                "position": {"x": 1, "y": 1},
+                "recipe": "iron-gear-wheel",
+                "items": [{"id": {"name": "speed-module-3"}, "items": {"in_inventory": [{"inventory": 4, "stack": 0}]}}],
+            },
+            {
+                "entity_number": 2,
+                "name": "assembling-machine-3",
+                "position": {"x": 5, "y": 1},
+                "recipe": "iron-gear-wheel",
+                "items": [{"id": {"name": "speed-module-3"}, "items": {"in_inventory": [{"inventory": 4, "stack": 0}]}}],
+            },
+        ]
+    }
+    recipe_templates = extract_templates_from_blueprint("fixture", "/", recipe_blueprint, category="science", cell_size=4)
+    if not recipe_templates or recipe_templates[0].recipes != ["iron-gear-wheel"]:
+        print(f"FAIL: expected recipe-bearing template: {recipe_templates}")
+        return 1
+
+    data_raw_path = ROOT / ".codex" / "tests" / "blueprint_lab_data_raw_fixture.json"
+    data_raw_path.write_text(
+        """
+{
+  "recipe": {
+    "iron-gear-wheel": {
+      "category": "crafting",
+      "energy_required": 0.5,
+      "ingredients": [["iron-plate", 2]],
+      "result": "iron-gear-wheel"
+    }
+  },
+  "assembling-machine": {
+    "assembling-machine-3": {
+      "crafting_categories": ["crafting"],
+      "crafting_speed": 1.25,
+      "module_slots": 4
+    }
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    knowledge = load_data_raw(data_raw_path)
+    mapped = map_template(recipe_templates[0], knowledge)
+    if not mapped.recipe_mappings or mapped.recipe_mappings[0].status != "resolved":
+        print(f"FAIL: expected recipe mapping to resolve: {mapped}")
+        return 1
+    if mapped.recipe_mappings[0].ingredients != [("iron-plate", 2.0)]:
+        print(f"FAIL: expected recipe ingredients to normalize: {mapped.recipe_mappings[0]}")
+        return 1
+
+    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, and generates a seed blueprint.")
     return 0
 
 

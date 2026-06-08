@@ -13,6 +13,7 @@ tree.
 - Classify blueprint families and choose representative examples for later template extraction.
 - Decompose learned black-box candidates into boundary ports, coarse grid signatures, and repeated module candidates.
 - Extract normalized entity subgraph templates from repeated grid signatures.
+- Import data.raw JSON and map recipe-bearing templates to recipe inputs, outputs, machine names, modules, and requests.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -73,6 +74,11 @@ entity subgraphs:
 - Recipe-bearing templates are stronger generation material than route-only or platform-fill templates.
 - Template candidates are still evidence, not proof. They need recipe data and in-game validation before becoming production modules.
 
+The prototype knowledge layer accepts a current game or mod `data.raw` JSON
+export. Without that export, recipe-bearing templates remain unresolved by
+design; with it, the report can show recipe category, craft time, ingredients,
+products, machine names, module items, and request items.
+
 ## Commands
 
 Analyze a blueprint directory:
@@ -97,6 +103,19 @@ Extract template candidates:
 
 ```bash
 python3 -m tools.blueprint_lab.templates /mnt/d/Desktop/游戏/异星工厂/蓝图 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-template-summary.json --markdown-output .codex/tests/blueprint-template-report.md
+```
+
+Map templates to data.raw recipe knowledge:
+
+```bash
+python3 -m tools.blueprint_lab.template_knowledge /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --top 8 --cell-size 16 --json-output .codex/tests/blueprint-template-knowledge-summary.json --markdown-output .codex/tests/blueprint-template-knowledge-report.md
+```
+
+If no `--data-raw-json` is provided, the command still reports template roles
+and unresolved recipes:
+
+```bash
+python3 -m tools.blueprint_lab.template_knowledge /mnt/d/Desktop/游戏/异星工厂/蓝图 --top 8 --cell-size 16
 ```
 
 Generate the current seed blueprint:
