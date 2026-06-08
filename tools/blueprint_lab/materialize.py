@@ -1113,13 +1113,16 @@ def add_boundary_connectors(
     def add_inter_instance_bridges() -> int:
         before = len(connectors)
         for node in layout_plan.get("nodes") or []:
-            ys = {
-                round(float(port.get("y") or 0.0), 3)
-                for port in ports_for_instance(node, 0, "right", {"output", "edge-bus", "boundary"})
-                if can_start_horizontal_flow(port) and is_simple_surface_belt_port(port)
-            }
-            for y in sorted(ys):
-                add_inter_instance_bridge_lane(node, y, require_simple_surface=True)
+            instances = max(1, int(node.get("instances") or 1))
+            columns = max(1, int(node.get("columns") or 1))
+            for row_start in range(0, instances, columns):
+                ys = {
+                    round(float(port.get("y") or 0.0), 3)
+                    for port in ports_for_instance(node, row_start, "right", {"output", "edge-bus", "boundary"})
+                    if can_start_horizontal_flow(port) and is_simple_surface_belt_port(port)
+                }
+                for y in sorted(ys):
+                    add_inter_instance_bridge_lane(node, y, require_simple_surface=True)
         return len(connectors) - before
 
     bridges_added = add_inter_instance_bridges()
@@ -2979,8 +2982,16 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         for item in connector_summary.get("boundary_coverage") or []
         if str(item.get("boundary") or "").startswith("output:")
     ]
+    output_routes = [
+        item
+        for item in connector_summary.get("routes") or []
+        if str(item.get("boundary") or "").startswith("output:")
+        and item.get("status") == "connected"
+        and item.get("port")
+    ]
     output_not_sufficient = sum(1 for item in output_capacity if item.get("status") != "sufficient")
     output_coverage_not_met = sum(1 for item in output_coverage if not item.get("meets_required_rate", item.get("status") == "covered"))
+    output_routes_without_machine_drop = sum(1 for item in output_routes if (item.get("port") or {}).get("role") != "machine-output")
     contract_not_exact = sum(1 for item in connector_summary.get("boundary_contract_audit") or [] if item.get("status") != "exact")
     contract_over = contract_statuses.get("over-provisioned", 0)
     bad_capacity = capacity_statuses.get("failed", 0) + capacity_statuses.get("insufficient", 0)
@@ -2996,6 +3007,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         float(flow_statuses.get("failed", 0)),
         float(contract_not_exact),
         float(contract_over),
+        float(output_routes_without_machine_drop),
         float(bad_capacity),
         float(unresolved_capacity),
         float(flow_statuses.get("unresolved", 0)),

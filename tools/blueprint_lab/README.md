@@ -189,8 +189,9 @@ port that cannot fan out across repeated instances. Inter-instance bridges are
 reported separately from boundary routes so a generated full-belt box can show
 whether repeated module edge buses were connected before the final boundary
 output was attached. The default bridge pass connects simple surface belt lanes
-first; extra learned lanes chosen by multi-belt boundary routing get their own
-on-demand bridge pass. The bridge generator does not start a visible horizontal
+on every repeated row, not only the first row; extra learned lanes chosen by
+multi-belt boundary routing get their own on-demand bridge pass. The bridge
+generator does not start a visible horizontal
 bridge from an underground-belt `input` end or terminate one at an
 underground-belt `output` end, because those are tunnel entrance/exit semantics
 rather than ordinary surface belts. Boundary coverage then audits the route plus
@@ -275,6 +276,16 @@ instances `[0, 1, 2, 3]` produce a planned `6300/min` into a `3600/min` lane,
 while `y=36.0` carries only instance `[4]` at `1575/min`. This explains why
 future layout optimization must balance copied modules across output lanes
 instead of only counting the final number of boundary belts.
+
+Runtime probes showed an important limitation of learned `output` edge-bus
+ports: a belt lane can be connected and pass the offline belt-flow audit without
+actually carrying the target recipe product. A 3x2 candidate connected two
+ordinary `output` edge-bus lanes and looked better offline, but the 2400-tick
+runtime throughput probe delivered `0/min` at the right boundary. The
+post-materialization column search therefore penalizes connected output routes
+whose selected port is not `machine-output`. This keeps the current default
+sample on the less compact but runtime-proven 4x2 layout until the generator can
+prove item flow from machine-output drop belts into learned edge buses.
 
 Runtime validation now adds an output-unloading bottleneck audit. It inspects
 recipe-machine output inventories, output inserters that pick up from those

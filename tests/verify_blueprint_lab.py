@@ -1231,6 +1231,10 @@ def main() -> int:
     selected_flow_counts = Counter(item["status"] for item in selected_summary["belt_flow_audit"])
     selected_capacity = {item["boundary"]: item for item in selected_summary["boundary_capacity_audit"]}
     selected_contract = {item["boundary"]: item for item in selected_summary["boundary_contract_audit"]}
+    selected_lane_loads = sorted(
+        selected_summary["output_lane_load_audit"],
+        key=lambda item: item["route_y"],
+    )
     if (
         selected_layout["nodes"][0]["columns"] != 3
         or selected_layout["nodes"][0]["rows"] != 2
@@ -1240,6 +1244,7 @@ def main() -> int:
         or selected_contract["output:iron-ore"]["status"] != "exact"
         or selected_contract["output:iron-ore"]["route_count"] != 2
         or selected_summary["output_fanins_added"] <= 0
+        or [item["covered_instance_count"] for item in selected_lane_loads] != [3, 2]
     ):
         print(f"FAIL: expected post-materialize layout selection to prefer the tightest exact 2-belt proven-flow grid over unresolved or over-provisioned layouts: {selected_layout} {selected_summary}")
         return 1
