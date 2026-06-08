@@ -84,6 +84,7 @@ def main() -> int:
         "transport_item_y_distribution",
         "transport_item_samples",
         "right_boundary_transport_item_audit",
+        "right_boundary_cleanliness",
         "script.on_event(defines.events.on_tick",
     ]:
         if expected not in validation_lua:

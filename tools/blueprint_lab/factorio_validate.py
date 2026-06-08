@@ -304,6 +304,8 @@ local function audit_right_boundary_transport_items(surface)
     end
   end
   local item_counts = {{}}
+  local input_item_count = 0
+  local product_item_count = 0
   local belt_count = 0
   local line_count = 0
   if max_x ~= nil then
@@ -323,6 +325,7 @@ local function audit_right_boundary_transport_items(surface)
               end)
               if ok_count and item_count ~= nil and item_count > 0 then
                 item_counts[item_name] = (item_counts[item_name] or 0) + item_count
+                input_item_count = input_item_count + item_count
               end
             end
             for item_name, _ in pairs(product_items) do
@@ -331,6 +334,7 @@ local function audit_right_boundary_transport_items(surface)
               end)
               if ok_count and item_count ~= nil and item_count > 0 then
                 item_counts[item_name] = (item_counts[item_name] or 0) + item_count
+                product_item_count = product_item_count + item_count
               end
             end
           end
@@ -339,6 +343,15 @@ local function audit_right_boundary_transport_items(surface)
     end
   end
   log("BLUEPRINT_LAB_VALIDATION right_boundary_transport_item_audit max_x=" .. tostring(max_x) .. " belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count) .. " items=" .. sorted_count_string(item_counts))
+  local cleanliness_status = "empty"
+  if max_x == nil then
+    cleanliness_status = "no-boundary"
+  elseif input_item_count > 0 then
+    cleanliness_status = "contaminated"
+  elseif product_item_count > 0 then
+    cleanliness_status = "clean"
+  end
+  log("BLUEPRINT_LAB_VALIDATION right_boundary_cleanliness status=" .. cleanliness_status .. " product_items=" .. tostring(product_item_count) .. " input_items=" .. tostring(input_item_count))
 end
 
 local function inject_input_items_to_left_belts(surface)
