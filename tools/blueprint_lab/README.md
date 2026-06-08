@@ -311,6 +311,17 @@ the generated right boundary. It still does not prove full-belt sustained
 throughput, long-run stability, clean output lanes, or player `build_blueprint`
 success on a platform surface.
 
+Full-belt targets now also carry a boundary-contract audit. For a target such as
+`2x turbo-transport-belt`, the audit expects exactly two connected output routes
+using `turbo-transport-belt`. The current `iron-ore` 2x turbo sample is therefore
+reported as `over-provisioned`: it can move product to the right boundary, but it
+uses five output routes rather than the requested two output belts. Candidate
+multi-column layouts can produce an exact two-route output contract, but the
+current machine-input routing creates failed overlapping input routes on those
+layouts, so the selector rejects them instead of trading a clean boundary shape
+for broken input flow. The next generator problem is a row-level machine-input
+manifold that can feed several copied crusher cells from one proven input lane.
+
 ## Commands
 
 Analyze a blueprint directory:

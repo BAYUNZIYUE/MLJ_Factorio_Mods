@@ -898,6 +898,13 @@ def main() -> int:
     ):
         print(f"FAIL: expected replicated-port routing to fan out through existing bridge-lane belts: {replicated_summary}")
         return 1
+    if (
+        len(replicated_summary["output_fanins"]) != 1
+        or replicated_summary["output_fanins"][0]["status"] != "connected"
+        or replicated_summary["output_fanins"][0]["existing_belts_used"] != 7
+    ):
+        print(f"FAIL: expected replicated-port routing to fan in output through existing bridge-lane belts: {replicated_summary}")
+        return 1
     replicated_coverage = {item["boundary"]: item for item in replicated_summary["boundary_coverage"]}
     if replicated_coverage["output:iron-ore"]["status"] != "covered" or replicated_coverage["output:iron-ore"]["covered_instances"] != [0, 1] or not replicated_coverage["output:iron-ore"]["meets_required_rate"]:
         print(f"FAIL: expected replicated output coverage to cover both instances and meet the boundary rate: {replicated_summary}")
@@ -906,7 +913,7 @@ def main() -> int:
         print(f"FAIL: expected input fanout to cover both replicated input ports: {replicated_summary}")
         return 1
     replicated_flow_counts = Counter(item["status"] for item in replicated_summary["belt_flow_audit"])
-    if replicated_flow_counts != {"pass": 4}:
+    if replicated_flow_counts != {"pass": 5}:
         print(f"FAIL: expected replicated route, bridge, and fanout to pass belt flow audit: {replicated_summary}")
         return 1
     if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 19:
@@ -1067,14 +1074,18 @@ def main() -> int:
     )
     selected_flow_counts = Counter(item["status"] for item in selected_summary["belt_flow_audit"])
     selected_capacity = {item["boundary"]: item for item in selected_summary["boundary_capacity_audit"]}
+    selected_contract = {item["boundary"]: item for item in selected_summary["boundary_contract_audit"]}
     if (
         selected_layout["nodes"][0]["columns"] != 3
         or selected_layout["nodes"][0]["rows"] != 2
-        or selected_flow_counts != {"pass": 10}
+        or selected_flow_counts != {"pass": 13}
         or selected_capacity["output:iron-ore"]["status"] != "sufficient"
         or selected_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 7200
+        or selected_contract["output:iron-ore"]["status"] != "exact"
+        or selected_contract["output:iron-ore"]["route_count"] != 2
+        or selected_summary["output_fanins_added"] <= 0
     ):
-        print(f"FAIL: expected post-materialize layout selection to prefer the tightest horizontal proven-flow grid over unresolved 5x1: {selected_layout} {selected_summary}")
+        print(f"FAIL: expected post-materialize layout selection to prefer the tightest exact 2-belt proven-flow grid over unresolved or over-provisioned layouts: {selected_layout} {selected_summary}")
         return 1
 
     semantic_fail_mappings = [
@@ -1131,7 +1142,7 @@ def main() -> int:
         print(f"FAIL: expected materializer to preserve underground-belt type: {underground}")
         return 1
     underground_flow_counts = Counter(item["status"] for item in underground_summary["belt_flow_audit"])
-    if underground_flow_counts != {"pass": 3, "unresolved": 1}:
+    if underground_flow_counts != {"pass": 3, "unresolved": 2}:
         print(f"FAIL: expected middle underground output to stay unresolved in reused fanout audit: {underground_summary}")
         return 1
 

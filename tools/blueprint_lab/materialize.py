@@ -462,17 +462,21 @@ def add_boundary_connectors(
     routes: list[dict[str, Any]] = []
     bridges: list[dict[str, Any]] = []
     input_fanouts: list[dict[str, Any]] = []
+    output_fanins: list[dict[str, Any]] = []
     if not layout_plan.get("nodes"):
         return {
             "connectors_added": 0,
             "bridges_added": 0,
             "input_fanouts_added": 0,
+            "output_fanins_added": 0,
             "collisions": collisions,
             "routes": routes,
             "bridges": bridges,
             "input_fanouts": input_fanouts,
+            "output_fanins": output_fanins,
             "boundary_coverage": [],
             "boundary_capacity_audit": [],
+            "boundary_contract_audit": [],
             "belt_flow_audit": [],
         }
 
@@ -1322,6 +1326,104 @@ def add_boundary_connectors(
 
     input_fanouts_added = add_input_fanouts()
 
+    def add_output_fanins() -> int:
+        before = len(connectors)
+        node_index = node_by_fingerprint()
+        for route in routes:
+            if route.get("status") != "connected":
+                continue
+            boundary = str(route.get("boundary") or "")
+            if not boundary.startswith("output:"):
+                continue
+            port = route.get("port") or {}
+            node = node_index.get(str(port.get("node_fingerprint") or ""))
+            if not node:
+                continue
+            current_instance = int(port.get("node_instance") or 0)
+            route_y = round(float(port.get("y") or 0.0), 3)
+            columns = max(1, int(node.get("columns") or 1))
+            row_start = (current_instance // columns) * columns
+            current_port = port
+            while current_instance - 1 >= row_start:
+                previous_instance = current_instance - 1
+                previous_ports = port_by_y(
+                    ports_for_instance(node, previous_instance, "right", {"machine-output", "output", "edge-bus", "boundary"}),
+                    prefer="rightmost",
+                )
+                previous_port = previous_ports.get(route_y)
+                if previous_port is None:
+                    output_fanins.append(
+                        {
+                            "boundary": boundary,
+                            "node_item": node.get("item"),
+                            "node_recipe": node.get("recipe"),
+                            "node_fingerprint": node.get("fingerprint"),
+                            "from_instance": previous_instance,
+                            "to_instance": current_instance,
+                            "fanin_y": route_y,
+                            "from_port": None,
+                            "to_port": current_port,
+                            "status": "blocked",
+                            "belts_added": 0,
+                            "collisions": [],
+                            "reason": "no-previous-right-port-on-route-y",
+                            "route_kind": "output-fanin-direct",
+                        }
+                    )
+                    break
+                start_x = float(previous_port["x"]) + 1.0
+                end_x = float(current_port["x"]) - 1.0
+                if start_x > end_x:
+                    output_fanins.append(
+                        {
+                            "boundary": boundary,
+                            "node_item": node.get("item"),
+                            "node_recipe": node.get("recipe"),
+                            "node_fingerprint": node.get("fingerprint"),
+                            "from_instance": previous_instance,
+                            "to_instance": current_instance,
+                            "fanin_y": route_y,
+                            "from_port": previous_port,
+                            "to_port": current_port,
+                            "status": "blocked",
+                            "belts_added": 0,
+                            "collisions": [],
+                            "reason": "no-horizontal-gap",
+                            "route_kind": "output-fanin-direct",
+                        }
+                    )
+                    break
+                belt_name = connector_belt_name_for_port(previous_port)
+                reason = f"fanin:{boundary}:{previous_instance}->{current_instance}:{route_y:g}"
+                positions = horizontal_positions(start_x, end_x, route_y, reason, belt_name)
+                belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(positions)
+                status = "connected" if not route_collisions else "blocked"
+                output_fanins.append(
+                    {
+                        "boundary": boundary,
+                        "node_item": node.get("item"),
+                        "node_recipe": node.get("recipe"),
+                        "node_fingerprint": node.get("fingerprint"),
+                        "from_instance": previous_instance,
+                        "to_instance": current_instance,
+                        "fanin_y": route_y,
+                        "from_port": previous_port,
+                        "to_port": current_port,
+                        "status": status,
+                        "belts_added": belts_added,
+                        "existing_belts_used": existing_belts_used,
+                        "collisions": route_collisions,
+                        "route_kind": "output-fanin-direct",
+                    }
+                )
+                if route_collisions:
+                    break
+                current_port = previous_port
+                current_instance = previous_instance
+        return len(connectors) - before
+
+    output_fanins_added = add_output_fanins()
+
     def route_boundary_rate(route: dict[str, Any]) -> float | None:
         return boundary_required_rate(str(route.get("boundary") or ""))
 
@@ -1416,6 +1518,48 @@ def add_boundary_connectors(
                 item["status"] = "unresolved"
         return audits
 
+    def boundary_contract_audit() -> list[dict[str, Any]]:
+        target_rate_basis = layout_plan.get("target_rate_basis") or {}
+        if target_rate_basis.get("kind") != "full-belt":
+            return []
+        target_item = str(layout_plan.get("target_item") or "")
+        expected_boundary = f"output:{target_item}"
+        expected_belt_count = int(target_rate_basis.get("belt_count") or 0)
+        expected_belt_name = str(target_rate_basis.get("belt_name") or "")
+        if expected_belt_count <= 0 or not expected_belt_name:
+            return []
+
+        connected_routes = [
+            route
+            for route in routes
+            if route.get("status") == "connected"
+            and str(route.get("boundary") or "") == expected_boundary
+            and route.get("port")
+        ]
+        belt_names = [connector_belt_name_for_port(route["port"]) for route in connected_routes]
+        route_ys = sorted({round(float((route.get("port") or {}).get("y") or 0.0), 3) for route in connected_routes})
+        wrong_belts = sorted({name for name in belt_names if name != expected_belt_name})
+        route_count = len(connected_routes)
+        if wrong_belts:
+            status = "wrong-belt"
+        elif route_count < expected_belt_count:
+            status = "under-provisioned"
+        elif route_count > expected_belt_count:
+            status = "over-provisioned"
+        else:
+            status = "exact"
+        return [
+            {
+                "boundary": expected_boundary,
+                "status": status,
+                "expected_belt_name": expected_belt_name,
+                "expected_belt_count": expected_belt_count,
+                "route_count": route_count,
+                "route_ys": route_ys,
+                "wrong_belts": wrong_belts,
+            }
+        ]
+
     def bridge_edges_for_node(fingerprint: str, y: float) -> list[tuple[int, int]]:
         edges: list[tuple[int, int]] = []
         for bridge in bridges:
@@ -1434,6 +1578,14 @@ def add_boundary_connectors(
             if round(float(fanout.get("fanout_y") or 0.0), 3) != round(y, 3):
                 continue
             edges.append((int(fanout["from_instance"]), int(fanout["to_instance"])))
+        for fanin in output_fanins:
+            if fanin.get("status") != "connected":
+                continue
+            if str(fanin.get("node_fingerprint") or "") != fingerprint:
+                continue
+            if round(float(fanin.get("fanin_y") or 0.0), 3) != round(y, 3):
+                continue
+            edges.append((int(fanin["from_instance"]), int(fanin["to_instance"])))
         return edges
 
     def horizontal_span_positions(start_x: float, end_x: float, y: float) -> list[tuple[float, float]]:
@@ -1707,6 +1859,24 @@ def add_boundary_connectors(
                     belt_name=connector_belt_name_for_port(from_port),
                 )
             )
+        for fanin in output_fanins:
+            if fanin.get("status") != "connected" or not fanin.get("from_port") or not fanin.get("to_port"):
+                continue
+            from_port = fanin["from_port"]
+            to_port = fanin["to_port"]
+            audit.append(
+                audit_horizontal_belt_flow(
+                    segment_type="output-fanin",
+                    boundary=str(fanin.get("boundary") or ""),
+                    node_fingerprint=str(fanin.get("node_fingerprint") or ""),
+                    from_instance=int(fanin["from_instance"]),
+                    to_instance=int(fanin["to_instance"]),
+                    start_x=float(from_port["x"]),
+                    end_x=float(to_port["x"]),
+                    y=float(fanin.get("fanin_y") or from_port["y"]),
+                    belt_name=connector_belt_name_for_port(from_port),
+                )
+            )
         return audit
 
     def reachable_instances(start: int, edges: list[tuple[int, int]], *, direction: str) -> list[int]:
@@ -1806,17 +1976,21 @@ def add_boundary_connectors(
     coverage = boundary_coverage()
     flow_audit = belt_flow_audit()
     capacity_audit = boundary_capacity_audit(flow_audit)
+    contract_audit = boundary_contract_audit()
     entities.extend(connectors)
     return {
         "connectors_added": len(connectors),
         "bridges_added": bridges_added,
         "input_fanouts_added": input_fanouts_added,
+        "output_fanins_added": output_fanins_added,
         "collisions": collisions,
         "routes": routes,
         "bridges": bridges,
         "input_fanouts": input_fanouts,
+        "output_fanins": output_fanins,
         "boundary_coverage": coverage,
         "boundary_capacity_audit": capacity_audit,
+        "boundary_contract_audit": contract_audit,
         "belt_flow_audit": flow_audit,
     }
 
@@ -1905,12 +2079,15 @@ def materialize_layout_with_summary(
         "connectors_added": 0,
         "bridges_added": 0,
         "input_fanouts_added": 0,
+        "output_fanins_added": 0,
         "collisions": [],
         "routes": [],
         "bridges": [],
         "input_fanouts": [],
+        "output_fanins": [],
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
+        "boundary_contract_audit": [],
         "belt_flow_audit": [],
     }
     if connect_boundaries:
@@ -1989,12 +2166,21 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     connector_summary = summary["connector_summary"]
     flow_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("belt_flow_audit") or [])
     capacity_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_capacity_audit") or [])
+    contract_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_contract_audit") or [])
     output_capacity = [
         item
         for item in connector_summary.get("boundary_capacity_audit") or []
         if str(item.get("boundary") or "").startswith("output:")
     ]
+    output_coverage = [
+        item
+        for item in connector_summary.get("boundary_coverage") or []
+        if str(item.get("boundary") or "").startswith("output:")
+    ]
     output_not_sufficient = sum(1 for item in output_capacity if item.get("status") != "sufficient")
+    output_coverage_not_met = sum(1 for item in output_coverage if not item.get("meets_required_rate", item.get("status") == "covered"))
+    contract_not_exact = sum(1 for item in connector_summary.get("boundary_contract_audit") or [] if item.get("status") != "exact")
+    contract_over = contract_statuses.get("over-provisioned", 0)
     bad_capacity = capacity_statuses.get("failed", 0) + capacity_statuses.get("insufficient", 0)
     unresolved_capacity = capacity_statuses.get("unresolved", 0)
     width = float(summary.get("width") or 0.0)
@@ -2004,8 +2190,11 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     return (
         float(len(connector_summary.get("collisions") or [])),
         float(output_not_sufficient),
-        float(bad_capacity),
+        float(output_coverage_not_met),
         float(flow_statuses.get("failed", 0)),
+        float(contract_not_exact),
+        float(contract_over),
+        float(bad_capacity),
         float(unresolved_capacity),
         float(flow_statuses.get("unresolved", 0)),
         horizontal_penalty,
@@ -2112,12 +2301,15 @@ def render_summary(
         "connectors_added": 0,
         "bridges_added": 0,
         "input_fanouts_added": 0,
+        "output_fanins_added": 0,
         "collisions": [],
         "routes": [],
         "bridges": [],
         "input_fanouts": [],
+        "output_fanins": [],
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
+        "boundary_contract_audit": [],
         "belt_flow_audit": [],
     }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
@@ -2185,10 +2377,12 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Connector belts: {summary['connector_summary']['connectors_added']}",
         f"- Inter-instance bridge belts: {summary['connector_summary'].get('bridges_added', 0)}",
         f"- Input fanout belts: {summary['connector_summary'].get('input_fanouts_added', 0)}",
+        f"- Output fan-in belts: {summary['connector_summary'].get('output_fanins_added', 0)}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Belt flow status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('belt_flow_audit') or []))}",
         f"- Boundary capacity status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('boundary_capacity_audit') or []))}",
+        f"- Boundary contract status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('boundary_contract_audit') or []))}",
         f"- Machine I/O status counts: {dict(Counter(item.get('status', 'unknown') for item in summary.get('machine_io_audit') or []))}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
         f"- Layout estimate: {summary['layout_estimated_width']:g} x {summary['layout_estimated_height']:g}",
@@ -2323,6 +2517,14 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 )
                 line += f" belts={belts}"
             lines.append(line)
+    if summary["connector_summary"].get("boundary_contract_audit"):
+        lines.extend(["", "## Boundary Contract Audit", ""])
+        for item in summary["connector_summary"]["boundary_contract_audit"]:
+            lines.append(
+                f"- {item.get('boundary')}: status={item.get('status')} "
+                f"expected={item.get('expected_belt_count')}x {item.get('expected_belt_name')} "
+                f"routes={item.get('route_count')} lanes={item.get('route_ys')}"
+            )
     if summary["connector_summary"].get("belt_flow_audit"):
         lines.extend(["", "## Belt Flow Audit", ""])
         for item in summary["connector_summary"]["belt_flow_audit"]:
