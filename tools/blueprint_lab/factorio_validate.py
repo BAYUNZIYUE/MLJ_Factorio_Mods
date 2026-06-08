@@ -25,15 +25,33 @@ def render_control_lua(
     input_probe: str = "both",
     runtime_audit_wait_ticks: int = 120,
     sustained_input_interval_ticks: int = 0,
+    throughput_window_ticks: int = 0,
+    throughput_target_item: str = "",
 ) -> str:
     return f"""local blueprint_string = {lua_long_string(blueprint_string)}
 local input_probe_mode = {lua_long_string(input_probe)}
 local runtime_audit_wait_ticks = {int(runtime_audit_wait_ticks)}
 local sustained_input_interval_ticks = {int(sustained_input_interval_ticks)}
+local throughput_window_ticks = {int(throughput_window_ticks)}
+local throughput_target_item_name = {lua_long_string(throughput_target_item)}
 local next_sustained_input_tick = nil
 local sustained_input_cycles = 0
 local sustained_input_inserted = 0
 local sustained_input_failures = 0
+local next_throughput_window_tick = nil
+local throughput_start_tick = nil
+local throughput_last_tick = nil
+local throughput_window_count = 0
+local throughput_removed_product_items = {{}}
+local throughput_removed_input_items = {{}}
+local throughput_removed_target_items = 0
+local throughput_current_product_items = {{}}
+local throughput_current_input_items = {{}}
+local throughput_current_target_items = 0
+local throughput_current_start_tick = nil
+local throughput_current_max_x = nil
+local throughput_current_belt_count = 0
+local throughput_current_line_count = 0
 
 local function validation_fail(message)
   log("BLUEPRINT_LAB_VALIDATION fail " .. tostring(message))
@@ -56,6 +74,11 @@ end
 local function add_count(counts, key)
   local count_key = tostring(key)
   counts[count_key] = (counts[count_key] or 0) + 1
+end
+
+local function add_amount(counts, key, amount)
+  local count_key = tostring(key)
+  counts[count_key] = (counts[count_key] or 0) + (amount or 0)
 end
 
 local function entity_status_name(status)
@@ -381,6 +404,137 @@ local function audit_right_boundary_transport_items(surface)
     cleanliness_status = "clean"
   end
   log("BLUEPRINT_LAB_VALIDATION right_boundary_cleanliness status=" .. cleanliness_status .. " product_items=" .. tostring(product_item_count) .. " input_items=" .. tostring(input_item_count))
+end
+
+local function remove_item_from_line(line, item_name)
+  local removed_total = 0
+  while true do
+    local ok_count, item_count = pcall(function()
+      return line.get_item_count(item_name)
+    end)
+    if not ok_count or item_count == nil or item_count <= 0 then
+      break
+    end
+    local ok_remove, removed_count = pcall(function()
+      return line.remove_item({{name = item_name, count = item_count}})
+    end)
+    if not ok_remove or removed_count == nil or removed_count <= 0 then
+      break
+    end
+    removed_total = removed_total + removed_count
+    if removed_count >= item_count then
+      break
+    end
+  end
+  return removed_total
+end
+
+local function drain_right_boundary_throughput_tick(surface)
+  local input_items = collect_recipe_input_items(surface)
+  local product_items = collect_recipe_product_items(surface)
+  local tracked_items = {{}}
+  for item_name, _ in pairs(input_items) do
+    tracked_items[item_name] = true
+  end
+  for item_name, _ in pairs(product_items) do
+    tracked_items[item_name] = true
+  end
+  if throughput_target_item_name ~= nil and throughput_target_item_name ~= "" then
+    tracked_items[throughput_target_item_name] = true
+  end
+
+  local max_x = nil
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_line_count, max_line_index = pcall(function()
+      return entity.get_max_transport_line_index()
+    end)
+    if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+      if max_x == nil or entity.position.x > max_x then
+        max_x = entity.position.x
+      end
+    end
+  end
+
+  local product_removed = {{}}
+  local input_removed = {{}}
+  local target_removed = 0
+  local belt_count = 0
+  local line_count = 0
+  if max_x ~= nil then
+    for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+      local ok_line_count, max_line_index = pcall(function()
+        return entity.get_max_transport_line_index()
+      end)
+      if ok_line_count and max_line_index ~= nil and max_line_index > 0 and entity.position.x >= max_x - 0.1 then
+        belt_count = belt_count + 1
+        for line_index = 1, max_line_index do
+          local line = entity.get_transport_line(line_index)
+          if line ~= nil then
+            line_count = line_count + 1
+            for item_name, _ in pairs(tracked_items) do
+              local removed_count = remove_item_from_line(line, item_name)
+              if removed_count > 0 then
+                if product_items[item_name] then
+                  add_amount(product_removed, item_name, removed_count)
+                  add_amount(throughput_removed_product_items, item_name, removed_count)
+                  add_amount(throughput_current_product_items, item_name, removed_count)
+                end
+                if input_items[item_name] then
+                  add_amount(input_removed, item_name, removed_count)
+                  add_amount(throughput_removed_input_items, item_name, removed_count)
+                  add_amount(throughput_current_input_items, item_name, removed_count)
+                end
+                if throughput_target_item_name ~= nil and throughput_target_item_name ~= "" and item_name == throughput_target_item_name then
+                  target_removed = target_removed + removed_count
+                  throughput_removed_target_items = throughput_removed_target_items + removed_count
+                  throughput_current_target_items = throughput_current_target_items + removed_count
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  throughput_current_max_x = max_x
+  throughput_current_belt_count = belt_count
+  throughput_current_line_count = line_count
+  throughput_last_tick = game.tick
+  return {{target_removed = target_removed, product_removed = product_removed, input_removed = input_removed, max_x = max_x, belt_count = belt_count, line_count = line_count}}
+end
+
+local function log_right_boundary_throughput_window()
+  throughput_window_count = throughput_window_count + 1
+  throughput_last_tick = game.tick
+  local observed_ticks = 0
+  if throughput_current_start_tick ~= nil then
+    observed_ticks = game.tick - throughput_current_start_tick
+  end
+  local target_per_minute = 0
+  if observed_ticks > 0 then
+    target_per_minute = throughput_current_target_items * 3600 / observed_ticks
+  end
+  log("BLUEPRINT_LAB_VALIDATION right_boundary_throughput_window index=" .. tostring(throughput_window_count) .. " tick=" .. tostring(game.tick) .. " observed_ticks=" .. tostring(observed_ticks) .. " max_x=" .. tostring(throughput_current_max_x) .. " belts=" .. tostring(throughput_current_belt_count) .. " lines=" .. tostring(throughput_current_line_count) .. " target_item=" .. tostring(throughput_target_item_name) .. " target_removed=" .. tostring(throughput_current_target_items) .. " target_per_minute=" .. string.format("%.2f", target_per_minute) .. " product_items=" .. sorted_count_string(throughput_current_product_items) .. " input_items=" .. sorted_count_string(throughput_current_input_items))
+  throughput_current_product_items = {{}}
+  throughput_current_input_items = {{}}
+  throughput_current_target_items = 0
+  throughput_current_start_tick = game.tick
+  throughput_current_max_x = nil
+  throughput_current_belt_count = 0
+  throughput_current_line_count = 0
+end
+
+local function log_right_boundary_throughput_summary()
+  local observed_ticks = 0
+  if throughput_start_tick ~= nil and throughput_last_tick ~= nil then
+    observed_ticks = throughput_last_tick - throughput_start_tick
+  end
+  local target_per_minute = 0
+  if observed_ticks > 0 then
+    target_per_minute = throughput_removed_target_items * 3600 / observed_ticks
+  end
+  log("BLUEPRINT_LAB_VALIDATION right_boundary_throughput_summary window_ticks=" .. tostring(throughput_window_ticks) .. " windows=" .. tostring(throughput_window_count) .. " observed_ticks=" .. tostring(observed_ticks) .. " target_item=" .. tostring(throughput_target_item_name) .. " target_removed=" .. tostring(throughput_removed_target_items) .. " target_per_minute=" .. string.format("%.2f", target_per_minute) .. " product_items=" .. sorted_count_string(throughput_removed_product_items) .. " input_items=" .. sorted_count_string(throughput_removed_input_items))
 end
 
 local function inject_input_items_to_left_belts(surface, should_log)
@@ -895,8 +1049,14 @@ local function run_validation()
   if sustained_input_interval_ticks > 0 and (input_probe_mode == "left" or input_probe_mode == "both") then
     next_sustained_input_tick = game.tick + sustained_input_interval_ticks
   end
+  if throughput_window_ticks > 0 then
+    throughput_start_tick = game.tick
+    throughput_current_start_tick = game.tick
+    next_throughput_window_tick = game.tick + throughput_window_ticks
+  end
   log("BLUEPRINT_LAB_VALIDATION runtime_audit_wait_ticks=" .. tostring(runtime_audit_wait_ticks))
   log("BLUEPRINT_LAB_VALIDATION sustained_input_interval_ticks=" .. tostring(sustained_input_interval_ticks))
+  log("BLUEPRINT_LAB_VALIDATION throughput_window_ticks=" .. tostring(throughput_window_ticks) .. " throughput_target_item=" .. tostring(throughput_target_item_name))
 end
 
 script.on_event(defines.events.on_tick, function(event)
@@ -911,11 +1071,20 @@ script.on_event(defines.events.on_tick, function(event)
     sustained_input_inserted = sustained_input_inserted + (result.inserted or 0)
     sustained_input_failures = sustained_input_failures + (result.failures or 0)
     next_sustained_input_tick = game.tick + sustained_input_interval_ticks
-    return
+  end
+  if pending_audit_surface ~= nil and next_throughput_window_tick ~= nil and game.tick < pending_audit_tick then
+    drain_right_boundary_throughput_tick(pending_audit_surface)
+    if game.tick >= next_throughput_window_tick then
+      log_right_boundary_throughput_window()
+      next_throughput_window_tick = game.tick + throughput_window_ticks
+    end
   end
   if pending_audit_surface ~= nil and game.tick >= pending_audit_tick then
     script.on_event(defines.events.on_tick, nil)
     log("BLUEPRINT_LAB_VALIDATION sustained_input_injection interval_ticks=" .. tostring(sustained_input_interval_ticks) .. " cycles=" .. tostring(sustained_input_cycles) .. " inserted=" .. tostring(sustained_input_inserted) .. " failures=" .. tostring(sustained_input_failures))
+    if throughput_window_ticks > 0 then
+      log_right_boundary_throughput_summary()
+    end
     audit_recipe_machines(pending_audit_surface)
     audit_recipe_machine_output_items(pending_audit_surface)
     audit_transport_items(pending_audit_surface)
@@ -940,6 +1109,8 @@ def write_validation_scenario(
     input_probe: str = "both",
     runtime_audit_wait_ticks: int = 120,
     sustained_input_interval_ticks: int = 0,
+    throughput_window_ticks: int = 0,
+    throughput_target_item: str = "",
 ) -> Path:
     scenario_dir = user_data_dir / "scenarios" / scenario_name
     scenario_dir.mkdir(parents=True, exist_ok=True)
@@ -963,6 +1134,8 @@ def write_validation_scenario(
             input_probe=input_probe,
             runtime_audit_wait_ticks=runtime_audit_wait_ticks,
             sustained_input_interval_ticks=sustained_input_interval_ticks,
+            throughput_window_ticks=throughput_window_ticks,
+            throughput_target_item=throughput_target_item,
         ),
         encoding="utf-8",
     )
@@ -1085,6 +1258,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input-probe", choices=["left", "pickup", "both"], default="both")
     parser.add_argument("--runtime-audit-wait-ticks", type=int, default=120)
     parser.add_argument("--sustained-input-interval-ticks", type=int, default=0)
+    parser.add_argument("--throughput-window-ticks", type=int, default=0)
+    parser.add_argument("--throughput-target-item", default="")
     args = parser.parse_args(argv)
 
     blueprint_string = args.blueprint.read_text(encoding="utf-8").strip()
@@ -1095,6 +1270,8 @@ def main(argv: list[str] | None = None) -> int:
         input_probe=args.input_probe,
         runtime_audit_wait_ticks=effective_runtime_audit_wait_ticks(args.until_tick, args.runtime_audit_wait_ticks),
         sustained_input_interval_ticks=args.sustained_input_interval_ticks,
+        throughput_window_ticks=args.throughput_window_ticks,
+        throughput_target_item=args.throughput_target_item,
     )
 
     args.console_log.parent.mkdir(parents=True, exist_ok=True)

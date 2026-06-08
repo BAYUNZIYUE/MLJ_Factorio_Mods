@@ -78,6 +78,10 @@ def main() -> int:
         "runtime_audit_wait_ticks=",
         "sustained_input_interval_ticks=",
         "sustained_input_injection",
+        "throughput_window_ticks=",
+        "right_boundary_throughput_window",
+        "right_boundary_throughput_summary",
+        "line.remove_item",
         "recipe_machine_audit",
         "recipe_machine_runtime",
         "recipe_machine_output_items",
@@ -117,6 +121,13 @@ def main() -> int:
     sustained_lua = render_control_lua(encoded, input_probe="left", runtime_audit_wait_ticks=2400, sustained_input_interval_ticks=300)
     if "local sustained_input_interval_ticks = 300" not in sustained_lua or "sustained_input_cycles" not in sustained_lua:
         print("FAIL: expected Factorio validation scenario to support sustained left-boundary input injection")
+        return 1
+    throughput_lua = render_control_lua(encoded, runtime_audit_wait_ticks=2400, throughput_window_ticks=300, throughput_target_item="iron-ore")
+    if "local throughput_window_ticks = 300" not in throughput_lua or 'local throughput_target_item_name = [[iron-ore]]' not in throughput_lua:
+        print("FAIL: expected Factorio validation scenario to support right-boundary throughput windows")
+        return 1
+    if "throughput_removed_target_items" not in throughput_lua or "target_per_minute" not in throughput_lua:
+        print("FAIL: expected Factorio validation scenario to summarize right-boundary target throughput")
         return 1
 
     learned = learn_library([tmp])

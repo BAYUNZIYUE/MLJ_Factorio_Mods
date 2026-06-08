@@ -347,6 +347,23 @@ result should be read as "right boundary stayed clean under periodic test
 feeding for this window", not as sustained full-belt or infinite-stability
 proof.
 
+For throughput-style validation, the runtime validator can run a right-boundary
+window drain with `--throughput-window-ticks` and `--throughput-target-item`.
+The implementation follows the same rightmost transport-line boundary used by
+the cleanliness audit, drains tracked items from that boundary every tick with
+`LuaTransportLine.remove_item`, and aggregates the removed counts into
+`--throughput-window-ticks` report windows. This measures whole-boundary
+delivered items rather than half-lane balancing, which matches the current
+generator goal better than lane-perfect accounting. It is still a diagnostic
+sink: removing items from the right boundary prevents output backup during the
+probe, so the result is evidence for delivered product rate under a test sink,
+not a complete proof of natural steady-state full-belt throughput.
+In the current `iron-ore 2x turbo-transport-belt` recycle-merge sample, the
+300-tick throughput windows after startup report about `444-456/min` delivered
+`iron-ore`, while the requested contract is `7200/min`. That is useful negative
+evidence: the generated box now has clean output and repeated runtime delivery,
+but it is still far from a sustained 2x turbo full-belt output.
+
 ## Commands
 
 Analyze a blueprint directory:
@@ -422,6 +439,12 @@ Run a longer sustained left-boundary input probe:
 python3 -m tools.blueprint_lab.factorio_validate --scenario-name blueprint_lab_validation_recycle_merge_sustained_2400 --blueprint .codex/tests/blueprint-routed-iron-ore-2x-turbo-belt.txt --user-data-dir .codex/tests/factorio-probe-write-data --mod-directory /mnt/c/Users/MLJ/AppData/Roaming/Factorio/mods --console-log .codex/tests/blueprint-lab-factorio-recycle-merge-sustained-2400.log --until-tick 2400 --timeout-seconds 120 --input-probe left --runtime-audit-wait-ticks 2400 --sustained-input-interval-ticks 300
 ```
 
+Run a right-boundary throughput-window probe:
+
+```bash
+python3 -m tools.blueprint_lab.factorio_validate --scenario-name blueprint_lab_validation_recycle_merge_throughput_2400 --blueprint .codex/tests/blueprint-routed-iron-ore-2x-turbo-belt.txt --user-data-dir .codex/tests/factorio-probe-write-data --mod-directory /mnt/c/Users/MLJ/AppData/Roaming/Factorio/mods --console-log .codex/tests/blueprint-lab-factorio-recycle-merge-throughput-2400.log --until-tick 2400 --timeout-seconds 120 --input-probe left --runtime-audit-wait-ticks 2400 --sustained-input-interval-ticks 300 --throughput-window-ticks 300 --throughput-target-item iron-ore
+```
+
 Generate the current seed blueprint:
 
 ```bash
@@ -438,6 +461,7 @@ python3 tests/verify_blueprint_lab.py
 
 - Blueprint string format: `https://wiki.factorio.com/Blueprint_string_format`
 - Runtime blueprint stack APIs: `https://lua-api.factorio.com/latest/classes/LuaItemStack.html`
+- Runtime transport-line APIs: `https://lua-api.factorio.com/latest/classes/LuaTransportLine.html`
 - Direction type: `https://lua-api.factorio.com/latest/types/Direction.html`
 - Prototype docs and machine-readable prototype format: `https://lua-api.factorio.com/latest/index-prototype.html`
 - Transport belt connectable prototype speed: `https://lua-api.factorio.com/latest/prototypes/TransportBeltConnectablePrototype.html`
