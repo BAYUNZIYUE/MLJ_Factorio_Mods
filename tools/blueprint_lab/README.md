@@ -127,10 +127,14 @@ planned rectangle, preserves recipe/direction/quality fields and raw entity
 numbers, and de-duplicates identical tile placements. With
 `--connect-boundaries`, it also adds conservative transport-belt stubs in the
 reserved left/right lanes and reports exact entity-position collisions. It
-intentionally does not generate full internal belt routing, pipes, power,
-missing modules, cross-template beacon effects, or collision repairs yet;
-those must be separate passes so they can be validated instead of hidden in the
-first generated skeleton.
+also bridges same-row adjacent repeated template instances when their learned
+left/right edge-bus ports share the same y coordinate. This mirrors the corpus
+pattern that copy-expanded modules become useful only when their edge buses are
+stitched across the gaps between repeated cells. It intentionally does not
+generate full internal belt routing, pipes, power, missing modules,
+cross-template beacon effects, or collision repairs yet; those must be separate
+passes so they can be validated instead of hidden in the first generated
+skeleton.
 
 Connector routing reports each boundary as `connected`, `stub-only`, or
 `blocked`. A connected route found a compatible learned edge port and added a
@@ -140,7 +144,10 @@ entity-position collision was detected. The router evaluates all compatible
 ports on the requested side before declaring a route blocked; failed direct
 candidates are retained in `blocked_attempts` so the report can explain why a
 later port was chosen. Connector belts inherit the selected port belt tier when
-the port is a transport belt, underground belt, or splitter.
+the port is a transport belt, underground belt, or splitter. Inter-instance
+bridges are reported separately from boundary routes so a generated full-belt
+box can show whether repeated module edge buses were connected before the final
+boundary output was attached.
 
 ## Commands
 

@@ -94,8 +94,9 @@ def add_boundary_connectors(
     connectors: list[dict[str, Any]] = []
     collisions: list[dict[str, Any]] = []
     routes: list[dict[str, Any]] = []
+    bridges: list[dict[str, Any]] = []
     if not layout_plan.get("nodes"):
-        return {"connectors_added": 0, "collisions": collisions, "routes": routes}
+        return {"connectors_added": 0, "bridges_added": 0, "collisions": collisions, "routes": routes, "bridges": bridges}
 
     root = layout_plan["nodes"][0]
     default_y = round(float(root["y"]) + float(root["source_height"]) / 2, 3)
@@ -175,42 +176,115 @@ def add_boundary_connectors(
         collisions.extend(last["collisions"])
         return 0, list(last["collisions"]), dict(last["port"]), str(last["route_kind"]), blocked_attempts
 
-    def candidate_ports(side: str, roles: set[str]) -> list[dict[str, Any]]:
+    def ports_for_instance(node: dict[str, Any], instance: int, side: str, roles: set[str]) -> list[dict[str, Any]]:
         ports: list[dict[str, Any]] = []
         spacing = float(layout_plan.get("spacing") or 0)
+        columns = max(1, int(node.get("columns") or 1))
+        source_width = float(node.get("source_width") or 0)
+        source_height = float(node.get("source_height") or 0)
+        col = instance % columns
+        row = instance // columns
+        origin_x = float(node["x"]) + col * (source_width + spacing)
+        origin_y = float(node["y"]) + row * (source_height + spacing)
+        for port in node.get("ports") or []:
+            if port.get("side") != side or port.get("role") not in roles:
+                continue
+            ports.append(
+                {
+                    "node_item": node.get("item"),
+                    "node_recipe": node.get("recipe"),
+                    "node_instance": instance,
+                    "node_column": col,
+                    "node_row": row,
+                    "side": port.get("side"),
+                    "role": port.get("role"),
+                    "entity_name": port.get("entity_name"),
+                    "x": round(origin_x + float(port.get("x") or 0), 3),
+                    "y": round(origin_y + float(port.get("y") or 0), 3),
+                }
+            )
+        return ports
+
+    def candidate_ports(side: str, roles: set[str]) -> list[dict[str, Any]]:
+        ports: list[dict[str, Any]] = []
         for node in layout_plan.get("nodes") or []:
-            instances = int(node.get("instances") or 1)
-            columns = max(1, int(node.get("columns") or 1))
-            source_width = float(node.get("source_width") or 0)
-            source_height = float(node.get("source_height") or 0)
-            for port in node.get("ports") or []:
-                if port.get("side") != side or port.get("role") not in roles:
-                    continue
-                for instance in range(instances):
-                    col = instance % columns
-                    row = instance // columns
-                    origin_x = float(node["x"]) + col * (source_width + spacing)
-                    origin_y = float(node["y"]) + row * (source_height + spacing)
-                    ports.append(
-                        {
-                            "node_item": node.get("item"),
-                            "node_recipe": node.get("recipe"),
-                            "node_instance": instance,
-                            "node_column": col,
-                            "node_row": row,
-                            "side": port.get("side"),
-                            "role": port.get("role"),
-                            "entity_name": port.get("entity_name"),
-                            "x": round(origin_x + float(port.get("x") or 0), 3),
-                            "y": round(origin_y + float(port.get("y") or 0), 3),
-                        }
-                    )
+            for instance in range(int(node.get("instances") or 1)):
+                ports.extend(ports_for_instance(node, instance, side, roles))
         return ports
 
     def ports_by_distance(ports: list[dict[str, Any]], y: float, side: str) -> list[dict[str, Any]]:
         if side == "right":
             return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), -float(port["x"])))
         return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), float(port["x"])))
+
+    def port_by_y(ports: list[dict[str, Any]], *, prefer: str) -> dict[float, dict[str, Any]]:
+        selected: dict[float, dict[str, Any]] = {}
+        for port in ports:
+            y = round(float(port["y"]), 3)
+            current = selected.get(y)
+            if current is None:
+                selected[y] = port
+                continue
+            if prefer == "rightmost" and float(port["x"]) > float(current["x"]):
+                selected[y] = port
+            if prefer == "leftmost" and float(port["x"]) < float(current["x"]):
+                selected[y] = port
+        return selected
+
+    def add_inter_instance_bridges() -> int:
+        before = len(connectors)
+        for node in layout_plan.get("nodes") or []:
+            instances = int(node.get("instances") or 1)
+            columns = max(1, int(node.get("columns") or 1))
+            if instances < 2 or columns < 2:
+                continue
+            for instance in range(instances - 1):
+                col = instance % columns
+                next_instance = instance + 1
+                if next_instance >= instances or next_instance // columns != instance // columns:
+                    continue
+                if col + 1 >= columns:
+                    continue
+                right_ports = port_by_y(
+                    ports_for_instance(node, instance, "right", {"output", "edge-bus", "boundary"}),
+                    prefer="rightmost",
+                )
+                left_ports = port_by_y(
+                    ports_for_instance(node, next_instance, "left", {"input", "edge-bus", "boundary"}),
+                    prefer="leftmost",
+                )
+                for y, right_port in sorted(right_ports.items()):
+                    left_port = left_ports.get(y)
+                    if left_port is None:
+                        continue
+                    start_x = float(right_port["x"]) + 1.0
+                    end_x = float(left_port["x"]) - 1.0
+                    if start_x > end_x:
+                        continue
+                    belt_name = connector_belt_name_for_port(right_port)
+                    reason = f"bridge:{node.get('item')}:{instance}->{next_instance}:{y:g}"
+                    positions = horizontal_positions(start_x, end_x, y, reason, belt_name)
+                    belts_added, route_collisions = add_positions(positions, record_collisions=False)
+                    status = "connected" if not route_collisions else "blocked"
+                    if route_collisions:
+                        collisions.extend(route_collisions)
+                    bridges.append(
+                        {
+                            "node_item": node.get("item"),
+                            "node_recipe": node.get("recipe"),
+                            "from_instance": instance,
+                            "to_instance": next_instance,
+                            "from_port": right_port,
+                            "to_port": left_port,
+                            "status": status,
+                            "belts_added": belts_added,
+                            "collisions": route_collisions,
+                            "route_kind": "inter-instance-direct",
+                        }
+                    )
+        return len(connectors) - before
+
+    bridges_added = add_inter_instance_bridges()
 
     for boundary in layout_plan.get("boundary_inputs") or []:
         ports = ports_by_distance(
@@ -324,7 +398,13 @@ def add_boundary_connectors(
         )
 
     entities.extend(connectors)
-    return {"connectors_added": len(connectors), "collisions": collisions, "routes": routes}
+    return {
+        "connectors_added": len(connectors),
+        "bridges_added": bridges_added,
+        "collisions": collisions,
+        "routes": routes,
+        "bridges": bridges,
+    }
 
 
 def materialize_layout_with_summary(
@@ -371,7 +451,7 @@ def materialize_layout_with_summary(
                 tile_positions.add(key)
                 tiles.append(tile)
 
-    connector_result = {"connectors_added": 0, "collisions": [], "routes": []}
+    connector_result = {"connectors_added": 0, "bridges_added": 0, "collisions": [], "routes": [], "bridges": []}
     if connect_boundaries:
         occupied = {entity_position_key(entity) for entity in entities}
         connector_result = add_boundary_connectors(entities, layout_plan, occupied=occupied)
@@ -443,7 +523,7 @@ def build_materialized_blueprint(
 def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     blueprint = wrapper["blueprint"]
     metrics = blueprint_metrics("/", blueprint)
-    summary = connector_summary or {"connectors_added": 0, "collisions": [], "routes": []}
+    summary = connector_summary or {"connectors_added": 0, "bridges_added": 0, "collisions": [], "routes": [], "bridges": []}
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
     layout_nodes = [
         {
@@ -500,6 +580,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Entities: {summary['entity_count']}",
         f"- Tiles: {summary['tile_count']}",
         f"- Connector belts: {summary['connector_summary']['connectors_added']}",
+        f"- Inter-instance bridge belts: {summary['connector_summary'].get('bridges_added', 0)}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
@@ -549,6 +630,21 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 line += f" blocked_attempts={len(item['blocked_attempts'])}"
             if item.get("reason"):
                 line += f" reason={item['reason']}"
+            lines.append(line)
+    if summary["connector_summary"].get("bridges"):
+        lines.extend(["", "## Inter-instance Bridges", ""])
+        for item in summary["connector_summary"]["bridges"]:
+            line = (
+                f"- {item['node_item']}: status={item['status']} belts={item['belts_added']} "
+                f"instances={item['from_instance']}->{item['to_instance']}"
+            )
+            if item.get("from_port") and item.get("to_port"):
+                line += (
+                    f" from=({item['from_port']['x']},{item['from_port']['y']})"
+                    f" to=({item['to_port']['x']},{item['to_port']['y']})"
+                )
+            if item.get("route_kind"):
+                line += f" route={item['route_kind']}"
             lines.append(line)
     if summary["connector_summary"]["collisions"]:
         lines.extend(["", "## Connector Collisions", ""])

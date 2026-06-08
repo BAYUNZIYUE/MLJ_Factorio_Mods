@@ -490,8 +490,11 @@ def main() -> int:
                 "planned_height": 3,
                 "x": 4,
                 "y": 4,
-                "ports": [{"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 1, "y": 1}],
-                "port_counts": [("right:output", 1)],
+                "ports": [
+                    {"side": "left", "role": "edge-bus", "entity_name": "turbo-transport-belt", "x": 0, "y": 1},
+                    {"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 1, "y": 1},
+                ],
+                "port_counts": [("left:edge-bus", 1), ("right:output", 1)],
                 "source": "fixture",
                 "path": "/replicated",
             }
@@ -521,8 +524,11 @@ def main() -> int:
     if replicated_summary["collisions"]:
         print(f"FAIL: expected replicated-port routing to avoid collisions: {replicated_summary}")
         return 1
-    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 5:
-        print(f"FAIL: expected replicated-port route to add turbo belts from the selected instance: {replicated}")
+    if replicated_summary["bridges_added"] != 6 or replicated_summary["bridges"][0]["status"] != "connected":
+        print(f"FAIL: expected replicated-port routing to bridge adjacent template instances: {replicated_summary}")
+        return 1
+    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 11:
+        print(f"FAIL: expected replicated-port route and bridge to add turbo belts: {replicated}")
         return 1
     if decode_blueprint_string(encode_blueprint_string(replicated)) != replicated:
         print("FAIL: replicated-port blueprint did not round-trip through Factorio string encoding")
