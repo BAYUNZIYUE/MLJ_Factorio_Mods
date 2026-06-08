@@ -60,6 +60,8 @@ def main() -> int:
         "game.forces.player.create_space_platform",
         "surface.set_tiles(platform_tiles",
         "stack.build_blueprint",
+        "manual_fallback=start",
+        "surface.create_entity",
         "script.on_event(defines.events.on_tick",
     ]:
         if expected not in validation_lua:

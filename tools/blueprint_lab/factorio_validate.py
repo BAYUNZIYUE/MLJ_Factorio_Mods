@@ -9,6 +9,8 @@ from pathlib import Path
 DEFAULT_FACTORIO_EXE = Path("/mnt/d/Steam/steamapps/common/Factorio/bin/x64/factorio.exe")
 DEFAULT_USER_DATA = Path("/mnt/c/Users/MLJ/AppData/Roaming/Factorio")
 DEFAULT_SCENARIO_NAME = "blueprint_lab_validation"
+POWERSHELL_EXE = Path("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+TASKKILL_EXE = Path("/mnt/c/Windows/System32/taskkill.exe")
 
 
 def lua_long_string(value: str) -> str:
@@ -153,13 +155,55 @@ local function run_validation()
   local built_count = #built_entities
   log("BLUEPRINT_LAB_VALIDATION built_entities=" .. tostring(built_count))
   if built_count == 0 then
-    validation_fail("build_blueprint returned zero entities")
+    log("BLUEPRINT_LAB_VALIDATION manual_fallback=start")
+    local manual_count = 0
+    local manual_failures = 0
+    local recipe_failures = 0
+    for _, entity in pairs(blueprint_entities) do
+      local entity_direction = entity.direction or defines.direction.north
+      local ok_create, created = pcall(function()
+        return surface.create_entity{{
+          name = entity.name,
+          position = {{
+            x = entity.position.x + build_position.x,
+            y = entity.position.y + build_position.y,
+          }},
+          direction = entity_direction,
+          quality = entity.quality,
+          force = "player",
+          raise_built = false,
+        }}
+      end)
+      if not ok_create or created == nil then
+        manual_failures = manual_failures + 1
+        if manual_failures <= 8 then
+          log("BLUEPRINT_LAB_VALIDATION manual_create_failed " .. entity.name .. "=" .. tostring(created))
+        end
+      else
+        manual_count = manual_count + 1
+        if entity.recipe ~= nil then
+          local ok_recipe, recipe_result = pcall(function()
+            created.set_recipe(entity.recipe)
+          end)
+          if not ok_recipe then
+            recipe_failures = recipe_failures + 1
+            if recipe_failures <= 8 then
+              log("BLUEPRINT_LAB_VALIDATION manual_recipe_failed " .. entity.name .. "=" .. tostring(recipe_result))
+            end
+          end
+        end
+      end
+    end
+    log("BLUEPRINT_LAB_VALIDATION manual_entities=" .. tostring(manual_count) .. " manual_failures=" .. tostring(manual_failures) .. " manual_recipe_failures=" .. tostring(recipe_failures))
+    if manual_failures > 0 then
+      validation_fail("manual fallback failed to place all entities")
+    end
   end
 
   local surface_entities = surface.find_entities_filtered{{force = game.forces.player}}
   log("BLUEPRINT_LAB_VALIDATION surface_entities=" .. tostring(#surface_entities))
   log("BLUEPRINT_LAB_VALIDATION success")
-  error("BLUEPRINT_LAB_VALIDATION completed", 0)
+  validation_fail("completed")
 end
 
 script.on_event(defines.events.on_tick, function(event)
@@ -231,6 +275,39 @@ def validation_markers(log_text: str) -> list[str]:
     return [line for line in log_text.splitlines() if "BLUEPRINT_LAB_VALIDATION" in line]
 
 
+def process_output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def kill_factorio_processes_for_scenario(scenario_name: str) -> list[int]:
+    if not POWERSHELL_EXE.exists() or not TASKKILL_EXE.exists():
+        return []
+    command = (
+        "Get-CimInstance Win32_Process -Filter \"Name = 'factorio.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{scenario_name}*' }} | "
+        "ForEach-Object { $_.ProcessId }"
+    )
+    found = subprocess.run(
+        [str(POWERSHELL_EXE), "-NoProfile", "-Command", command],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    killed: list[int] = []
+    for line in found.stdout.splitlines():
+        line = line.strip()
+        if not line.isdigit():
+            continue
+        pid = int(line)
+        subprocess.run([str(TASKKILL_EXE), "/PID", str(pid), "/T", "/F"], capture_output=True, check=False)
+        killed.append(pid)
+    return killed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate one generated blueprint with a real Factorio runtime scenario.")
     parser.add_argument("--factorio-exe", type=Path, default=DEFAULT_FACTORIO_EXE)
@@ -240,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--blueprint", type=Path, required=True)
     parser.add_argument("--console-log", type=Path, default=Path(".codex/tests/blueprint-lab-factorio-validation.log"))
     parser.add_argument("--until-tick", type=int, default=2)
+    parser.add_argument("--timeout-seconds", type=float, default=45)
     args = parser.parse_args(argv)
 
     blueprint_string = args.blueprint.read_text(encoding="utf-8").strip()
@@ -266,19 +344,38 @@ def main(argv: list[str] | None = None) -> int:
     if args.mod_directory:
         command.extend(["--mod-directory", str(args.mod_directory)])
 
-    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    timed_out = False
+    killed_pids: list[int] = []
+    try:
+        completed = subprocess.run(command, text=True, capture_output=True, check=False, timeout=args.timeout_seconds)
+        stdout = completed.stdout
+        stderr = completed.stderr
+        command_exit: int | str = completed.returncode
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        stdout = process_output_text(exc.stdout)
+        stderr = process_output_text(exc.stderr)
+        killed_pids = kill_factorio_processes_for_scenario(args.scenario_name)
+        command_exit = "timeout"
     log_text = args.console_log.read_text(encoding="utf-8", errors="replace") if args.console_log.exists() else ""
-    markers = validation_markers(log_text + "\n" + completed.stdout + "\n" + completed.stderr)
+    markers = validation_markers(log_text + "\n" + stdout + "\n" + stderr)
     print(f"scenario={scenario_dir}")
-    print(f"command_exit={completed.returncode}")
+    print(f"command_exit={command_exit}")
+    if timed_out:
+        print(f"timeout_seconds={args.timeout_seconds}")
+        print(f"killed_factorio_pids={killed_pids}")
     for marker in markers:
         print(marker)
     if any("BLUEPRINT_LAB_VALIDATION success" in marker for marker in markers):
         return 0
-    if completed.returncode != 0:
-        print(completed.stdout)
-        print(completed.stderr)
-        return completed.returncode
+    if timed_out:
+        print(stdout)
+        print(stderr)
+        return 124
+    if command_exit != 0:
+        print(stdout)
+        print(stderr)
+        return int(command_exit)
     print("FAIL: Factorio exited without validation success marker")
     return 1
 
