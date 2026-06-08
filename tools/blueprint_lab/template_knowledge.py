@@ -27,6 +27,11 @@ class RecipeMapping:
     base_crafts_per_minute: float | None
     base_ingredients_per_minute: list[tuple[str, float]]
     base_products_per_minute: list[tuple[str, float]]
+    direct_module_effects: list[tuple[str, float]]
+    direct_module_items: list[tuple[str, str, int]]
+    effective_crafts_per_minute: float | None
+    effective_ingredients_per_minute: list[tuple[str, float]]
+    effective_products_per_minute: list[tuple[str, float]]
 
 
 @dataclass(frozen=True)
@@ -125,6 +130,80 @@ def recipe_machine_speed_sum(
         for name, count in sorted(unknown.items())
     ]
     return machine_speeds, unknown_names, total_speed
+
+
+def item_stack_count(item: dict[str, Any]) -> int:
+    item_payload = item.get("items")
+    if not isinstance(item_payload, dict):
+        return 1
+    inventory = item_payload.get("in_inventory")
+    if isinstance(inventory, list):
+        return len(inventory)
+    return 1
+
+
+def entity_module_items(entity: Any) -> list[tuple[str, str, int]]:
+    items: list[tuple[str, str, int]] = []
+    for item in entity.item_stacks:
+        item_id = item.get("id") if isinstance(item, dict) else None
+        if not isinstance(item_id, dict) or not item_id.get("name"):
+            continue
+        items.append(
+            (
+                str(item_id["name"]),
+                str(item_id.get("quality") or "normal"),
+                item_stack_count(item),
+            )
+        )
+    return items
+
+
+def direct_module_effects_for_entity(entity: Any, knowledge: PrototypeKnowledge) -> tuple[Counter[str], list[tuple[str, str, int]]]:
+    effects: Counter[str] = Counter()
+    module_items = entity_module_items(entity)
+    for module_name, quality_name, count in module_items:
+        module = knowledge.module(module_name)
+        if module is None:
+            continue
+        quality_multiplier = knowledge.quality_effect_multiplier(quality_name)
+        for effect_name, effect_value in module.effects.items():
+            value = effect_value * quality_multiplier if effect_value > 0 else effect_value
+            effects[effect_name] += value * count
+    return effects, module_items
+
+
+def effective_recipe_rates(
+    template: TemplateCandidate,
+    recipe: str,
+    knowledge: PrototypeKnowledge,
+    recipe_energy_required: float,
+) -> tuple[float | None, list[tuple[str, float]], list[tuple[str, str, int]]]:
+    if recipe_energy_required <= 0:
+        return None, [], []
+
+    total_crafts = 0.0
+    total_effects: Counter[str] = Counter()
+    module_items: Counter[tuple[str, str]] = Counter()
+    for entity in template.normalized_entities:
+        if entity.recipe != recipe:
+            continue
+        prototype = knowledge.entity(entity.name)
+        if prototype is None:
+            return None, [], []
+        machine_quality_multiplier = knowledge.quality_effect_multiplier(entity.quality)
+        direct_effects, direct_items = direct_module_effects_for_entity(entity, knowledge)
+        total_effects.update(direct_effects)
+        for module_name, quality_name, count in direct_items:
+            module_items[(module_name, quality_name)] += count
+        speed_bonus = direct_effects.get("speed", 0.0)
+        entity_speed = prototype.crafting_speed * machine_quality_multiplier * max(0.0, 1.0 + speed_bonus)
+        total_crafts += entity_speed * 60 / recipe_energy_required
+
+    return (
+        total_crafts,
+        sorted(total_effects.items()),
+        [(name, quality, count) for (name, quality), count in sorted(module_items.items())],
+    )
 
 
 def scaled_rates(items: list[tuple[str, float]], crafts_per_minute: float) -> list[tuple[str, float]]:
@@ -271,6 +350,11 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
                     base_crafts_per_minute=None,
                     base_ingredients_per_minute=[],
                     base_products_per_minute=[],
+                    direct_module_effects=[],
+                    direct_module_items=[],
+                    effective_crafts_per_minute=None,
+                    effective_ingredients_per_minute=[],
+                    effective_products_per_minute=[],
                 )
             )
         else:
@@ -283,6 +367,24 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
                 base_crafts = base_speed_sum * 60 / recipe.energy_required
                 base_ingredients = scaled_rates(ingredients, base_crafts)
                 base_products = scaled_rates(products, base_crafts)
+            effective_crafts, direct_module_effects, direct_module_items = effective_recipe_rates(
+                template,
+                recipe_name,
+                knowledge,
+                recipe.energy_required,
+            )
+            effective_ingredients: list[tuple[str, float]] = []
+            effective_products: list[tuple[str, float]] = []
+            if effective_crafts is not None:
+                productivity_bonus = max(
+                    0.0,
+                    dict(direct_module_effects).get("productivity", 0.0),
+                )
+                effective_ingredients = scaled_rates(ingredients, effective_crafts)
+                effective_products = [
+                    (name, amount * effective_crafts * (1.0 + productivity_bonus))
+                    for name, amount in products
+                ]
             mappings.append(
                 RecipeMapping(
                     recipe=recipe_name,
@@ -298,6 +400,11 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
                     base_crafts_per_minute=base_crafts,
                     base_ingredients_per_minute=base_ingredients,
                     base_products_per_minute=base_products,
+                    direct_module_effects=direct_module_effects,
+                    direct_module_items=direct_module_items,
+                    effective_crafts_per_minute=effective_crafts,
+                    effective_ingredients_per_minute=effective_ingredients,
+                    effective_products_per_minute=effective_products,
                 )
             )
 
@@ -384,7 +491,8 @@ def map_template_library(
         "mappings": [asdict(item) for item in mappings],
         "lessons": [
             "Templates with resolved recipes can be checked against production DAG requirements.",
-            "Base throughput is computed from recipe time and machine crafting speed only; module and beacon effects are recorded as evidence but not applied yet.",
+            "Base throughput is computed from recipe time and machine crafting speed only.",
+            "Effective throughput applies machine quality and direct module effects, including quality-scaled positive module bonuses; beacon effects are still not applied.",
             "Templates without recipes are still useful as support, routing, platform, or power fill material.",
             "Unresolved recipes mean data.raw knowledge is missing or stale; import the current game/mod data before claiming throughput.",
         ],
@@ -455,6 +563,36 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                     )
                     lines.append(
                         f"  base_without_modules={mapping['base_crafts_per_minute']:g} crafts/min inputs=[{base_inputs}] outputs=[{base_outputs}]"
+                    )
+                if mapping.get("direct_module_items"):
+                    modules = ", ".join(
+                        f"{count}x {quality} {name}"
+                        for name, quality, count in mapping["direct_module_items"]
+                    )
+                    lines.append(f"  direct_modules={modules}")
+                if mapping.get("direct_module_effects"):
+                    effects = ", ".join(
+                        f"{name}:{value:g}"
+                        for name, value in mapping["direct_module_effects"]
+                    )
+                    lines.append(f"  direct_module_effects={effects}")
+                if mapping.get("effective_crafts_per_minute") is not None:
+                    effective_inputs = (
+                        ", ".join(
+                            f"{name}:{amount:g}/min"
+                            for name, amount in mapping["effective_ingredients_per_minute"]
+                        )
+                        or "none"
+                    )
+                    effective_outputs = (
+                        ", ".join(
+                            f"{name}:{amount:g}/min"
+                            for name, amount in mapping["effective_products_per_minute"]
+                        )
+                        or "none"
+                    )
+                    lines.append(
+                        f"  effective_direct_modules={mapping['effective_crafts_per_minute']:g} crafts/min inputs=[{effective_inputs}] outputs=[{effective_outputs}]"
                     )
                 elif mapping["unknown_machine_names"]:
                     lines.append(

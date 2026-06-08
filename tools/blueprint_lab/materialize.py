@@ -357,7 +357,7 @@ def materialize_layout_with_summary(
         icons=[icon(target_item)],
         description=(
             "Blueprint Lab materialized skeleton from learned templates. "
-            "Connector belts, pipes, power, modules, and in-game validation are still required before production use."
+            "Connector belts, pipes, power, beacon effects, and in-game validation are still required before production use."
         ),
     )
     return wrapper, connector_result
@@ -416,6 +416,19 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
     metrics = blueprint_metrics("/", blueprint)
     summary = connector_summary or {"connectors_added": 0, "collisions": [], "routes": []}
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
+    layout_nodes = [
+        {
+            "item": node.get("item"),
+            "recipe": node.get("recipe"),
+            "fingerprint": node.get("fingerprint"),
+            "instances": node.get("instances"),
+            "rate_basis": node.get("rate_basis"),
+            "planned_net_output_per_minute": node.get("planned_net_output_per_minute"),
+            "direct_module_effects": node.get("direct_module_effects") or [],
+            "direct_module_items": node.get("direct_module_items") or [],
+        }
+        for node in layout.get("nodes") or []
+    ]
     return {
         "label": blueprint.get("label"),
         "target_item": layout["target_item"],
@@ -429,12 +442,13 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
         "layout_estimated_height": layout["estimated_height"],
         "boundary_inputs": layout["boundary_inputs"],
         "boundary_outputs": layout["boundary_outputs"],
+        "layout_nodes": layout_nodes,
         "connector_summary": summary,
         "route_status_counts": dict(route_status_counts),
         "lessons": [
             "Materialization copies learned local template geometry into the planned rectangle instead of inventing machines from scratch.",
             "Boundary connectors are generated only in reserved lanes and checked for exact entity-position collisions.",
-            "The generated blueprint is still not production-ready: pipe routing, power, full belt routing, module/beacon effect modeling, and in-game validation remain separate steps.",
+            "The generated blueprint is still not production-ready: pipe routing, power, full belt routing, beacon effect modeling, and in-game validation remain separate steps.",
         ],
     }
 
@@ -466,6 +480,22 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
     lines.extend(["", "## Boundary Outputs", ""])
     for item in summary["boundary_outputs"]:
         lines.append(f"- {item['item']}: {item['rate_per_minute']:g}/min side={item['side']}")
+    if summary["layout_nodes"]:
+        lines.extend(["", "## Layout Nodes", ""])
+        for node in summary["layout_nodes"]:
+            lines.append(
+                f"- {node['item']} / {node['recipe']}: instances={node['instances']} "
+                f"basis={node['rate_basis']} planned_net={node['planned_net_output_per_minute']:g}/min"
+            )
+            if node["direct_module_items"]:
+                modules = ", ".join(
+                    f"{count}x {quality} {name}"
+                    for name, quality, count in node["direct_module_items"]
+                )
+                lines.append(f"  direct_modules={modules}")
+            if node["direct_module_effects"]:
+                effects = ", ".join(f"{name}:{value:g}" for name, value in node["direct_module_effects"])
+                lines.append(f"  direct_module_effects={effects}")
     if summary["connector_summary"]["routes"]:
         lines.extend(["", "## Connector Routes", ""])
         for item in summary["connector_summary"]["routes"]:

@@ -117,12 +117,25 @@ def main() -> int:
       "crafting_speed": 1.25,
       "module_slots": 4
     }
+  },
+  "module": {
+    "speed-module-3": {
+      "category": "speed",
+      "effect": {"speed": 0.5, "consumption": 0.7, "quality": -0.25}
+    }
+  },
+  "quality": {
+    "normal": {"level": 0},
+    "legendary": {"level": 5}
   }
 }
 """,
         encoding="utf-8",
     )
     knowledge = load_data_raw(data_raw_path)
+    if knowledge.quality_effect_multiplier("legendary") != 2.5:
+        print(f"FAIL: expected legendary quality to scale positive module effects by 2.5: {knowledge.qualities}")
+        return 1
     mapped = map_template(recipe_templates[0], knowledge)
     if not mapped.recipe_mappings or mapped.recipe_mappings[0].status != "resolved":
         print(f"FAIL: expected recipe mapping to resolve: {mapped}")
@@ -147,6 +160,15 @@ def main() -> int:
         return 1
     if not mapped.layout.entities[0].items or mapped.layout.entities[0].items[0]["id"]["name"] != "speed-module-3":
         print(f"FAIL: expected template layout to preserve raw module item stacks: {mapped.layout.entities[0]}")
+        return 1
+    if mapped.recipe_mappings[0].effective_crafts_per_minute != 225:
+        print(f"FAIL: expected direct speed module to raise effective crafts/min to 225: {mapped.recipe_mappings[0]}")
+        return 1
+    if mapped.recipe_mappings[0].effective_ingredients_per_minute != [("iron-plate", 450.0)]:
+        print(f"FAIL: expected direct speed module to raise effective input rate: {mapped.recipe_mappings[0]}")
+        return 1
+    if mapped.recipe_mappings[0].direct_module_effects != [("consumption", 0.7), ("quality", -0.25), ("speed", 0.5)]:
+        print(f"FAIL: expected direct module effects to normalize: {mapped.recipe_mappings[0]}")
         return 1
 
     dag_mappings = [

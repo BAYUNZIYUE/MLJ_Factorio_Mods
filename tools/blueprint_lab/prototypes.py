@@ -42,15 +42,41 @@ class CraftingEntity:
 
 
 @dataclass(frozen=True)
+class ModulePrototype:
+    name: str
+    category: str
+    effects: dict[str, float]
+
+
+@dataclass(frozen=True)
+class QualityPrototype:
+    name: str
+    level: int
+
+
+@dataclass(frozen=True)
 class PrototypeKnowledge:
     recipes: dict[str, Recipe]
     crafting_entities: dict[str, CraftingEntity]
+    modules: dict[str, ModulePrototype]
+    qualities: dict[str, QualityPrototype]
 
     def recipe(self, name: str) -> Recipe | None:
         return self.recipes.get(name)
 
     def entity(self, name: str) -> CraftingEntity | None:
         return self.crafting_entities.get(name)
+
+    def module(self, name: str) -> ModulePrototype | None:
+        return self.modules.get(name)
+
+    def quality_effect_multiplier(self, name: str | None) -> float:
+        if not name or name in {"normal", "quality-unknown"}:
+            return 1.0
+        quality = self.qualities.get(name)
+        if quality is None:
+            return 1.0
+        return 1.0 + quality.level * 0.3
 
 
 def value_amount(value: Any, default: float = 1.0) -> float:
@@ -147,6 +173,26 @@ def normalize_crafting_entity(name: str, entity_type: str, proto: dict[str, Any]
     )
 
 
+def normalize_module(name: str, proto: dict[str, Any]) -> ModulePrototype:
+    effects = {
+        str(effect): float(value)
+        for effect, value in (proto.get("effect") or {}).items()
+        if isinstance(value, (int, float))
+    }
+    return ModulePrototype(
+        name=name,
+        category=str(proto.get("category") or ""),
+        effects=effects,
+    )
+
+
+def normalize_quality(name: str, proto: dict[str, Any]) -> QualityPrototype:
+    return QualityPrototype(
+        name=name,
+        level=int(proto.get("level") or 0),
+    )
+
+
 def load_data_raw(path: Path) -> PrototypeKnowledge:
     raw = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw, dict):
@@ -170,11 +216,30 @@ def load_data_raw(path: Path) -> PrototypeKnowledge:
             if entity is not None:
                 crafting_entities[name] = entity
 
-    return PrototypeKnowledge(recipes=recipes, crafting_entities=crafting_entities)
+    module_table = raw.get("module") or {}
+    modules = {
+        name: normalize_module(name, proto)
+        for name, proto in module_table.items()
+        if isinstance(proto, dict)
+    }
+
+    quality_table = raw.get("quality") or {}
+    qualities = {
+        name: normalize_quality(name, proto)
+        for name, proto in quality_table.items()
+        if isinstance(proto, dict)
+    }
+
+    return PrototypeKnowledge(
+        recipes=recipes,
+        crafting_entities=crafting_entities,
+        modules=modules,
+        qualities=qualities,
+    )
 
 
 def empty_knowledge() -> PrototypeKnowledge:
-    return PrototypeKnowledge(recipes={}, crafting_entities={})
+    return PrototypeKnowledge(recipes={}, crafting_entities={}, modules={}, qualities={})
 
 
 def render_recipe(recipe: Recipe) -> str:
@@ -196,8 +261,12 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "recipe_count": len(knowledge.recipes),
         "crafting_entity_count": len(knowledge.crafting_entities),
+        "module_count": len(knowledge.modules),
+        "quality_count": len(knowledge.qualities),
         "sample_recipes": [asdict(recipe) for recipe in list(knowledge.recipes.values())[:20]],
         "sample_crafting_entities": [asdict(entity) for entity in list(knowledge.crafting_entities.values())[:20]],
+        "sample_modules": [asdict(module) for module in list(knowledge.modules.values())[:20]],
+        "sample_qualities": [asdict(quality) for quality in list(knowledge.qualities.values())[:20]],
     }
     if args.json_output:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -211,4 +280,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -40,6 +40,9 @@ class TemplateOption:
     input_rates_per_instance: list[tuple[str, float]]
     product_rates_per_instance: list[tuple[str, float]]
     machine_speeds: list[tuple[str, float]]
+    rate_basis: str
+    direct_module_effects: list[tuple[str, float]]
+    direct_module_items: list[tuple[str, str, int]]
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,9 @@ class ProductionPlanNode:
     planned_input_rates_per_minute: list[tuple[str, float]]
     module_items: list[str]
     machine_speeds: list[tuple[str, float]]
+    rate_basis: str
+    direct_module_effects: list[tuple[str, float]]
+    direct_module_items: list[tuple[str, str, int]]
     children: list["ProductionPlanNode"]
     external_inputs: list[ExternalInput]
 
@@ -95,6 +101,26 @@ def normalize_pairs(pairs: list[Any]) -> list[tuple[str, float]]:
     return normalized
 
 
+def recipe_rate_basis(recipe_mapping: dict[str, Any]) -> tuple[str, list[tuple[str, float]], list[tuple[str, float]], float | None]:
+    effective_crafts = recipe_mapping.get("effective_crafts_per_minute")
+    if effective_crafts is not None:
+        return (
+            "effective-direct-modules",
+            normalize_pairs(recipe_mapping.get("effective_ingredients_per_minute") or []),
+            normalize_pairs(recipe_mapping.get("effective_products_per_minute") or []),
+            float(effective_crafts),
+        )
+    base_crafts = recipe_mapping.get("base_crafts_per_minute")
+    if base_crafts is not None:
+        return (
+            "base-without-modules",
+            normalize_pairs(recipe_mapping.get("base_ingredients_per_minute") or []),
+            normalize_pairs(recipe_mapping.get("base_products_per_minute") or []),
+            float(base_crafts),
+        )
+    return "", [], [], None
+
+
 def template_options_from_mappings(
     mappings: list[dict[str, Any]],
     *,
@@ -109,11 +135,10 @@ def template_options_from_mappings(
                 continue
             if target_recipe and recipe_mapping.get("recipe") != target_recipe:
                 continue
-            if recipe_mapping.get("base_crafts_per_minute") is None:
+            rate_basis, inputs, products, crafts_per_minute = recipe_rate_basis(recipe_mapping)
+            if crafts_per_minute is None:
                 continue
 
-            inputs = normalize_pairs(recipe_mapping.get("base_ingredients_per_minute") or [])
-            products = normalize_pairs(recipe_mapping.get("base_products_per_minute") or [])
             for product_name, output_rate in products:
                 target_input_rate = pair_rate(inputs, product_name)
                 net_rate = output_rate - target_input_rate
@@ -135,6 +160,12 @@ def template_options_from_mappings(
                         input_rates_per_instance=inputs,
                         product_rates_per_instance=products,
                         machine_speeds=normalize_pairs(recipe_mapping.get("machine_speeds") or []),
+                        rate_basis=rate_basis,
+                        direct_module_effects=normalize_pairs(recipe_mapping.get("direct_module_effects") or []),
+                        direct_module_items=[
+                            (str(name), str(quality), int(count))
+                            for name, quality, count in recipe_mapping.get("direct_module_items") or []
+                        ],
                     )
                 )
 
@@ -212,6 +243,9 @@ def plan_node(
         planned_input_rates_per_minute=planned_inputs,
         module_items=option.module_items,
         machine_speeds=option.machine_speeds,
+        rate_basis=option.rate_basis,
+        direct_module_effects=option.direct_module_effects,
+        direct_module_items=option.direct_module_items,
         children=children,
         external_inputs=external_inputs,
     )
@@ -275,6 +309,7 @@ def build_production_plan(
             "The planner treats a learned production template as the smallest copyable unit, so required instances are rounded up to whole templates.",
             "Template selection prefers the strongest positive net output for the requested item; recipes that consume more of the target item than they produce are ignored as sources.",
             "External inputs mark the current black-box boundary: either the item is configured as raw/base input, the corpus has not yielded a usable production template for it yet, or recursion hit a cycle/depth guard.",
+            "Rate basis prefers effective direct modules when available, so copied machine quality and direct module stacks affect template count before layout.",
             "This is a production-DAG seed, not final routing or placement; rectangle packing and belt/pipe routing must consume this plan next.",
         ],
     }
@@ -302,13 +337,26 @@ def render_node(node: dict[str, Any], lines: list[str], indent: int = 0) -> None
     )
     lines.append(
         f"{prefix}  per_instance net={node['net_target_rate_per_instance']:g}/min "
-        f"gross={node['output_rate_per_instance']:g}/min occurrence_count={node['occurrence_count']}"
+        f"gross={node['output_rate_per_instance']:g}/min basis={node['rate_basis']} "
+        f"occurrence_count={node['occurrence_count']}"
     )
     if node["machine_speeds"]:
         speeds = ", ".join(f"{name}@{speed:g}" for name, speed in node["machine_speeds"])
         lines.append(f"{prefix}  machines={speeds}")
     if node["module_items"]:
         lines.append(f"{prefix}  modules/items={', '.join(node['module_items'][:8])}")
+    if node.get("direct_module_items"):
+        modules = ", ".join(
+            f"{count}x {quality} {name}"
+            for name, quality, count in node["direct_module_items"]
+        )
+        lines.append(f"{prefix}  direct_modules={modules}")
+    if node.get("direct_module_effects"):
+        effects = ", ".join(
+            f"{name}:{value:g}"
+            for name, value in node["direct_module_effects"]
+        )
+        lines.append(f"{prefix}  direct_module_effects={effects}")
     if node["planned_input_rates_per_minute"]:
         inputs = ", ".join(
             f"{name}:{rate:g}/min"

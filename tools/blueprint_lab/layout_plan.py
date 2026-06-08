@@ -37,6 +37,10 @@ class LayoutNode:
     port_counts: list[tuple[str, int]]
     source: str
     path: str
+    rate_basis: str
+    planned_net_output_per_minute: float
+    direct_module_effects: list[tuple[str, float]]
+    direct_module_items: list[tuple[str, str, int]]
 
 
 def mapping_by_fingerprint(mappings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -88,6 +92,10 @@ def node_layout(
         port_counts=[tuple(item) for item in layout.get("port_counts") or []],
         source=str(node.get("source") or ""),
         path=str(node.get("path") or ""),
+        rate_basis=str(node.get("rate_basis") or ""),
+        planned_net_output_per_minute=float(node.get("planned_net_output_per_minute") or 0.0),
+        direct_module_effects=[tuple(item) for item in node.get("direct_module_effects") or []],
+        direct_module_items=[tuple(item) for item in node.get("direct_module_items") or []],
     )
 
 
@@ -177,11 +185,21 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             f"- {node['item']} / {node['recipe']} template={node['fingerprint']} "
             f"instances={node['instances']} grid={node['columns']}x{node['rows']} "
             f"unit={node['source_width']:g}x{node['source_height']:g} "
-            f"planned={node['planned_width']:g}x{node['planned_height']:g} at=({node['x']:g},{node['y']:g})"
+            f"planned={node['planned_width']:g}x{node['planned_height']:g} at=({node['x']:g},{node['y']:g}) "
+            f"basis={node['rate_basis']} planned_net={node['planned_net_output_per_minute']:g}/min"
         )
         if node["port_counts"]:
             ports = ", ".join(f"{name}:{count}" for name, count in node["port_counts"])
             lines.append(f"  ports={ports}")
+        if node["direct_module_items"]:
+            modules = ", ".join(
+                f"{count}x {quality} {name}"
+                for name, quality, count in node["direct_module_items"]
+            )
+            lines.append(f"  direct_modules={modules}")
+        if node["direct_module_effects"]:
+            effects = ", ".join(f"{name}:{value:g}" for name, value in node["direct_module_effects"])
+            lines.append(f"  direct_module_effects={effects}")
         lines.append(f"  source={node['source']} path={node['path']}")
 
     lines.extend(["", "## Boundary Inputs", ""])

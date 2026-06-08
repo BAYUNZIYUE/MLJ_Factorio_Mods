@@ -82,10 +82,12 @@ export. Without that export, recipe-bearing templates remain unresolved by
 design; with it, the report can show recipe category, craft time, ingredients,
 products, machine names, base machine speeds, conservative input/output rates
 per minute for one normalized template instance, module items, and request
-items. The current throughput estimate is deliberately conservative: it uses
-only recipe time and machine crafting speed, and records modules or beacons as
-evidence without applying their effects yet. Observed `occurrence_count` is kept
-separate so later DAG planning can decide how many template instances to place.
+items. It reports both `base_without_modules` and `effective_direct_modules`.
+The effective rate applies machine quality and direct module stacks learned from
+the source entity, including quality-scaled positive module effects. Beacon
+effects are still recorded as evidence but not applied to machine throughput
+yet. Observed `occurrence_count` is kept separate so later DAG planning can
+decide how many template instances to place.
 
 The production DAG seed uses those per-template rates to choose copyable
 production units, round them up to whole instances, and recursively expose
@@ -97,7 +99,8 @@ ore, stone, coal, water, crude oil, and asteroid chunks are treated as default
 boundary inputs for child nodes; pass `--external-item` to add more boundary
 items or `--no-default-boundary-items` to inspect deeper recursive chains. It
 still does not solve rectangle packing, belt routing, pipe routing, power, or
-in-game validation.
+in-game validation. When `effective_direct_modules` is available, the DAG uses
+it as the rate basis before falling back to the base rate.
 
 The layout plan converts DAG nodes into conservative rectangular units. It
 keeps each learned template as the copyable atom, arranges repeated instances in
@@ -115,7 +118,7 @@ numbers, and de-duplicates identical tile placements. With
 `--connect-boundaries`, it also adds conservative transport-belt stubs in the
 reserved left/right lanes and reports exact entity-position collisions. It
 intentionally does not generate full internal belt routing, pipes, power,
-missing modules, module/beacon throughput effects, or collision repairs yet;
+missing modules, beacon throughput effects, or collision repairs yet;
 those must be separate passes so they can be validated instead of hidden in the
 first generated skeleton.
 
