@@ -20,9 +20,10 @@ from .prototypes import load_data_raw
 from .template_knowledge import map_template_library
 
 
-DIR_NORTH = 0
 DIR_EAST = 2
-DIR_SOUTH = 4
+
+
+RoutePosition = tuple[float, float, str, int, str]
 
 
 def materialized_entity(raw: dict[str, Any], entity_number: int, *, x: float, y: float) -> dict[str, Any]:
@@ -52,13 +53,26 @@ def entity_position_key(entity: dict[str, Any]) -> tuple[float, float]:
     return (round(float(position.get("x", 0)), 3), round(float(position.get("y", 0)), 3))
 
 
-def connector_belt(entity_number: int, x: float, y: float, *, direction: int = DIR_EAST) -> dict[str, Any]:
+def connector_belt(entity_number: int, x: float, y: float, *, direction: int = DIR_EAST, name: str = "transport-belt") -> dict[str, Any]:
     return {
         "entity_number": entity_number,
-        "name": "transport-belt",
+        "name": name,
         "position": {"x": round(x, 3), "y": round(y, 3)},
         "direction": direction,
     }
+
+
+def connector_belt_name_for_port(port: dict[str, Any] | None) -> str:
+    if not port:
+        return "transport-belt"
+    entity_name = str(port.get("entity_name") or "")
+    if entity_name.endswith("transport-belt"):
+        return entity_name
+    if entity_name.endswith("underground-belt"):
+        return entity_name.replace("underground-belt", "transport-belt")
+    if entity_name.endswith("splitter"):
+        return entity_name.replace("splitter", "transport-belt")
+    return "transport-belt"
 
 
 def materialized_tile(raw: dict[str, Any], *, x: float, y: float) -> dict[str, Any]:
@@ -87,13 +101,13 @@ def add_boundary_connectors(
     default_y = round(float(root["y"]) + float(root["source_height"]) / 2, 3)
 
     def add_positions(
-        positions: list[tuple[float, float, str, int]],
+        positions: list[RoutePosition],
         *,
         record_collisions: bool = True,
     ) -> tuple[int, list[dict[str, Any]]]:
         route_collisions: list[dict[str, Any]] = []
         seen: set[tuple[float, float]] = set()
-        for x, belt_y, reason, direction in positions:
+        for x, belt_y, reason, direction, belt_name in positions:
             key = (round(x, 3), round(belt_y, 3))
             if key in seen:
                 collision = {"x": key[0], "y": key[1], "reason": f"{reason}:duplicate-route-position"}
@@ -109,59 +123,39 @@ def add_boundary_connectors(
             return 0, route_collisions
 
         before = len(connectors)
-        for x, belt_y, reason, direction in positions:
+        for x, belt_y, reason, direction, belt_name in positions:
             key = (round(x, 3), round(belt_y, 3))
-            belt = connector_belt(len(entities) + len(connectors) + 1, x, belt_y, direction=direction)
+            belt = connector_belt(
+                len(entities) + len(connectors) + 1,
+                x,
+                belt_y,
+                direction=direction,
+                name=belt_name,
+            )
             connectors.append(belt)
             occupied.add(key)
         return len(connectors) - before, route_collisions
 
-    def horizontal_positions(start_x: float, end_x: float, y: float, reason: str) -> list[tuple[float, float, str, int]]:
-        positions: list[tuple[float, float, str, int]] = []
+    def horizontal_positions(start_x: float, end_x: float, y: float, reason: str, belt_name: str) -> list[RoutePosition]:
+        positions: list[RoutePosition] = []
         x = start_x
         while x <= end_x:
-            positions.append((round(x, 3), y, reason, DIR_EAST))
+            positions.append((round(x, 3), y, reason, DIR_EAST, belt_name))
             x += 1.0
-        return positions
-
-    def vertical_positions(x: float, start_y: float, end_y: float, reason: str) -> list[tuple[float, float, str, int]]:
-        if start_y == end_y:
-            return []
-        direction = DIR_SOUTH if end_y > start_y else DIR_NORTH
-        step = 1.0 if end_y > start_y else -1.0
-        positions: list[tuple[float, float, str, int]] = []
-        y = start_y + step
-        while (step > 0 and y <= end_y) or (step < 0 and y >= end_y):
-            positions.append((x, round(y, 3), reason, direction))
-            y += step
         return positions
 
     def route_candidate(
         *,
-        side: str,
         start_x: float,
         end_x: float,
         y: float,
         reason: str,
-        offset: int | None = None,
-    ) -> tuple[str, list[tuple[float, float, str, int]]]:
-        if offset is None:
-            return "direct", horizontal_positions(start_x, end_x, y, reason)
-
-        detour_y = round(y + float(offset), 3)
-        if side == "right":
-            positions = vertical_positions(start_x, y, detour_y, reason)
-            if positions and positions[-1][0] == start_x and positions[-1][1] == detour_y:
-                positions = positions[:-1]
-            positions.extend(horizontal_positions(start_x, end_x, detour_y, reason))
-            return f"detour-y{offset:+d}", positions
-
-        positions = horizontal_positions(start_x, end_x, detour_y, reason)
-        positions.extend(vertical_positions(end_x, detour_y, y, reason))
-        return f"detour-y{offset:+d}", positions
+        belt_name: str,
+    ) -> tuple[str, list[RoutePosition]]:
+        return "direct", horizontal_positions(start_x, end_x, y, reason, belt_name)
 
     def add_first_clear_route(
-        candidates: list[tuple[dict[str, Any], str, list[tuple[float, float, str, int]]]],
+        candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]],
     ) -> tuple[int, list[dict[str, Any]], dict[str, Any] | None, str | None, list[dict[str, Any]]]:
         blocked_attempts: list[dict[str, Any]] = []
         for port, route_kind, positions in candidates:
@@ -211,7 +205,7 @@ def add_boundary_connectors(
         if not ports:
             left_end = int(max(0, float(root["x"]) - 1))
             positions = [
-                (float(x), default_y, f"input:{boundary['item']}", DIR_EAST)
+                (float(x), default_y, f"input:{boundary['item']}", DIR_EAST, "transport-belt")
                 for x in range(0, left_end + 1)
             ]
             belts_added, route_collisions = add_positions(positions)
@@ -226,16 +220,24 @@ def add_boundary_connectors(
             )
             continue
 
-        candidates: list[tuple[dict[str, Any], str, list[tuple[float, float, str, int]]]] = []
+        candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]] = []
         reason = f"input:{boundary['item']}"
         for port in ports:
             start_x = 0.5
             end_x = float(port["x"]) - 0.5
-            candidates.append((port, *route_candidate(side="left", start_x=start_x, end_x=end_x, y=float(port["y"]), reason=reason)))
-            for offset in (-1, 1, -2, 2, -3, 3):
-                candidates.append(
-                    (port, *route_candidate(side="left", start_x=start_x, end_x=end_x, y=float(port["y"]), reason=reason, offset=offset))
+            belt_name = connector_belt_name_for_port(port)
+            candidates.append(
+                (
+                    port,
+                    *route_candidate(
+                        start_x=start_x,
+                        end_x=end_x,
+                        y=float(port["y"]),
+                        reason=reason,
+                        belt_name=belt_name,
+                    ),
                 )
+            )
         belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
         routes.append(
             {
@@ -258,7 +260,7 @@ def add_boundary_connectors(
             right_start = int(float(root["x"]) + float(root["planned_width"]) + 1)
             right_end = int(max(right_start - 1, float(layout_plan["estimated_width"]) - 1))
             positions = [
-                (float(x), default_y, f"output:{boundary['item']}", DIR_EAST)
+                (float(x), default_y, f"output:{boundary['item']}", DIR_EAST, "transport-belt")
                 for x in range(right_start, right_end + 1)
             ]
             belts_added, route_collisions = add_positions(positions)
@@ -278,11 +280,19 @@ def add_boundary_connectors(
         end_x = float(layout_plan["estimated_width"]) - 0.5
         for port in ports:
             start_x = float(port["x"]) + 1.0
-            candidates.append((port, *route_candidate(side="right", start_x=start_x, end_x=end_x, y=float(port["y"]), reason=reason)))
-            for offset in (-1, 1, -2, 2, -3, 3):
-                candidates.append(
-                    (port, *route_candidate(side="right", start_x=start_x, end_x=end_x, y=float(port["y"]), reason=reason, offset=offset))
+            belt_name = connector_belt_name_for_port(port)
+            candidates.append(
+                (
+                    port,
+                    *route_candidate(
+                        start_x=start_x,
+                        end_x=end_x,
+                        y=float(port["y"]),
+                        reason=reason,
+                        belt_name=belt_name,
+                    ),
                 )
+            )
         belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
         routes.append(
             {

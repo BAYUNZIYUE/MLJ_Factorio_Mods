@@ -400,8 +400,11 @@ def main() -> int:
                 "planned_height": 3,
                 "x": 4,
                 "y": 4,
-                "ports": [{"side": "right", "role": "output", "entity_name": "transport-belt", "x": 1, "y": 1}],
-                "port_counts": [("right:output", 1)],
+                "ports": [
+                    {"side": "right", "role": "output", "entity_name": "transport-belt", "x": 1, "y": 1},
+                    {"side": "right", "role": "output", "entity_name": "fast-transport-belt", "x": 1, "y": 2},
+                ],
+                "port_counts": [("right:output", 2)],
                 "source": "fixture",
                 "path": "/detour",
             }
@@ -414,6 +417,7 @@ def main() -> int:
                 "entities": [
                     {"name": "transport-belt", "x": 1, "y": 1, "direction": 2, "recipe": None, "recipe_quality": None, "quality": None},
                     {"name": "stone-furnace", "x": 2, "y": 1, "direction": None, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "fast-transport-belt", "x": 1, "y": 2, "direction": 2, "recipe": None, "recipe_quality": None, "quality": None},
                 ],
                 "tiles": [],
             },
@@ -426,14 +430,20 @@ def main() -> int:
         connect_boundaries=True,
     )
     detour_route = detour_summary["routes"][0]
-    if detour_route["status"] != "connected" or detour_route["route_kind"] != "detour-y-1":
-        print(f"FAIL: expected output route to detour around a straight-line collision: {detour_summary}")
+    if detour_route["status"] != "connected" or detour_route["route_kind"] != "direct":
+        print(f"FAIL: expected output route to pick an alternate direct port around a blocked port: {detour_summary}")
         return 1
     if not detour_route["blocked_attempts"] or detour_route["blocked_attempts"][0]["route_kind"] != "direct":
-        print(f"FAIL: expected detour report to retain the blocked direct attempt: {detour_summary}")
+        print(f"FAIL: expected alternate-port report to retain the blocked first port: {detour_summary}")
         return 1
     if detour_summary["collisions"]:
-        print(f"FAIL: successful detour should not keep collisions in the connector summary: {detour_summary}")
+        print(f"FAIL: successful alternate direct route should not keep collisions in the connector summary: {detour_summary}")
+        return 1
+    if detour_route["port"]["entity_name"] != "fast-transport-belt":
+        print(f"FAIL: expected alternate route to choose the fast belt port: {detour_summary}")
+        return 1
+    if sum(1 for entity in detoured["blueprint"]["entities"] if entity["name"] == "fast-transport-belt") <= 1:
+        print(f"FAIL: expected generated connector belts to preserve selected port belt tier: {detoured}")
         return 1
     if decode_blueprint_string(encode_blueprint_string(detoured)) != detoured:
         print("FAIL: detoured blueprint did not round-trip through Factorio string encoding")

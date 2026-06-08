@@ -127,9 +127,11 @@ Connector routing reports each boundary as `connected`, `stub-only`, or
 `blocked`. A connected route found a compatible learned edge port and added a
 collision-free belt line. A stub-only route has no compatible learned port yet.
 A blocked route found a port but refused to add partial belts because an exact
-entity-position collision was detected. When a direct route is blocked, the
-router tries small vertical detours and records failed candidates in
-`blocked_attempts` so the report can explain why a later route was chosen.
+entity-position collision was detected. The router evaluates all compatible
+ports on the requested side before declaring a route blocked; failed direct
+candidates are retained in `blocked_attempts` so the report can explain why a
+later port was chosen. Connector belts inherit the selected port belt tier when
+the port is a transport belt, underground belt, or splitter.
 
 ## Commands
 
