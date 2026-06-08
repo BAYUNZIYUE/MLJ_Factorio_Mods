@@ -13,6 +13,7 @@ mlj_factorio_mods/
 ├── pack_mods.py                # discovers <mod>/src/info.json and packs all mods
 ├── ModZips/                    # packaged artifacts only; do not edit as source
 ├── tests/                      # long-lived regression guards, when present
+├── tools/blueprint_lab/        # offline blueprint analysis/generation tooling
 ├── DynamicInventory/           # runtime/settings inventory resizing mod
 ├── expend-toolbar/             # runtime/data/settings custom toolbar mod
 ├── py_quick_start/             # runtime/settings starter-items mod
@@ -26,6 +27,7 @@ mlj_factorio_mods/
 | Task | Location | Notes |
 |------|----------|-------|
 | Pack or validate all mods | `pack_mods.py` | Source of truth for discovery, ignored dirs, entrypoint names, zip naming, and opening `ModZips/` |
+| Offline blueprint analysis/generation | `tools/blueprint_lab/` | Decode/re-encode blueprint strings, scan local blueprint corpora, record layout metrics, and generate seed blueprints outside any mod package |
 | Runtime inventory logic | `DynamicInventory/` | Runtime/settings mod; no `data.lua` |
 | Custom toolbar logic | `expend-toolbar/` | Runtime/data/settings mod; compact runtime modules live directly under `src/` as `names.lua`, `stock.lua`, `panel.lua`, and `runtime.lua` |
 | Starter item logic | `py_quick_start/` | Runtime/settings mod; no `data.lua` |
@@ -128,6 +130,8 @@ copy the contents into the archive root.
   fallbacks; if a mod does not satisfy the layout, fix the mod layout.
 - Long-lived regression tests belong under the repository root `tests/`, grouped
   by domain or mod name. Do not place test files inside any mod `src/` tree.
+- Offline repository tools belong under `tools/`. They are not Factorio runtime
+  mod files and must not be copied into any `<mod>/src/` tree.
 - One-off investigation scripts are temporary. Put them under `.codex/` while
   working, or remove them before handoff if they are not useful regression
   guards.
@@ -157,6 +161,7 @@ copy the contents into the archive root.
 ## COMMANDS
 
 ```bash
+python3 tests/verify_blueprint_lab.py
 python3 tests/verify_pack_mods_ignores_non_runtime_files.py
 python3 pack_mods.py
 ```

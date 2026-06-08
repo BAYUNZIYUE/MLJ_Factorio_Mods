@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.blueprint_lab.analysis import blueprint_metrics, summarize_library
+from tools.blueprint_lab.codec import decode_blueprint_string, encode_blueprint_string, walk_nodes
+from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
+
+
+def main() -> int:
+    wrapper = generate_iron_plate_blackbox_seed(furnace_pairs=4)
+    encoded = encode_blueprint_string(wrapper)
+    decoded = decode_blueprint_string(encoded)
+    if decoded != wrapper:
+        print("FAIL: generated blueprint did not round-trip through Factorio string encoding")
+        return 1
+
+    nodes = list(walk_nodes(decoded))
+    blueprints = [node for node in nodes if node.kind == "blueprint"]
+    if len(blueprints) != 1:
+        print(f"FAIL: expected 1 generated blueprint, got {len(blueprints)}")
+        return 1
+
+    metrics = blueprint_metrics("/", blueprints[0].payload)
+    if metrics.entity_count != 2 * (4 * 3 + 1) + 4 * 12:
+        print(f"FAIL: unexpected entity count {metrics.entity_count}")
+        return 1
+    if metrics.width <= 0 or metrics.height <= 0 or metrics.density <= 0:
+        print(f"FAIL: invalid metrics {metrics}")
+        return 1
+
+    tmp = ROOT / ".codex" / "tests" / "blueprint_lab_seed.txt"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_text(encoded, encoding="utf-8")
+    summary = summarize_library([tmp])
+    if summary["decoded_files"] != 1 or summary["blueprint_count"] != 1:
+        print(f"FAIL: generated seed summary is wrong: {summary}")
+        return 1
+
+    print("PASS: blueprint_lab encodes, decodes, analyzes, and generates a seed blueprint.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

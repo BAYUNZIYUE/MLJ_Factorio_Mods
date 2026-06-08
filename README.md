@@ -14,6 +14,12 @@
 | `section-autocraft/` | section-autocraft | 根据物流编组自动安排手搓的模组 |
 | `ups_saving_quality_ships/` | ups_saving_quality_ships | 用品质枢纽模拟多艘同款飞船以降低 UPS 压力的 Space Age 模组 |
 
+## 离线工具
+
+| 目录 | 说明 |
+|------|------|
+| `tools/blueprint_lab/` | 离线蓝图分析和生成工具；用于解码蓝图字符串、扫描本地蓝图语料、提取紧凑布局经验，并生成第一版矩形黑盒种子蓝图 |
+
 ## 目录约定
 
 每个可打包模组都使用同一种源码布局：
@@ -73,11 +79,12 @@ python3 pack_mods.py
 ## 打包验证
 
 ```bash
+python3 tests/verify_blueprint_lab.py
 python3 tests/verify_pack_mods_ignores_non_runtime_files.py
 python3 pack_mods.py
 ```
 
-守卫测试会确认测试目录和仓库文档不会进入打包产物。打包命令输出
+守卫测试会确认蓝图工具的编码/生成入口可用，并确认测试目录和仓库文档不会进入打包产物。打包命令输出
 `Completed. Success: 6, Failed: 0` 时，表示当前 6 个模组都已成功生成 zip。
 
 ## Factorio 资料
