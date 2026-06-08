@@ -16,6 +16,7 @@ from tools.blueprint_lab.templates import extract_templates_from_blueprint
 from tools.blueprint_lab.prototypes import load_data_raw
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
+from tools.blueprint_lab.layout_plan import build_layout_plan
 
 
 def main() -> int:
@@ -153,6 +154,14 @@ def main() -> int:
             "path": "/gear",
             "occurrence_count": 2,
             "module_items": ["speed-module-3"],
+            "layout": {
+                "width": 3.0,
+                "height": 3.0,
+                "entity_count": 1,
+                "tile_count": 0,
+                "ports": [],
+                "port_counts": [],
+            },
             "recipe_mappings": [
                 {
                     "recipe": "iron-gear-wheel",
@@ -172,6 +181,14 @@ def main() -> int:
             "path": "/plate",
             "occurrence_count": 16,
             "module_items": [],
+            "layout": {
+                "width": 2.0,
+                "height": 2.0,
+                "entity_count": 1,
+                "tile_count": 0,
+                "ports": [{"side": "left", "role": "input", "entity_name": "transport-belt"}],
+                "port_counts": [("left:input", 1)],
+            },
             "recipe_mappings": [
                 {
                     "recipe": "iron-plate",
@@ -191,6 +208,14 @@ def main() -> int:
             "path": "/gear-sink",
             "occurrence_count": 1,
             "module_items": [],
+            "layout": {
+                "width": 3.0,
+                "height": 3.0,
+                "entity_count": 1,
+                "tile_count": 0,
+                "ports": [],
+                "port_counts": [],
+            },
             "recipe_mappings": [
                 {
                     "recipe": "gear-reprocessing",
@@ -221,8 +246,21 @@ def main() -> int:
     if dag["external_inputs"] != [{"item": "iron-ore", "rate_per_minute": 300.0, "reason": "boundary-input"}]:
         print(f"FAIL: expected iron ore to become black-box boundary input: {dag}")
         return 1
+    layout = build_layout_plan(dag, dag_mappings, max_columns=8, spacing=1, lane_width=4)
+    if layout["layout_node_count"] != 2:
+        print(f"FAIL: expected two layout nodes: {layout}")
+        return 1
+    if layout["nodes"][1]["item"] != "iron-plate" or layout["nodes"][1]["columns"] != 8 or layout["nodes"][1]["rows"] != 2:
+        print(f"FAIL: expected plate node to pack as 8x2 repeated templates: {layout}")
+        return 1
+    if layout["boundary_inputs"] != [{"item": "iron-ore", "rate_per_minute": 300.0, "side": "left", "reason": "boundary-input"}]:
+        print(f"FAIL: expected layout boundary input on the left side: {layout}")
+        return 1
+    if layout["boundary_outputs"] != [{"item": "iron-gear-wheel", "rate_per_minute": 150, "side": "right"}]:
+        print(f"FAIL: expected layout boundary output on the right side: {layout}")
+        return 1
 
-    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG, and generates a seed blueprint.")
+    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, and generates a seed blueprint.")
     return 0
 
 

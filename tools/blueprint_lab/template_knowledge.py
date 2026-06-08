@@ -30,6 +30,27 @@ class RecipeMapping:
 
 
 @dataclass(frozen=True)
+class TemplatePortHint:
+    side: str
+    role: str
+    entity_name: str
+    direction: int | None
+    x: float
+    y: float
+
+
+@dataclass(frozen=True)
+class TemplateLayoutHint:
+    width: float
+    height: float
+    entity_count: int
+    tile_count: int
+    cell_size: int
+    ports: list[TemplatePortHint]
+    port_counts: list[tuple[str, int]]
+
+
+@dataclass(frozen=True)
 class TemplateKnowledgeMapping:
     fingerprint: str
     label: str
@@ -43,6 +64,7 @@ class TemplateKnowledgeMapping:
     requests: list[str]
     unresolved_recipes: list[str]
     candidate_role: str
+    layout: TemplateLayoutHint
 
 
 def recipe_machines(template: TemplateCandidate, recipe: str) -> list[str]:
@@ -86,6 +108,94 @@ def recipe_machine_speed_sum(
 
 def scaled_rates(items: list[tuple[str, float]], crafts_per_minute: float) -> list[tuple[str, float]]:
     return [(name, amount * crafts_per_minute) for name, amount in items]
+
+
+def template_side(x: float, y: float, min_x: float, max_x: float, min_y: float, max_y: float, margin: float = 1.0) -> str | None:
+    if x <= min_x + margin:
+        return "left"
+    if x >= max_x - margin:
+        return "right"
+    if y <= min_y + margin:
+        return "top"
+    if y >= max_y - margin:
+        return "bottom"
+    return None
+
+
+def template_port_role(side: str, direction: int | None) -> str:
+    if direction is None:
+        return "boundary"
+    if side == "left" and direction == 2:
+        return "input"
+    if side == "left" and direction == 6:
+        return "output"
+    if side == "right" and direction == 6:
+        return "input"
+    if side == "right" and direction == 2:
+        return "output"
+    if side == "top" and direction == 4:
+        return "input"
+    if side == "top" and direction == 0:
+        return "output"
+    if side == "bottom" and direction == 0:
+        return "input"
+    if side == "bottom" and direction == 4:
+        return "output"
+    return "edge-bus"
+
+
+def template_layout_hint(template: TemplateCandidate) -> TemplateLayoutHint:
+    entities = template.normalized_entities
+    if not entities:
+        return TemplateLayoutHint(
+            width=float(template.cell_size),
+            height=float(template.cell_size),
+            entity_count=template.entity_count,
+            tile_count=template.tile_count,
+            cell_size=template.cell_size,
+            ports=[],
+            port_counts=[],
+        )
+
+    min_x = min(entity.x for entity in entities)
+    max_x = max(entity.x for entity in entities)
+    min_y = min(entity.y for entity in entities)
+    max_y = max(entity.y for entity in entities)
+    width = max(1.0, max_x - min_x + 1)
+    height = max(1.0, max_y - min_y + 1)
+    port_families = {"transport-belt", "underground-belt", "splitter", "fluid", "rail", "logistics-storage"}
+    ports: list[TemplatePortHint] = []
+    for entity in entities:
+        if entity.family not in port_families:
+            continue
+        side = template_side(entity.x, entity.y, min_x, max_x, min_y, max_y)
+        if side is None:
+            continue
+        role = template_port_role(side, entity.direction) if entity.family in {
+            "transport-belt",
+            "underground-belt",
+            "splitter",
+        } else "boundary"
+        ports.append(
+            TemplatePortHint(
+                side=side,
+                role=role,
+                entity_name=entity.name,
+                direction=entity.direction,
+                x=entity.x,
+                y=entity.y,
+            )
+        )
+    counts = Counter(f"{port.side}:{port.role}" for port in ports)
+    return TemplateLayoutHint(
+        width=round(width, 3),
+        height=round(height, 3),
+        entity_count=template.entity_count,
+        tile_count=template.tile_count,
+        cell_size=template.cell_size,
+        ports=ports,
+        port_counts=sorted(counts.items()),
+    )
 
 
 def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> TemplateKnowledgeMapping:
@@ -169,6 +279,7 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
         requests=template.requests,
         unresolved_recipes=unresolved,
         candidate_role=role,
+        layout=template_layout_hint(template),
     )
 
 
@@ -259,6 +370,13 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             lines.append(f"- modules/items={', '.join(item['module_items'][:8])}")
         if item["requests"]:
             lines.append(f"- requests={', '.join(item['requests'][:8])}")
+        layout = item["layout"]
+        lines.append(
+            f"- layout={layout['width']:g}x{layout['height']:g} entities={layout['entity_count']} tiles={layout['tile_count']}"
+        )
+        if layout["port_counts"]:
+            port_counts = ", ".join(f"{name}:{count}" for name, count in layout["port_counts"])
+            lines.append(f"- ports={port_counts}")
         if not item["recipe_mappings"]:
             lines.append("- recipes=none")
         for mapping in item["recipe_mappings"]:

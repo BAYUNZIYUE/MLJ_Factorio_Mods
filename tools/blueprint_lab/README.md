@@ -15,6 +15,7 @@ tree.
 - Extract normalized entity subgraph templates from repeated grid signatures.
 - Import data.raw JSON and map recipe-bearing templates to recipe inputs, outputs, machine names, base machine speeds, conservative per-template-instance throughput, modules, and requests.
 - Plan a production DAG seed from learned production templates: target item rate, whole-template instance counts, upstream template needs, and external black-box inputs.
+- Turn a production DAG seed into a rectangular layout plan with repeated template grids, estimated module dimensions, and left/right black-box boundaries.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -97,6 +98,14 @@ items or `--no-default-boundary-items` to inspect deeper recursive chains. It
 still does not solve rectangle packing, belt routing, pipe routing, power, or
 in-game validation.
 
+The layout plan converts DAG nodes into conservative rectangular units. It
+keeps each learned template as the copyable atom, arranges repeated instances in
+rows, reserves a left input boundary and right output boundary, and reports the
+estimated rectangle before any connector belts or pipes are generated. This
+matches the corpus lesson that integrated black boxes usually preserve local
+module geometry first, then use long boundary buses to make the final rectangle
+manageable.
+
 ## Commands
 
 Analyze a blueprint directory:
@@ -140,6 +149,12 @@ Plan a production DAG seed from learned templates:
 
 ```bash
 python3 -m tools.blueprint_lab.production_dag /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-production-dag-summary.json --markdown-output .codex/tests/blueprint-production-dag-report.md
+```
+
+Plan a rectangular layout from learned templates:
+
+```bash
+python3 -m tools.blueprint_lab.layout_plan /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-layout-plan-summary.json --markdown-output .codex/tests/blueprint-layout-plan-report.md
 ```
 
 Generate the current seed blueprint:

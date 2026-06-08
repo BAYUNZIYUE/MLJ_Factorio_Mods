@@ -1,0 +1,267 @@
+from __future__ import annotations
+
+import argparse
+import json
+import math
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+from .analysis import iter_blueprint_text_files
+from .production_dag import (
+    build_production_plan,
+    default_boundary_items,
+    template_options_from_mappings,
+)
+from .prototypes import load_data_raw
+from .template_knowledge import map_template_library
+
+
+@dataclass(frozen=True)
+class LayoutNode:
+    item: str
+    recipe: str
+    fingerprint: str
+    instances: int
+    source_width: float
+    source_height: float
+    source_entity_count: int
+    source_tile_count: int
+    columns: int
+    rows: int
+    planned_width: float
+    planned_height: float
+    x: float
+    y: float
+    ports: list[dict[str, Any]]
+    port_counts: list[tuple[str, int]]
+    source: str
+    path: str
+
+
+def mapping_by_fingerprint(mappings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(mapping["fingerprint"]): mapping for mapping in mappings}
+
+
+def flatten_plan_nodes(node: dict[str, Any]) -> list[dict[str, Any]]:
+    if node.get("reason"):
+        return []
+    nodes = [node]
+    for child in node.get("children") or []:
+        nodes.extend(flatten_plan_nodes(child))
+    return nodes
+
+
+def node_layout(
+    node: dict[str, Any],
+    mapping: dict[str, Any],
+    *,
+    x: float,
+    y: float,
+    max_columns: int,
+    spacing: float,
+) -> LayoutNode:
+    layout = mapping.get("layout") or {}
+    source_width = float(layout.get("width") or mapping.get("cell_size") or 1)
+    source_height = float(layout.get("height") or mapping.get("cell_size") or 1)
+    instances = int(node["instances"])
+    columns = max(1, min(max_columns, instances))
+    rows = max(1, math.ceil(instances / columns))
+    planned_width = columns * source_width + max(0, columns - 1) * spacing
+    planned_height = rows * source_height + max(0, rows - 1) * spacing
+    return LayoutNode(
+        item=str(node["item"]),
+        recipe=str(node["recipe"]),
+        fingerprint=str(node["fingerprint"]),
+        instances=instances,
+        source_width=source_width,
+        source_height=source_height,
+        source_entity_count=int(layout.get("entity_count") or 0),
+        source_tile_count=int(layout.get("tile_count") or 0),
+        columns=columns,
+        rows=rows,
+        planned_width=round(planned_width, 3),
+        planned_height=round(planned_height, 3),
+        x=round(x, 3),
+        y=round(y, 3),
+        ports=list(layout.get("ports") or []),
+        port_counts=[tuple(item) for item in layout.get("port_counts") or []],
+        source=str(node.get("source") or ""),
+        path=str(node.get("path") or ""),
+    )
+
+
+def build_layout_plan(
+    production_plan: dict[str, Any],
+    mappings: list[dict[str, Any]],
+    *,
+    max_columns: int = 8,
+    spacing: float = 2.0,
+    lane_width: float = 4.0,
+) -> dict[str, Any]:
+    mapping_index = mapping_by_fingerprint(mappings)
+    nodes = flatten_plan_nodes(production_plan["root"])
+    layout_nodes: list[LayoutNode] = []
+    cursor_y = lane_width
+    content_width = 0.0
+    for node in nodes:
+        mapping = mapping_index.get(str(node["fingerprint"])) or {}
+        planned = node_layout(
+            node,
+            mapping,
+            x=lane_width,
+            y=cursor_y,
+            max_columns=max_columns,
+            spacing=spacing,
+        )
+        layout_nodes.append(planned)
+        cursor_y += planned.planned_height + spacing
+        content_width = max(content_width, planned.planned_width)
+
+    content_height = max(0.0, cursor_y - spacing)
+    overall_width = content_width + lane_width * 2
+    overall_height = content_height + lane_width
+    external_inputs = production_plan.get("external_inputs") or []
+    output_item = production_plan["target_item"]
+    return {
+        "target_item": production_plan["target_item"],
+        "target_rate_per_minute": production_plan["target_rate_per_minute"],
+        "max_columns": max_columns,
+        "spacing": spacing,
+        "lane_width": lane_width,
+        "layout_node_count": len(layout_nodes),
+        "estimated_width": round(overall_width, 3),
+        "estimated_height": round(overall_height, 3),
+        "estimated_area": round(overall_width * overall_height, 3),
+        "nodes": [asdict(node) for node in layout_nodes],
+        "boundary_inputs": [
+            {
+                "item": item["item"],
+                "rate_per_minute": item["rate_per_minute"],
+                "side": "left",
+                "reason": item["reason"],
+            }
+            for item in external_inputs
+        ],
+        "boundary_outputs": [
+            {
+                "item": output_item,
+                "rate_per_minute": production_plan["target_rate_per_minute"],
+                "side": "right",
+            }
+        ],
+        "lessons": [
+            "The first layout pass stacks DAG units into a long rectangle because the corpus black boxes favored long straight buses over square packing.",
+            "Each production node is packed as repeated copies of one learned template; this preserves local proven geometry before solving global routing.",
+            "Left boundary inputs and right boundary outputs make the black-box contract explicit before belt, pipe, and power routing are generated.",
+            "This is still a layout plan, not a final blueprint: it estimates module rectangles and boundary lanes, but does not place connecting belts or resolve collisions.",
+        ],
+    }
+
+
+def render_markdown_report(summary: dict[str, Any]) -> str:
+    lines = [
+        "# Blueprint Layout Plan Report",
+        "",
+        f"- Target item: {summary['target_item']}",
+        f"- Target rate: {summary['target_rate_per_minute']:g}/min",
+        f"- Estimated rectangle: {summary['estimated_width']:g} x {summary['estimated_height']:g}",
+        f"- Estimated area: {summary['estimated_area']:g}",
+        f"- Layout nodes: {summary['layout_node_count']}",
+        "",
+        "## Layout Nodes",
+        "",
+    ]
+    for node in summary["nodes"]:
+        lines.append(
+            f"- {node['item']} / {node['recipe']} template={node['fingerprint']} "
+            f"instances={node['instances']} grid={node['columns']}x{node['rows']} "
+            f"unit={node['source_width']:g}x{node['source_height']:g} "
+            f"planned={node['planned_width']:g}x{node['planned_height']:g} at=({node['x']:g},{node['y']:g})"
+        )
+        if node["port_counts"]:
+            ports = ", ".join(f"{name}:{count}" for name, count in node["port_counts"])
+            lines.append(f"  ports={ports}")
+        lines.append(f"  source={node['source']} path={node['path']}")
+
+    lines.extend(["", "## Boundary Inputs", ""])
+    if summary["boundary_inputs"]:
+        for item in summary["boundary_inputs"]:
+            lines.append(
+                f"- {item['item']}: {item['rate_per_minute']:g}/min side={item['side']} reason={item['reason']}"
+            )
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Boundary Outputs", ""])
+    for item in summary["boundary_outputs"]:
+        lines.append(f"- {item['item']}: {item['rate_per_minute']:g}/min side={item['side']}")
+
+    lines.extend(["", "## Generator Implications", ""])
+    for lesson in summary["lessons"]:
+        lines.append(f"- {lesson}")
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Turn a production DAG seed into a rectangular layout plan.")
+    parser.add_argument("paths", nargs="+", type=Path)
+    parser.add_argument("--data-raw-json", type=Path, required=True)
+    parser.add_argument("--target-item", required=True)
+    parser.add_argument("--target-rate-per-minute", type=float, required=True)
+    parser.add_argument("--target-recipe")
+    parser.add_argument("--external-item", action="append", default=[])
+    parser.add_argument("--no-default-boundary-items", action="store_true")
+    parser.add_argument("--top", type=int, default=8)
+    parser.add_argument("--cell-size", type=int, default=16)
+    parser.add_argument("--max-depth", type=int, default=4)
+    parser.add_argument("--max-columns", type=int, default=8)
+    parser.add_argument("--spacing", type=float, default=2.0)
+    parser.add_argument("--lane-width", type=float, default=4.0)
+    parser.add_argument("--json-output", type=Path)
+    parser.add_argument("--markdown-output", type=Path)
+    args = parser.parse_args(argv)
+
+    files: list[Path] = []
+    for path in args.paths:
+        files.extend(iter_blueprint_text_files(path))
+
+    knowledge = load_data_raw(args.data_raw_json)
+    template_summary = map_template_library(files, knowledge=knowledge, top=args.top, cell_size=args.cell_size)
+    boundary_items = set(args.external_item)
+    if not args.no_default_boundary_items:
+        boundary_items.update(default_boundary_items(template_options_from_mappings(template_summary["mappings"])))
+    production_plan = build_production_plan(
+        template_summary["mappings"],
+        target_item=args.target_item,
+        target_rate_per_minute=args.target_rate_per_minute,
+        target_recipe=args.target_recipe,
+        max_depth=args.max_depth,
+        boundary_items=boundary_items,
+    )
+    summary = build_layout_plan(
+        production_plan,
+        template_summary["mappings"],
+        max_columns=args.max_columns,
+        spacing=args.spacing,
+        lane_width=args.lane_width,
+    )
+    summary["production_node_count"] = production_plan["node_count"]
+    summary["template_mapping_status_counts"] = template_summary["status_counts"]
+    summary["template_mapping_failed_files"] = template_summary["failed_files"]
+    summary["template_count"] = template_summary["template_count"]
+    summary["file_count"] = template_summary["file_count"]
+
+    if args.json_output:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    if args.markdown_output:
+        args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
+        args.markdown_output.write_text(render_markdown_report(summary), encoding="utf-8")
+
+    print(render_markdown_report(summary))
+    return 0 if not template_summary["failed_files"] else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
