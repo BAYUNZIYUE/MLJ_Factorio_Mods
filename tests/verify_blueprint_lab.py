@@ -21,6 +21,7 @@ from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
 from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe, select_best_materialized_layout
+from tools.blueprint_lab.factorio_validate import render_control_lua, write_server_settings
 
 
 def main() -> int:
@@ -51,6 +52,23 @@ def main() -> int:
     summary = summarize_library([tmp])
     if summary["decoded_files"] != 1 or summary["blueprint_count"] != 1:
         print(f"FAIL: generated seed summary is wrong: {summary}")
+        return 1
+
+    validation_lua = render_control_lua(encoded)
+    for expected in [
+        "stack.import_stack(blueprint_string)",
+        "game.forces.player.create_space_platform",
+        "surface.set_tiles(platform_tiles",
+        "stack.build_blueprint",
+        "script.on_event(defines.events.on_tick",
+    ]:
+        if expected not in validation_lua:
+            print(f"FAIL: expected Factorio validation scenario to contain {expected}")
+            return 1
+    server_settings_path = ROOT / ".codex" / "tests" / "blueprint_lab_server_settings_fixture.json"
+    server_settings = write_server_settings(server_settings_path).read_text(encoding="utf-8")
+    if '"auto_pause": false' not in server_settings or '"visibility"' not in server_settings:
+        print(f"FAIL: expected Factorio validation server settings to disable auto-pause: {server_settings}")
         return 1
 
     learned = learn_library([tmp])
