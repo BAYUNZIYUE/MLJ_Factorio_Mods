@@ -32,6 +32,11 @@ class RecipeMapping:
     effective_crafts_per_minute: float | None
     effective_ingredients_per_minute: list[tuple[str, float]]
     effective_products_per_minute: list[tuple[str, float]]
+    effective_with_beacons_effects: list[tuple[str, float]]
+    effective_with_beacons_module_items: list[tuple[str, str, int]]
+    effective_with_beacons_crafts_per_minute: float | None
+    effective_with_beacons_ingredients_per_minute: list[tuple[str, float]]
+    effective_with_beacons_products_per_minute: list[tuple[str, float]]
 
 
 @dataclass(frozen=True)
@@ -172,11 +177,70 @@ def direct_module_effects_for_entity(entity: Any, knowledge: PrototypeKnowledge)
     return effects, module_items
 
 
+def module_effects_for_beacon(entity: Any, knowledge: PrototypeKnowledge) -> tuple[Counter[str], list[tuple[str, str, int]]]:
+    effects, module_items = direct_module_effects_for_entity(entity, knowledge)
+    beacon = knowledge.beacon(entity.name)
+    if beacon is None or not beacon.allowed_effects:
+        return effects, module_items
+    allowed = set(beacon.allowed_effects)
+    return Counter({name: value for name, value in effects.items() if name in allowed}), module_items
+
+
+def beacon_profile_factor(profile: list[float], beacon_count: int) -> float:
+    if beacon_count <= 0:
+        return 0.0
+    if not profile:
+        return 1.0
+    index = min(beacon_count - 1, len(profile) - 1)
+    return profile[index]
+
+
+def entity_in_beacon_range(machine: Any, beacon_entity: Any, knowledge: PrototypeKnowledge) -> bool:
+    beacon = knowledge.beacon(beacon_entity.name)
+    if beacon is None:
+        return False
+    return (
+        abs(float(machine.x) - float(beacon_entity.x)) <= beacon.supply_area_distance
+        and abs(float(machine.y) - float(beacon_entity.y)) <= beacon.supply_area_distance
+    )
+
+
+def beacon_effects_for_machine(
+    machine: Any,
+    template: TemplateCandidate,
+    knowledge: PrototypeKnowledge,
+) -> tuple[Counter[str], list[tuple[str, str, int]]]:
+    beacons = [
+        entity
+        for entity in template.normalized_entities
+        if knowledge.beacon(entity.name) is not None and entity_in_beacon_range(machine, entity, knowledge)
+    ]
+    beacon_count = len(beacons)
+    total_effects: Counter[str] = Counter()
+    module_items: Counter[tuple[str, str]] = Counter()
+    for beacon_entity in beacons:
+        beacon = knowledge.beacon(beacon_entity.name)
+        if beacon is None:
+            continue
+        profile_factor = beacon_profile_factor(beacon.profile, beacon_count)
+        effects, items = module_effects_for_beacon(beacon_entity, knowledge)
+        for effect_name, effect_value in effects.items():
+            total_effects[effect_name] += effect_value * beacon.distribution_effectivity * profile_factor
+        for module_name, quality_name, count in items:
+            module_items[(module_name, quality_name)] += count
+    return (
+        total_effects,
+        [(name, quality, count) for (name, quality), count in sorted(module_items.items())],
+    )
+
+
 def effective_recipe_rates(
     template: TemplateCandidate,
     recipe: str,
     knowledge: PrototypeKnowledge,
     recipe_energy_required: float,
+    *,
+    include_beacons: bool = False,
 ) -> tuple[float | None, list[tuple[str, float]], list[tuple[str, str, int]]]:
     if recipe_energy_required <= 0:
         return None, [], []
@@ -192,10 +256,16 @@ def effective_recipe_rates(
             return None, [], []
         machine_quality_multiplier = knowledge.quality_effect_multiplier(entity.quality)
         direct_effects, direct_items = direct_module_effects_for_entity(entity, knowledge)
-        total_effects.update(direct_effects)
+        combined_effects: Counter[str] = Counter(direct_effects)
         for module_name, quality_name, count in direct_items:
             module_items[(module_name, quality_name)] += count
-        speed_bonus = direct_effects.get("speed", 0.0)
+        if include_beacons:
+            beacon_effects, beacon_items = beacon_effects_for_machine(entity, template, knowledge)
+            combined_effects.update(beacon_effects)
+            for module_name, quality_name, count in beacon_items:
+                module_items[(module_name, quality_name)] += count
+        total_effects.update(combined_effects)
+        speed_bonus = combined_effects.get("speed", 0.0)
         entity_speed = prototype.crafting_speed * machine_quality_multiplier * max(0.0, 1.0 + speed_bonus)
         total_crafts += entity_speed * 60 / recipe_energy_required
 
@@ -355,6 +425,11 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
                     effective_crafts_per_minute=None,
                     effective_ingredients_per_minute=[],
                     effective_products_per_minute=[],
+                    effective_with_beacons_effects=[],
+                    effective_with_beacons_module_items=[],
+                    effective_with_beacons_crafts_per_minute=None,
+                    effective_with_beacons_ingredients_per_minute=[],
+                    effective_with_beacons_products_per_minute=[],
                 )
             )
         else:
@@ -373,6 +448,21 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
                 knowledge,
                 recipe.energy_required,
             )
+            effective_with_beacons_crafts, effective_with_beacons_effects, effective_with_beacons_module_items = effective_recipe_rates(
+                template,
+                recipe_name,
+                knowledge,
+                recipe.energy_required,
+                include_beacons=True,
+            )
+            if (
+                effective_with_beacons_crafts == effective_crafts
+                and effective_with_beacons_effects == direct_module_effects
+                and effective_with_beacons_module_items == direct_module_items
+            ):
+                effective_with_beacons_crafts = None
+                effective_with_beacons_effects = []
+                effective_with_beacons_module_items = []
             effective_ingredients: list[tuple[str, float]] = []
             effective_products: list[tuple[str, float]] = []
             if effective_crafts is not None:
@@ -383,6 +473,18 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
                 effective_ingredients = scaled_rates(ingredients, effective_crafts)
                 effective_products = [
                     (name, amount * effective_crafts * (1.0 + productivity_bonus))
+                    for name, amount in products
+                ]
+            effective_with_beacons_ingredients: list[tuple[str, float]] = []
+            effective_with_beacons_products: list[tuple[str, float]] = []
+            if effective_with_beacons_crafts is not None:
+                productivity_bonus = max(
+                    0.0,
+                    dict(effective_with_beacons_effects).get("productivity", 0.0),
+                )
+                effective_with_beacons_ingredients = scaled_rates(ingredients, effective_with_beacons_crafts)
+                effective_with_beacons_products = [
+                    (name, amount * effective_with_beacons_crafts * (1.0 + productivity_bonus))
                     for name, amount in products
                 ]
             mappings.append(
@@ -405,6 +507,11 @@ def map_template(template: TemplateCandidate, knowledge: PrototypeKnowledge) -> 
                     effective_crafts_per_minute=effective_crafts,
                     effective_ingredients_per_minute=effective_ingredients,
                     effective_products_per_minute=effective_products,
+                    effective_with_beacons_effects=effective_with_beacons_effects,
+                    effective_with_beacons_module_items=effective_with_beacons_module_items,
+                    effective_with_beacons_crafts_per_minute=effective_with_beacons_crafts,
+                    effective_with_beacons_ingredients_per_minute=effective_with_beacons_ingredients,
+                    effective_with_beacons_products_per_minute=effective_with_beacons_products,
                 )
             )
 
@@ -492,7 +599,7 @@ def map_template_library(
         "lessons": [
             "Templates with resolved recipes can be checked against production DAG requirements.",
             "Base throughput is computed from recipe time and machine crafting speed only.",
-            "Effective throughput applies machine quality and direct module effects, including quality-scaled positive module bonuses; beacon effects are still not applied.",
+            "Effective throughput applies machine quality, direct module effects, and a conservative same-template beacon estimate.",
             "Templates without recipes are still useful as support, routing, platform, or power fill material.",
             "Unresolved recipes mean data.raw knowledge is missing or stale; import the current game/mod data before claiming throughput.",
         ],
@@ -593,6 +700,36 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                     )
                     lines.append(
                         f"  effective_direct_modules={mapping['effective_crafts_per_minute']:g} crafts/min inputs=[{effective_inputs}] outputs=[{effective_outputs}]"
+                    )
+                if mapping.get("effective_with_beacons_module_items"):
+                    modules = ", ".join(
+                        f"{count}x {quality} {name}"
+                        for name, quality, count in mapping["effective_with_beacons_module_items"]
+                    )
+                    lines.append(f"  effective_with_beacons_modules={modules}")
+                if mapping.get("effective_with_beacons_effects"):
+                    effects = ", ".join(
+                        f"{name}:{value:g}"
+                        for name, value in mapping["effective_with_beacons_effects"]
+                    )
+                    lines.append(f"  effective_with_beacons_effects={effects}")
+                if mapping.get("effective_with_beacons_crafts_per_minute") is not None:
+                    effective_inputs = (
+                        ", ".join(
+                            f"{name}:{amount:g}/min"
+                            for name, amount in mapping["effective_with_beacons_ingredients_per_minute"]
+                        )
+                        or "none"
+                    )
+                    effective_outputs = (
+                        ", ".join(
+                            f"{name}:{amount:g}/min"
+                            for name, amount in mapping["effective_with_beacons_products_per_minute"]
+                        )
+                        or "none"
+                    )
+                    lines.append(
+                        f"  effective_with_beacons={mapping['effective_with_beacons_crafts_per_minute']:g} crafts/min inputs=[{effective_inputs}] outputs=[{effective_outputs}]"
                     )
                 elif mapping["unknown_machine_names"]:
                     lines.append(

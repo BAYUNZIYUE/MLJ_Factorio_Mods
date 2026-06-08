@@ -43,6 +43,8 @@ class TemplateOption:
     rate_basis: str
     direct_module_effects: list[tuple[str, float]]
     direct_module_items: list[tuple[str, str, int]]
+    rate_module_effects: list[tuple[str, float]]
+    rate_module_items: list[tuple[str, str, int]]
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,8 @@ class ProductionPlanNode:
     rate_basis: str
     direct_module_effects: list[tuple[str, float]]
     direct_module_items: list[tuple[str, str, int]]
+    rate_module_effects: list[tuple[str, float]]
+    rate_module_items: list[tuple[str, str, int]]
     children: list["ProductionPlanNode"]
     external_inputs: list[ExternalInput]
 
@@ -101,7 +105,22 @@ def normalize_pairs(pairs: list[Any]) -> list[tuple[str, float]]:
     return normalized
 
 
-def recipe_rate_basis(recipe_mapping: dict[str, Any]) -> tuple[str, list[tuple[str, float]], list[tuple[str, float]], float | None]:
+def recipe_rate_basis(
+    recipe_mapping: dict[str, Any],
+) -> tuple[str, list[tuple[str, float]], list[tuple[str, float]], float | None, list[tuple[str, float]], list[tuple[str, str, int]]]:
+    with_beacons_crafts = recipe_mapping.get("effective_with_beacons_crafts_per_minute")
+    if with_beacons_crafts is not None:
+        return (
+            "effective-with-beacons",
+            normalize_pairs(recipe_mapping.get("effective_with_beacons_ingredients_per_minute") or []),
+            normalize_pairs(recipe_mapping.get("effective_with_beacons_products_per_minute") or []),
+            float(with_beacons_crafts),
+            normalize_pairs(recipe_mapping.get("effective_with_beacons_effects") or []),
+            [
+                (str(name), str(quality), int(count))
+                for name, quality, count in recipe_mapping.get("effective_with_beacons_module_items") or []
+            ],
+        )
     effective_crafts = recipe_mapping.get("effective_crafts_per_minute")
     if effective_crafts is not None:
         return (
@@ -109,6 +128,11 @@ def recipe_rate_basis(recipe_mapping: dict[str, Any]) -> tuple[str, list[tuple[s
             normalize_pairs(recipe_mapping.get("effective_ingredients_per_minute") or []),
             normalize_pairs(recipe_mapping.get("effective_products_per_minute") or []),
             float(effective_crafts),
+            normalize_pairs(recipe_mapping.get("direct_module_effects") or []),
+            [
+                (str(name), str(quality), int(count))
+                for name, quality, count in recipe_mapping.get("direct_module_items") or []
+            ],
         )
     base_crafts = recipe_mapping.get("base_crafts_per_minute")
     if base_crafts is not None:
@@ -117,8 +141,10 @@ def recipe_rate_basis(recipe_mapping: dict[str, Any]) -> tuple[str, list[tuple[s
             normalize_pairs(recipe_mapping.get("base_ingredients_per_minute") or []),
             normalize_pairs(recipe_mapping.get("base_products_per_minute") or []),
             float(base_crafts),
+            [],
+            [],
         )
-    return "", [], [], None
+    return "", [], [], None, [], []
 
 
 def template_options_from_mappings(
@@ -135,7 +161,7 @@ def template_options_from_mappings(
                 continue
             if target_recipe and recipe_mapping.get("recipe") != target_recipe:
                 continue
-            rate_basis, inputs, products, crafts_per_minute = recipe_rate_basis(recipe_mapping)
+            rate_basis, inputs, products, crafts_per_minute, rate_module_effects, rate_module_items = recipe_rate_basis(recipe_mapping)
             if crafts_per_minute is None:
                 continue
 
@@ -166,6 +192,8 @@ def template_options_from_mappings(
                             (str(name), str(quality), int(count))
                             for name, quality, count in recipe_mapping.get("direct_module_items") or []
                         ],
+                        rate_module_effects=rate_module_effects,
+                        rate_module_items=rate_module_items,
                     )
                 )
 
@@ -246,6 +274,8 @@ def plan_node(
         rate_basis=option.rate_basis,
         direct_module_effects=option.direct_module_effects,
         direct_module_items=option.direct_module_items,
+        rate_module_effects=option.rate_module_effects,
+        rate_module_items=option.rate_module_items,
         children=children,
         external_inputs=external_inputs,
     )
@@ -309,7 +339,7 @@ def build_production_plan(
             "The planner treats a learned production template as the smallest copyable unit, so required instances are rounded up to whole templates.",
             "Template selection prefers the strongest positive net output for the requested item; recipes that consume more of the target item than they produce are ignored as sources.",
             "External inputs mark the current black-box boundary: either the item is configured as raw/base input, the corpus has not yielded a usable production template for it yet, or recursion hit a cycle/depth guard.",
-            "Rate basis prefers effective direct modules when available, so copied machine quality and direct module stacks affect template count before layout.",
+            "Rate basis prefers effective same-template beacon estimates, then effective direct modules, then base rates, so copied machine quality and module stacks affect template count before layout.",
             "This is a production-DAG seed, not final routing or placement; rectangle packing and belt/pipe routing must consume this plan next.",
         ],
     }
@@ -345,18 +375,18 @@ def render_node(node: dict[str, Any], lines: list[str], indent: int = 0) -> None
         lines.append(f"{prefix}  machines={speeds}")
     if node["module_items"]:
         lines.append(f"{prefix}  modules/items={', '.join(node['module_items'][:8])}")
-    if node.get("direct_module_items"):
+    if node.get("rate_module_items"):
         modules = ", ".join(
             f"{count}x {quality} {name}"
-            for name, quality, count in node["direct_module_items"]
+            for name, quality, count in node["rate_module_items"]
         )
-        lines.append(f"{prefix}  direct_modules={modules}")
-    if node.get("direct_module_effects"):
+        lines.append(f"{prefix}  rate_modules={modules}")
+    if node.get("rate_module_effects"):
         effects = ", ".join(
             f"{name}:{value:g}"
-            for name, value in node["direct_module_effects"]
+            for name, value in node["rate_module_effects"]
         )
-        lines.append(f"{prefix}  direct_module_effects={effects}")
+        lines.append(f"{prefix}  rate_module_effects={effects}")
     if node["planned_input_rates_per_minute"]:
         inputs = ", ".join(
             f"{name}:{rate:g}/min"

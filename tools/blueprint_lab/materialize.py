@@ -426,6 +426,8 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
             "planned_net_output_per_minute": node.get("planned_net_output_per_minute"),
             "direct_module_effects": node.get("direct_module_effects") or [],
             "direct_module_items": node.get("direct_module_items") or [],
+            "rate_module_effects": node.get("rate_module_effects") or [],
+            "rate_module_items": node.get("rate_module_items") or [],
         }
         for node in layout.get("nodes") or []
     ]
@@ -448,7 +450,7 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
         "lessons": [
             "Materialization copies learned local template geometry into the planned rectangle instead of inventing machines from scratch.",
             "Boundary connectors are generated only in reserved lanes and checked for exact entity-position collisions.",
-            "The generated blueprint is still not production-ready: pipe routing, power, full belt routing, beacon effect modeling, and in-game validation remain separate steps.",
+            "The generated blueprint is still not production-ready: pipe routing, power, full belt routing, cross-template beacon modeling, and in-game validation remain separate steps.",
         ],
     }
 
@@ -487,15 +489,15 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"- {node['item']} / {node['recipe']}: instances={node['instances']} "
                 f"basis={node['rate_basis']} planned_net={node['planned_net_output_per_minute']:g}/min"
             )
-            if node["direct_module_items"]:
+            if node["rate_module_items"]:
                 modules = ", ".join(
                     f"{count}x {quality} {name}"
-                    for name, quality, count in node["direct_module_items"]
+                    for name, quality, count in node["rate_module_items"]
                 )
-                lines.append(f"  direct_modules={modules}")
-            if node["direct_module_effects"]:
-                effects = ", ".join(f"{name}:{value:g}" for name, value in node["direct_module_effects"])
-                lines.append(f"  direct_module_effects={effects}")
+                lines.append(f"  rate_modules={modules}")
+            if node["rate_module_effects"]:
+                effects = ", ".join(f"{name}:{value:g}" for name, value in node["rate_module_effects"])
+                lines.append(f"  rate_module_effects={effects}")
     if summary["connector_summary"]["routes"]:
         lines.extend(["", "## Connector Routes", ""])
         for item in summary["connector_summary"]["routes"]:

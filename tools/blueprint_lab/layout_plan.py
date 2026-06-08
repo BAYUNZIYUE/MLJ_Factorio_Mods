@@ -41,6 +41,8 @@ class LayoutNode:
     planned_net_output_per_minute: float
     direct_module_effects: list[tuple[str, float]]
     direct_module_items: list[tuple[str, str, int]]
+    rate_module_effects: list[tuple[str, float]]
+    rate_module_items: list[tuple[str, str, int]]
 
 
 def mapping_by_fingerprint(mappings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -96,6 +98,8 @@ def node_layout(
         planned_net_output_per_minute=float(node.get("planned_net_output_per_minute") or 0.0),
         direct_module_effects=[tuple(item) for item in node.get("direct_module_effects") or []],
         direct_module_items=[tuple(item) for item in node.get("direct_module_items") or []],
+        rate_module_effects=[tuple(item) for item in node.get("rate_module_effects") or []],
+        rate_module_items=[tuple(item) for item in node.get("rate_module_items") or []],
     )
 
 
@@ -191,15 +195,15 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         if node["port_counts"]:
             ports = ", ".join(f"{name}:{count}" for name, count in node["port_counts"])
             lines.append(f"  ports={ports}")
-        if node["direct_module_items"]:
+        if node["rate_module_items"]:
             modules = ", ".join(
                 f"{count}x {quality} {name}"
-                for name, quality, count in node["direct_module_items"]
+                for name, quality, count in node["rate_module_items"]
             )
-            lines.append(f"  direct_modules={modules}")
-        if node["direct_module_effects"]:
-            effects = ", ".join(f"{name}:{value:g}" for name, value in node["direct_module_effects"])
-            lines.append(f"  direct_module_effects={effects}")
+            lines.append(f"  rate_modules={modules}")
+        if node["rate_module_effects"]:
+            effects = ", ".join(f"{name}:{value:g}" for name, value in node["rate_module_effects"])
+            lines.append(f"  rate_module_effects={effects}")
         lines.append(f"  source={node['source']} path={node['path']}")
 
     lines.extend(["", "## Boundary Inputs", ""])

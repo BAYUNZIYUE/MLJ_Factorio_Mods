@@ -55,11 +55,21 @@ class QualityPrototype:
 
 
 @dataclass(frozen=True)
+class BeaconPrototype:
+    name: str
+    supply_area_distance: float
+    distribution_effectivity: float
+    profile: list[float]
+    allowed_effects: list[str]
+
+
+@dataclass(frozen=True)
 class PrototypeKnowledge:
     recipes: dict[str, Recipe]
     crafting_entities: dict[str, CraftingEntity]
     modules: dict[str, ModulePrototype]
     qualities: dict[str, QualityPrototype]
+    beacons: dict[str, BeaconPrototype]
 
     def recipe(self, name: str) -> Recipe | None:
         return self.recipes.get(name)
@@ -77,6 +87,9 @@ class PrototypeKnowledge:
         if quality is None:
             return 1.0
         return 1.0 + quality.level * 0.3
+
+    def beacon(self, name: str) -> BeaconPrototype | None:
+        return self.beacons.get(name)
 
 
 def value_amount(value: Any, default: float = 1.0) -> float:
@@ -193,6 +206,21 @@ def normalize_quality(name: str, proto: dict[str, Any]) -> QualityPrototype:
     )
 
 
+def normalize_beacon(name: str, proto: dict[str, Any]) -> BeaconPrototype:
+    profile = [
+        float(item)
+        for item in proto.get("profile") or []
+        if isinstance(item, (int, float))
+    ]
+    return BeaconPrototype(
+        name=name,
+        supply_area_distance=value_amount(proto.get("supply_area_distance"), 0.0),
+        distribution_effectivity=value_amount(proto.get("distribution_effectivity"), 0.5),
+        profile=profile,
+        allowed_effects=[str(item) for item in proto.get("allowed_effects") or []],
+    )
+
+
 def load_data_raw(path: Path) -> PrototypeKnowledge:
     raw = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw, dict):
@@ -230,16 +258,24 @@ def load_data_raw(path: Path) -> PrototypeKnowledge:
         if isinstance(proto, dict)
     }
 
+    beacon_table = raw.get("beacon") or {}
+    beacons = {
+        name: normalize_beacon(name, proto)
+        for name, proto in beacon_table.items()
+        if isinstance(proto, dict)
+    }
+
     return PrototypeKnowledge(
         recipes=recipes,
         crafting_entities=crafting_entities,
         modules=modules,
         qualities=qualities,
+        beacons=beacons,
     )
 
 
 def empty_knowledge() -> PrototypeKnowledge:
-    return PrototypeKnowledge(recipes={}, crafting_entities={}, modules={}, qualities={})
+    return PrototypeKnowledge(recipes={}, crafting_entities={}, modules={}, qualities={}, beacons={})
 
 
 def render_recipe(recipe: Recipe) -> str:
@@ -263,10 +299,12 @@ def main(argv: list[str] | None = None) -> int:
         "crafting_entity_count": len(knowledge.crafting_entities),
         "module_count": len(knowledge.modules),
         "quality_count": len(knowledge.qualities),
+        "beacon_count": len(knowledge.beacons),
         "sample_recipes": [asdict(recipe) for recipe in list(knowledge.recipes.values())[:20]],
         "sample_crafting_entities": [asdict(entity) for entity in list(knowledge.crafting_entities.values())[:20]],
         "sample_modules": [asdict(module) for module in list(knowledge.modules.values())[:20]],
         "sample_qualities": [asdict(quality) for quality in list(knowledge.qualities.values())[:20]],
+        "sample_beacons": [asdict(beacon) for beacon in list(knowledge.beacons.values())[:20]],
     }
     if args.json_output:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
