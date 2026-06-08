@@ -150,6 +150,17 @@ cross-template beacon effects, or collision repairs yet; those must be separate
 passes so they can be validated instead of hidden in the first generated
 skeleton.
 
+When boundary connection is enabled for a single repeated-template node, the
+materializer performs a post-materialization column search. It tries the
+possible repeated-grid column counts, materializes each candidate, runs the real
+connector, flow, capacity, and machine I/O audits, then chooses by audit result
+before compactness. The selection prefers no collisions, proven output boundary
+capacity, no failed or unresolved belt flow, and a horizontal rectangle before
+falling back to area and entity count. This is intentionally later than the
+layout-plan estimate: a layout that looks compact can still be worse if its
+second full-belt lane depends on an unresolved underground belt, while a
+slightly taller multi-row rectangle can expose two proven surface output lanes.
+
 Connector routing reports each boundary as `connected`, `stub-only`, or
 `blocked`. A connected route found a compatible learned edge port and added a
 collision-free belt line. A stub-only route has no compatible learned port yet.
@@ -219,10 +230,11 @@ underground-belt `input` followed by a matching `output` can also pass; the
 route generator treats the tiles between that pair as hidden tunnel span instead
 of filling them with visible connector belts. Underground endpoints that do not
 form such an explicit input-to-output pair, underground belts without a
-preserved type, and splitters stay `unresolved` until a stronger parser can
-prove their semantics. This is still not a full belt simulation: it does not
-understand lane filters, splitter balancing, stacked belts, cross-segment
-underground-belt pairing, or inserter timing.
+preserved type, overlong pairs beyond the data.raw `max_distance`, and
+splitters stay `unresolved` until a stronger parser can prove their semantics.
+This is still not a full belt simulation: it does not understand lane filters,
+splitter balancing, stacked belts, cross-segment underground-belt pairing, or
+inserter timing.
 
 The machine I/O audit is the next conservative semantic pass. It imports
 entity selection boxes and inserter pickup/insert positions from the current

@@ -68,6 +68,7 @@ class BeltPrototype:
     name: str
     type: str
     speed: float
+    max_underground_distance: int | None = None
 
     @property
     def items_per_second(self) -> float:
@@ -270,6 +271,7 @@ def normalize_belt(name: str, entity_type: str, proto: dict[str, Any]) -> BeltPr
         name=name,
         type=entity_type,
         speed=float(speed),
+        max_underground_distance=int(proto["max_distance"]) if isinstance(proto.get("max_distance"), int) else None,
     )
 
 

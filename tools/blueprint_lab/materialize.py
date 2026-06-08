@@ -486,6 +486,14 @@ def add_boundary_connectors(
     def visible_route_positions(positions: list[RoutePosition]) -> list[RoutePosition]:
         visible: list[RoutePosition] = []
         index = 0
+        def underground_pair_within_distance(entity_name: str, input_x: float, output_x: float) -> bool:
+            if knowledge is None:
+                return True
+            belt = knowledge.belt(entity_name)
+            if belt is None or belt.max_underground_distance is None:
+                return True
+            return abs(output_x - input_x) <= belt.max_underground_distance + 1
+
         while index < len(positions):
             position = positions[index]
             x, belt_y, _reason, direction, belt_name = position
@@ -508,6 +516,8 @@ def add_boundary_connectors(
                     if pair_entity.get("type") != "output" or pair_entity.get("direction") != pair_direction:
                         continue
                     if canonical_transport_belt_name(str(pair_entity.get("name") or "")) != belt_name:
+                        continue
+                    if not underground_pair_within_distance(str(entity.get("name") or ""), float(x), float(pair_x)):
                         continue
                     index = pair_index
                     break
@@ -1228,6 +1238,15 @@ def add_boundary_connectors(
         last_index = len(positions) - 1
 
         def find_underground_output_pair(start_index: int, entity_name: str) -> int | None:
+            def within_distance(input_x: float, output_x: float) -> bool:
+                if knowledge is None:
+                    return True
+                belt = knowledge.belt(entity_name)
+                if belt is None or belt.max_underground_distance is None:
+                    return True
+                return abs(output_x - input_x) <= belt.max_underground_distance + 1
+
+            input_x, _input_y = positions[start_index]
             for pair_index in range(start_index + 1, len(positions)):
                 pair_x, pair_y = positions[pair_index]
                 pair_entity = occupied_entities.get((pair_x, pair_y))
@@ -1237,7 +1256,7 @@ def add_boundary_connectors(
                     continue
                 if pair_entity.get("direction") != DIR_EAST:
                     continue
-                if pair_entity.get("type") == "output":
+                if pair_entity.get("type") == "output" and within_distance(input_x, pair_x):
                     return pair_index
             return None
 
@@ -1618,6 +1637,114 @@ def materialize_layout(
     return wrapper
 
 
+def layout_with_single_node_columns(layout_plan: dict[str, Any], columns: int) -> dict[str, Any]:
+    layout = copy.deepcopy(layout_plan)
+    if len(layout.get("nodes") or []) != 1:
+        return layout
+    node = layout["nodes"][0]
+    instances = max(1, int(node.get("instances") or 1))
+    columns = max(1, min(columns, instances))
+    rows = max(1, math.ceil(instances / columns))
+    source_width = float(node.get("source_width") or 1.0)
+    source_height = float(node.get("source_height") or 1.0)
+    spacing = float(layout.get("spacing") or 0.0)
+    lane_width = float(layout.get("lane_width") or 0.0)
+    planned_width = columns * source_width + max(0, columns - 1) * spacing
+    planned_height = rows * source_height + max(0, rows - 1) * spacing
+    node["columns"] = columns
+    node["rows"] = rows
+    node["planned_width"] = round(planned_width, 3)
+    node["planned_height"] = round(planned_height, 3)
+    layout["estimated_width"] = round(planned_width + lane_width * 2, 3)
+    layout["estimated_height"] = round(planned_height + lane_width * 2, 3)
+    layout["estimated_area"] = round(layout["estimated_width"] * layout["estimated_height"], 3)
+    layout["layout_selection"] = {
+        "strategy": "forced-single-node-columns",
+        "columns": columns,
+        "rows": rows,
+    }
+    return layout
+
+
+def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
+    connector_summary = summary["connector_summary"]
+    flow_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("belt_flow_audit") or [])
+    capacity_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_capacity_audit") or [])
+    output_capacity = [
+        item
+        for item in connector_summary.get("boundary_capacity_audit") or []
+        if str(item.get("boundary") or "").startswith("output:")
+    ]
+    output_not_sufficient = sum(1 for item in output_capacity if item.get("status") != "sufficient")
+    bad_capacity = capacity_statuses.get("failed", 0) + capacity_statuses.get("insufficient", 0)
+    unresolved_capacity = capacity_statuses.get("unresolved", 0)
+    width = float(summary.get("width") or 0.0)
+    height = float(summary.get("height") or 0.0)
+    area = width * height
+    horizontal_penalty = max(0.0, height - width)
+    return (
+        float(len(connector_summary.get("collisions") or [])),
+        float(output_not_sufficient),
+        float(bad_capacity),
+        float(flow_statuses.get("failed", 0)),
+        float(unresolved_capacity),
+        float(flow_statuses.get("unresolved", 0)),
+        horizontal_penalty,
+        area,
+        float(connector_summary.get("connectors_added", 0)),
+        float(summary.get("entity_count") or 0),
+    )
+
+
+def select_best_materialized_layout(
+    layout_plan: dict[str, Any],
+    mappings: list[dict[str, Any]],
+    *,
+    label: str | None = None,
+    connect_boundaries: bool = False,
+    knowledge: PrototypeKnowledge | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    if not connect_boundaries or knowledge is None or len(layout_plan.get("nodes") or []) != 1:
+        wrapper, connector_summary = materialize_layout_with_summary(
+            layout_plan,
+            mappings,
+            label=label,
+            connect_boundaries=connect_boundaries,
+            knowledge=knowledge,
+        )
+        return wrapper, connector_summary, layout_plan
+
+    node = layout_plan["nodes"][0]
+    instances = max(1, int(node.get("instances") or 1))
+    max_columns = max(1, min(int(layout_plan.get("max_columns") or instances), instances))
+    best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
+    candidate_count = 0
+    for columns in range(1, max_columns + 1):
+        candidate_count += 1
+        candidate_layout = layout_with_single_node_columns(layout_plan, columns)
+        wrapper, connector_summary = materialize_layout_with_summary(
+            candidate_layout,
+            mappings,
+            label=label,
+            connect_boundaries=connect_boundaries,
+            knowledge=knowledge,
+        )
+        summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
+        score = materialized_layout_score(summary)
+        if best is None or score < best[0]:
+            best = (score, wrapper, connector_summary, candidate_layout)
+    assert best is not None
+    score, wrapper, connector_summary, selected_layout = best
+    selected_layout["layout_selection"] = {
+        "strategy": "post-materialize-column-search",
+        "candidate_count": candidate_count,
+        "selected_columns": selected_layout["nodes"][0]["columns"],
+        "selected_rows": selected_layout["nodes"][0]["rows"],
+        "score": list(score),
+    }
+    return wrapper, connector_summary, selected_layout
+
+
 def build_materialized_blueprint(
     mappings: list[dict[str, Any]],
     *,
@@ -1681,6 +1808,10 @@ def render_summary(
             "recipe": node.get("recipe"),
             "fingerprint": node.get("fingerprint"),
             "instances": node.get("instances"),
+            "columns": node.get("columns"),
+            "rows": node.get("rows"),
+            "planned_width": node.get("planned_width"),
+            "planned_height": node.get("planned_height"),
             "rate_basis": node.get("rate_basis"),
             "planned_net_output_per_minute": node.get("planned_net_output_per_minute"),
             "direct_module_effects": node.get("direct_module_effects") or [],
@@ -1708,6 +1839,7 @@ def render_summary(
         "boundary_inputs": layout["boundary_inputs"],
         "boundary_outputs": layout["boundary_outputs"],
         "layout_nodes": layout_nodes,
+        "layout_selection": layout.get("layout_selection"),
         "connector_summary": summary,
         "route_status_counts": dict(route_status_counts),
         "machine_io_audit": audit_machine_io(wrapper, knowledge),
@@ -1742,10 +1874,15 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
         f"- Layout estimate: {summary['layout_estimated_width']:g} x {summary['layout_estimated_height']:g}",
         f"- Density: {summary['density']:g}",
-        "",
-        "## Boundary Inputs",
-        "",
     ]
+    if summary.get("layout_selection"):
+        selection = summary["layout_selection"]
+        lines.append(
+            f"- Layout selection: {selection.get('strategy')} "
+            f"columns={selection.get('selected_columns', selection.get('columns'))} "
+            f"rows={selection.get('selected_rows', selection.get('rows'))}"
+        )
+    lines.extend(["", "## Boundary Inputs", ""])
     if summary["boundary_inputs"]:
         for item in summary["boundary_inputs"]:
             lines.append(f"- {item['item']}: {item['rate_per_minute']:g}/min side={item['side']} reason={item['reason']}")
@@ -1759,6 +1896,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         for node in summary["layout_nodes"]:
             lines.append(
                 f"- {node['item']} / {node['recipe']}: instances={node['instances']} "
+                f"grid={node.get('columns')}x{node.get('rows')} "
                 f"basis={node['rate_basis']} planned_net={node['planned_net_output_per_minute']:g}/min"
             )
             if node["rate_module_items"]:
@@ -1975,7 +2113,7 @@ def main(argv: list[str] | None = None) -> int:
         spacing=args.spacing,
         lane_width=args.lane_width,
     )
-    wrapper, connector_summary = materialize_layout_with_summary(
+    wrapper, connector_summary, layout = select_best_materialized_layout(
         layout,
         template_summary["mappings"],
         label=args.label,

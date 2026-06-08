@@ -20,7 +20,7 @@ from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe
+from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe, select_best_materialized_layout
 
 
 def main() -> int:
@@ -142,6 +142,9 @@ def main() -> int:
   "transport-belt": {
     "transport-belt": {"speed": 0.03125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]},
     "turbo-transport-belt": {"speed": 0.125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]}
+  },
+  "underground-belt": {
+    "turbo-underground-belt": {"speed": 0.125, "max_distance": 11, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]}
   }
 }
 """,
@@ -153,6 +156,9 @@ def main() -> int:
         return 1
     if knowledge.inserter("fast-inserter") is None or knowledge.entity_box("assembling-machine-3") is None:
         print(f"FAIL: expected data.raw fixture to import inserter endpoints and entity boxes: {knowledge}")
+        return 1
+    if knowledge.belt("turbo-underground-belt") is None or knowledge.belt("turbo-underground-belt").max_underground_distance != 11:
+        print(f"FAIL: expected data.raw fixture to import underground belt max_distance: {knowledge.belts}")
         return 1
     io_audit = audit_machine_io(
         {
@@ -815,6 +821,76 @@ def main() -> int:
         or unresolved_output["meets_required_rate"]
     ):
         print(f"FAIL: expected structural 2x capacity with one unresolved lane to stay unresolved, not sufficient: {capacity_unresolved_lane_summary}")
+        return 1
+    selection_layout = {
+        "target_item": "iron-ore",
+        "target_rate_per_minute": 7200,
+        "target_rate_basis": {"kind": "full-belt", "belt_name": "turbo-transport-belt", "belt_count": 2, "items_per_second_per_belt": 60},
+        "max_columns": 5,
+        "spacing": 2,
+        "lane_width": 4,
+        "estimated_width": 96,
+        "estimated_height": 23.5,
+        "boundary_inputs": [{"item": "metallic-asteroid-chunk", "rate_per_minute": 120, "side": "left", "reason": "boundary-input"}],
+        "boundary_outputs": [{"item": "iron-ore", "rate_per_minute": 7200, "side": "right"}],
+        "nodes": [
+            {
+                "item": "iron-ore",
+                "recipe": "fixture-crushing",
+                "fingerprint": "selection-template",
+                "instances": 5,
+                "source_width": 16,
+                "source_height": 15.5,
+                "source_entity_count": 3,
+                "source_tile_count": 0,
+                "columns": 5,
+                "rows": 1,
+                "planned_width": 88,
+                "planned_height": 15.5,
+                "planned_net_output_per_minute": 7875,
+                "x": 4,
+                "y": 4,
+                "ports": [
+                    {"side": "left", "role": "input", "entity_name": "turbo-transport-belt", "x": 0, "y": 1},
+                    {"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 15, "y": 1},
+                    {"side": "right", "role": "output", "entity_name": "turbo-underground-belt", "entity_type": "input", "x": 15, "y": 0},
+                ],
+                "port_counts": [("left:input", 1), ("right:output", 2)],
+                "source": "fixture",
+                "path": "/selection",
+            }
+        ],
+    }
+    selection_mappings = [
+        {
+            "fingerprint": "selection-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 0, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 15, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-underground-belt", "x": 15, "y": 0, "direction": DIR_EAST, "entity_type": "input", "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, selected_summary, selected_layout = select_best_materialized_layout(
+        selection_layout,
+        selection_mappings,
+        label="fixture-selected-layout",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    selected_flow_counts = Counter(item["status"] for item in selected_summary["belt_flow_audit"])
+    selected_capacity = {item["boundary"]: item for item in selected_summary["boundary_capacity_audit"]}
+    if (
+        selected_layout["nodes"][0]["columns"] != 3
+        or selected_layout["nodes"][0]["rows"] != 2
+        or selected_flow_counts != {"pass": 10}
+        or selected_capacity["output:iron-ore"]["status"] != "sufficient"
+        or selected_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 7200
+    ):
+        print(f"FAIL: expected post-materialize layout selection to prefer the tightest horizontal proven-flow grid over unresolved 5x1: {selected_layout} {selected_summary}")
         return 1
 
     semantic_fail_mappings = [
