@@ -118,6 +118,12 @@ belt routing, pipes, power, module item stacks, or collision repairs yet; those
 must be separate passes so they can be validated instead of hidden in the first
 generated skeleton.
 
+Connector routing reports each boundary as `connected`, `stub-only`, or
+`blocked`. A connected route found a compatible learned edge port and added a
+collision-free belt line. A stub-only route has no compatible learned port yet.
+A blocked route found a port but refused to add partial belts because an exact
+entity-position collision was detected.
+
 ## Commands
 
 Analyze a blueprint directory:

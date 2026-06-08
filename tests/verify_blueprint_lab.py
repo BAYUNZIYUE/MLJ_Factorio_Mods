@@ -328,8 +328,14 @@ def main() -> int:
         label="fixture-connected",
         connect_boundaries=True,
     )
-    if connector_summary != {"connectors_added": 27, "collisions": []}:
+    if connector_summary["connectors_added"] != 27 or connector_summary["collisions"]:
         print(f"FAIL: expected connector belts without collisions: {connector_summary}")
+        return 1
+    if [route["status"] for route in connector_summary["routes"]] != ["connected", "stub-only"]:
+        print(f"FAIL: expected input connected and output stub-only route states: {connector_summary}")
+        return 1
+    if connector_summary["routes"][0]["port"]["node_item"] != "iron-plate":
+        print(f"FAIL: expected input route to choose the plate template port: {connector_summary}")
         return 1
     if len(connected["blueprint"]["entities"]) != 44:
         print(f"FAIL: expected connected blueprint to add connector belts: {connected}")

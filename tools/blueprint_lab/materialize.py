@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any
+from collections import Counter
 
 from .analysis import blueprint_metrics, iter_blueprint_text_files
 from .codec import make_blueprint_wrapper, save_blueprint_file
@@ -73,35 +74,134 @@ def add_boundary_connectors(
 ) -> dict[str, Any]:
     connectors: list[dict[str, Any]] = []
     collisions: list[dict[str, Any]] = []
+    routes: list[dict[str, Any]] = []
     if not layout_plan.get("nodes"):
-        return {"connectors_added": 0, "collisions": collisions}
+        return {"connectors_added": 0, "collisions": collisions, "routes": routes}
 
     root = layout_plan["nodes"][0]
-    y = round(float(root["y"]) + float(root["source_height"]) / 2, 3)
-    left_start = 0
-    left_end = int(max(0, float(root["x"]) - 1))
-    right_start = int(float(root["x"]) + float(root["planned_width"]) + 1)
-    right_end = int(max(right_start - 1, float(layout_plan["estimated_width"]) - 1))
+    default_y = round(float(root["y"]) + float(root["source_height"]) / 2, 3)
 
-    planned_positions: list[tuple[float, float, str]] = []
+    def add_positions(positions: list[tuple[float, float, str]]) -> tuple[int, list[dict[str, Any]]]:
+        route_collisions: list[dict[str, Any]] = []
+        for x, belt_y, reason in positions:
+            key = (round(x, 3), round(belt_y, 3))
+            if key in occupied:
+                collision = {"x": key[0], "y": key[1], "reason": reason}
+                route_collisions.append(collision)
+        if route_collisions:
+            collisions.extend(route_collisions)
+            return 0, route_collisions
+
+        before = len(connectors)
+        for x, belt_y, reason in positions:
+            key = (round(x, 3), round(belt_y, 3))
+            belt = connector_belt(len(entities) + len(connectors) + 1, x, belt_y)
+            connectors.append(belt)
+            occupied.add(key)
+        return len(connectors) - before, route_collisions
+
+    def candidate_ports(side: str, roles: set[str]) -> list[dict[str, Any]]:
+        ports: list[dict[str, Any]] = []
+        for node in layout_plan.get("nodes") or []:
+            for port in node.get("ports") or []:
+                if port.get("side") != side or port.get("role") not in roles:
+                    continue
+                ports.append(
+                    {
+                        "node_item": node.get("item"),
+                        "node_recipe": node.get("recipe"),
+                        "side": port.get("side"),
+                        "role": port.get("role"),
+                        "entity_name": port.get("entity_name"),
+                        "x": round(float(node["x"]) + float(port.get("x") or 0), 3),
+                        "y": round(float(node["y"]) + float(port.get("y") or 0), 3),
+                    }
+                )
+        return ports
+
+    def nearest_port(ports: list[dict[str, Any]], y: float) -> dict[str, Any] | None:
+        if not ports:
+            return None
+        return min(ports, key=lambda port: (abs(float(port["y"]) - y), float(port["x"])))
+
     for boundary in layout_plan.get("boundary_inputs") or []:
-        for x in range(left_start, left_end + 1):
-            planned_positions.append((float(x), y, f"input:{boundary['item']}"))
-    for boundary in layout_plan.get("boundary_outputs") or []:
-        for x in range(right_start, right_end + 1):
-            planned_positions.append((float(x), y, f"output:{boundary['item']}"))
-
-    for x, belt_y, reason in planned_positions:
-        key = (round(x, 3), round(belt_y, 3))
-        if key in occupied:
-            collisions.append({"x": key[0], "y": key[1], "reason": reason})
+        port = nearest_port(
+            candidate_ports("left", {"input", "edge-bus", "boundary"}),
+            default_y,
+        )
+        if port is None:
+            left_end = int(max(0, float(root["x"]) - 1))
+            positions = [(float(x), default_y, f"input:{boundary['item']}") for x in range(0, left_end + 1)]
+            belts_added, route_collisions = add_positions(positions)
+            routes.append(
+                {
+                    "boundary": f"input:{boundary['item']}",
+                    "status": "stub-only" if not route_collisions else "blocked",
+                    "belts_added": belts_added,
+                    "collisions": route_collisions,
+                    "reason": "no-left-port",
+                }
+            )
             continue
-        belt = connector_belt(len(entities) + len(connectors) + 1, x, belt_y)
-        connectors.append(belt)
-        occupied.add(key)
+
+        positions = []
+        x = 0.5
+        while x < float(port["x"]):
+            positions.append((x, float(port["y"]), f"input:{boundary['item']}"))
+            x += 1.0
+        belts_added, route_collisions = add_positions(positions)
+        routes.append(
+            {
+                "boundary": f"input:{boundary['item']}",
+                "status": "connected" if not route_collisions else "blocked",
+                "belts_added": belts_added,
+                "collisions": route_collisions,
+                "port": port,
+            }
+        )
+
+    for boundary in layout_plan.get("boundary_outputs") or []:
+        port = nearest_port(
+            candidate_ports("right", {"output", "edge-bus", "boundary"}),
+            default_y,
+        )
+        if port is None:
+            right_start = int(float(root["x"]) + float(root["planned_width"]) + 1)
+            right_end = int(max(right_start - 1, float(layout_plan["estimated_width"]) - 1))
+            positions = [
+                (float(x), default_y, f"output:{boundary['item']}")
+                for x in range(right_start, right_end + 1)
+            ]
+            belts_added, route_collisions = add_positions(positions)
+            routes.append(
+                {
+                    "boundary": f"output:{boundary['item']}",
+                    "status": "stub-only" if not route_collisions else "blocked",
+                    "belts_added": belts_added,
+                    "collisions": route_collisions,
+                    "reason": "no-right-port",
+                }
+            )
+            continue
+
+        positions = []
+        x = float(port["x"]) + 1.0
+        while x <= float(layout_plan["estimated_width"]) - 0.5:
+            positions.append((x, float(port["y"]), f"output:{boundary['item']}"))
+            x += 1.0
+        belts_added, route_collisions = add_positions(positions)
+        routes.append(
+            {
+                "boundary": f"output:{boundary['item']}",
+                "status": "connected" if not route_collisions else "blocked",
+                "belts_added": belts_added,
+                "collisions": route_collisions,
+                "port": port,
+            }
+        )
 
     entities.extend(connectors)
-    return {"connectors_added": len(connectors), "collisions": collisions}
+    return {"connectors_added": len(connectors), "collisions": collisions, "routes": routes}
 
 
 def materialize_layout_with_summary(
@@ -148,7 +248,7 @@ def materialize_layout_with_summary(
                 tile_positions.add(key)
                 tiles.append(tile)
 
-    connector_result = {"connectors_added": 0, "collisions": []}
+    connector_result = {"connectors_added": 0, "collisions": [], "routes": []}
     if connect_boundaries:
         occupied = {entity_position_key(entity) for entity in entities}
         connector_result = add_boundary_connectors(entities, layout_plan, occupied=occupied)
@@ -218,6 +318,8 @@ def build_materialized_blueprint(
 def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     blueprint = wrapper["blueprint"]
     metrics = blueprint_metrics("/", blueprint)
+    summary = connector_summary or {"connectors_added": 0, "collisions": [], "routes": []}
+    route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
     return {
         "label": blueprint.get("label"),
         "target_item": layout["target_item"],
@@ -231,7 +333,8 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
         "layout_estimated_height": layout["estimated_height"],
         "boundary_inputs": layout["boundary_inputs"],
         "boundary_outputs": layout["boundary_outputs"],
-        "connector_summary": connector_summary or {"connectors_added": 0, "collisions": []},
+        "connector_summary": summary,
+        "route_status_counts": dict(route_status_counts),
         "lessons": [
             "Materialization copies learned local template geometry into the planned rectangle instead of inventing machines from scratch.",
             "Boundary connectors are generated only in reserved lanes and checked for exact entity-position collisions.",
@@ -251,6 +354,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Tiles: {summary['tile_count']}",
         f"- Connector belts: {summary['connector_summary']['connectors_added']}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
+        f"- Route status counts: {summary['route_status_counts']}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
         f"- Layout estimate: {summary['layout_estimated_width']:g} x {summary['layout_estimated_height']:g}",
         f"- Density: {summary['density']:g}",
@@ -266,6 +370,19 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
     lines.extend(["", "## Boundary Outputs", ""])
     for item in summary["boundary_outputs"]:
         lines.append(f"- {item['item']}: {item['rate_per_minute']:g}/min side={item['side']}")
+    if summary["connector_summary"]["routes"]:
+        lines.extend(["", "## Connector Routes", ""])
+        for item in summary["connector_summary"]["routes"]:
+            line = f"- {item['boundary']}: status={item['status']} belts={item['belts_added']}"
+            if item.get("port"):
+                port = item["port"]
+                line += (
+                    f" port={port['node_item']}/{port['role']}/{port['entity_name']}"
+                    f" at=({port['x']},{port['y']})"
+                )
+            if item.get("reason"):
+                line += f" reason={item['reason']}"
+            lines.append(line)
     if summary["connector_summary"]["collisions"]:
         lines.extend(["", "## Connector Collisions", ""])
         for item in summary["connector_summary"]["collisions"]:
