@@ -309,24 +309,30 @@ using `turbo-transport-belt`; the current `iron-ore` 2x turbo sample reports
 `exact` with lanes `[8.5, 36.0]`. The same sample now also detects that
 `metallic-asteroid-crushing` can return `metallic-asteroid-chunk` as a 0.2
 probability item byproduct. The materializer inserts two target-item filter
-splitters, keeps `iron-ore` on the main output routes, and sends byproduct chunks
-into non-boundary overflow lanes. Because that byproduct is also the recipe input,
-the materialization report now marks the recommended handling as
-`recycle-to-input-boundary`; the current generated geometry is still
-`finite-overflow-buffer`, not a proven recycle loop.
+splitters, keeps `iron-ore` on the main output routes, and recognizes that the
+byproduct chunk is also the recipe input. The current generated geometry routes
+those side outputs back to the left input boundary with U-shaped recycle-return
+belts when a collision-free lane is available; otherwise it falls back to a
+finite non-boundary overflow lane and reports that fallback explicitly.
 
-Left-only runtime probes against that generated blueprint import 656 entities,
-place them through the direct-placement fallback, insert
-`metallic-asteroid-chunk` only on left-edge transport lines, and restore splitter
+For the current `iron-ore` 2x turbo sample, both output separations are
+`recycle-return-to-input-boundary`. The report shows zero overflow belts, 106
+recycle-return belts, and per-route `recycle_flow=pass` audits over 80 and 26
+checked belt positions. This is a structural return-to-input-boundary route, not
+yet a proven internal merge back into the input bus.
+
+Left-only runtime probes against the earlier filtered-output generated blueprint
+imported 656 entities, placed them through the direct-placement fallback, inserted
+`metallic-asteroid-chunk` only on left-edge transport lines, and restored splitter
 filters/priorities with zero splitter-setting failures. After 1200 and 2400 ticks,
-the right-boundary cleanliness audit reports `clean`; the 2400-tick probe shows
-right-boundary samples containing only `iron-ore`, while byproduct chunks remain
-off-boundary with max x below the output boundary. This proves the current sample
-can feed crushers from the external input boundary, produce `iron-ore`, and keep
-the audited right output boundary free of the recipe byproduct for the tested
-runtime window. It still does not prove sustained full-belt throughput, physical
-byproduct recycling, long-run stability, or player `build_blueprint` success on a
-platform surface.
+that earlier filtered-output blueprint reported a clean right boundary containing
+only `iron-ore`. A fresh 1200/2400 tick probe against the newer 704-entity
+recycle-return geometry still imports and places every entity with zero splitter
+setting failures, but the right-boundary audit is currently `empty` rather than
+`clean` with product samples. This means the structural recycle-return route is
+not yet runtime-proven as a sustained output blueprint. It also still does not
+prove sustained full-belt throughput, internal byproduct merge, long-run
+stability, or player `build_blueprint` success on a platform surface.
 
 ## Commands
 

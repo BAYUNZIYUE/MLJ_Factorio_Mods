@@ -1059,7 +1059,8 @@ def main() -> int:
     byproduct_separation = byproduct_summary["output_separations"][0]
     if (
         byproduct_summary["output_separation_splitters"] != 1
-        or byproduct_summary["output_separation_overflow_belts"] <= 0
+        or byproduct_summary["output_separation_overflow_belts"] != 0
+        or byproduct_summary["output_separation_recycle_belts"] <= 0
         or len(byproduct_splitters) != 1
         or byproduct_splitters[0].get("filter", {}).get("name") != "iron-ore"
         or byproduct_splitters[0].get("output_priority") != "left"
@@ -1071,11 +1072,16 @@ def main() -> int:
         or byproduct_item["input_boundary_rate_per_minute"] != 180
         or byproduct_item["input_boundary_side"] != "left"
         or byproduct_separation["recommended_handling"] != "recycle-to-input-boundary"
-        or byproduct_separation["current_handling"] != "finite-overflow-buffer"
+        or byproduct_separation["current_handling"] != "recycle-return-to-input-boundary"
         or byproduct_separation["recyclable_byproducts"] != ["metallic-asteroid-chunk"]
+        or byproduct_separation["recycle_belts_added"] <= 0
+        or byproduct_separation["overflow_belts_added"] != 0
+        or byproduct_separation["recycle_exit"]["side"] != "left"
+        or byproduct_separation["recycle_flow_audit"]["status"] != "pass"
+        or byproduct_separation["recycle_flow_audit"]["positions_checked"] != byproduct_separation["recycle_belts_added"]
         or Counter(item["status"] for item in byproduct_summary["belt_flow_audit"]) != {"pass": 1}
     ):
-        print(f"FAIL: expected byproduct output route to expose recycle recommendation while using current overflow lane: {byproduct_summary} {byproduct_wrapper}")
+        print(f"FAIL: expected byproduct output route to build a recycle return route for byproduct-as-input: {byproduct_summary} {byproduct_wrapper}")
         return 1
     capacity_unresolved_lane_mappings = deepcopy(capacity_multi_lane_mappings)
     capacity_unresolved_lane_mappings[0]["layout"]["entities"][-1] = {

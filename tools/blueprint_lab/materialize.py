@@ -482,6 +482,7 @@ def add_boundary_connectors(
             "output_fanins_added": 0,
             "output_separation_splitters": 0,
             "output_separation_overflow_belts": 0,
+            "output_separation_recycle_belts": 0,
             "collisions": collisions,
             "routes": routes,
             "bridges": bridges,
@@ -601,6 +602,22 @@ def add_boundary_connectors(
             x += 1.0
         return positions
 
+    def directional_horizontal_positions(
+        start_x: float,
+        end_x: float,
+        y: float,
+        reason: str,
+        direction: int,
+        belt_name: str,
+    ) -> list[RoutePosition]:
+        positions: list[RoutePosition] = []
+        step = 1.0 if start_x <= end_x else -1.0
+        x = start_x
+        while (step > 0 and x <= end_x) or (step < 0 and x >= end_x):
+            positions.append((round(x, 3), round(y, 3), reason, direction, belt_name))
+            x += step
+        return positions
+
     def vertical_positions(x: float, start_y: float, end_y: float, reason: str, direction: int, belt_name: str) -> list[RoutePosition]:
         positions: list[RoutePosition] = []
         step = 1.0 if start_y <= end_y else -1.0
@@ -681,6 +698,81 @@ def add_boundary_connectors(
         last = blocked_attempts[-1]
         collisions.extend(last["collisions"])
         return 0, list(last["collisions"]), dict(last["port"]), str(last["route_kind"]), blocked_attempts, []
+
+    def add_positions_without_reuse(
+        positions: list[RoutePosition],
+        *,
+        record_collisions: bool = True,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        route_collisions: list[dict[str, Any]] = []
+        seen: set[tuple[float, float]] = set()
+        for x, belt_y, reason, _direction, _belt_name in positions:
+            key = (round(x, 3), round(belt_y, 3))
+            if key in seen:
+                route_collisions.append({"x": key[0], "y": key[1], "reason": f"{reason}:duplicate-route-position"})
+                continue
+            seen.add(key)
+            if key in occupied_entities:
+                route_collisions.append(
+                    {
+                        "x": key[0],
+                        "y": key[1],
+                        "reason": reason,
+                        "entity_name": str(occupied_entities[key].get("name") or ""),
+                    }
+                )
+        if route_collisions:
+            if record_collisions:
+                collisions.extend(route_collisions)
+            return 0, route_collisions
+
+        before = len(connectors)
+        for x, belt_y, _reason, direction, belt_name in positions:
+            key = (round(x, 3), round(belt_y, 3))
+            belt = connector_belt(
+                len(entities) + len(connectors) + 1,
+                x,
+                belt_y,
+                direction=direction,
+                name=belt_name,
+            )
+            connectors.append(belt)
+            occupied.add(key)
+            occupied_entities[key] = belt
+        return len(connectors) - before, route_collisions
+
+    def audit_exact_route_positions(segment_type: str, positions: list[RoutePosition]) -> dict[str, Any]:
+        failures: list[dict[str, Any]] = []
+        for x, belt_y, _reason, direction, belt_name in positions:
+            key = (round(x, 3), round(belt_y, 3))
+            entity = occupied_entities.get(key)
+            if entity is None:
+                failures.append({"x": key[0], "y": key[1], "reason": "missing-belt"})
+                continue
+            entity_name = str(entity.get("name") or "")
+            if not is_belt_like_entity_name(entity_name):
+                failures.append({"x": key[0], "y": key[1], "entity_name": entity_name, "reason": "non-belt-entity"})
+                continue
+            if canonical_transport_belt_name(entity_name) != belt_name:
+                failures.append({"x": key[0], "y": key[1], "entity_name": entity_name, "reason": "belt-tier-mismatch"})
+                continue
+            if entity.get("direction") != direction:
+                failures.append(
+                    {
+                        "x": key[0],
+                        "y": key[1],
+                        "entity_name": entity_name,
+                        "direction": entity.get("direction"),
+                        "expected_direction": direction,
+                        "reason": "wrong-flow-direction",
+                    }
+                )
+        return {
+            "segment_type": segment_type,
+            "status": "failed" if failures else "pass",
+            "positions_checked": len(positions),
+            "failures": failures,
+        }
 
     def ports_for_instance(node: dict[str, Any], instance: int, side: str, roles: set[str]) -> list[dict[str, Any]]:
         ports: list[dict[str, Any]] = []
@@ -1523,20 +1615,77 @@ def add_boundary_connectors(
             )
         return audits
 
-    def add_output_byproduct_separation(byproduct_audit: list[dict[str, Any]]) -> tuple[int, int, list[dict[str, Any]]]:
+    def add_output_byproduct_separation(byproduct_audit: list[dict[str, Any]]) -> tuple[int, int, int, list[dict[str, Any]]]:
         if not byproduct_audit:
-            return 0, 0, []
+            return 0, 0, 0, []
         target_items = {
             str(item.get("target_item") or "")
             for item in byproduct_audit
             if item.get("target_item")
         }
         if not target_items:
-            return 0, 0, []
+            return 0, 0, 0, []
         right_boundary_x = round(float(layout_plan["estimated_width"]) - 0.5, 3)
+        left_boundary_x = 0.5
+        min_y = 0.5
+        max_y = round(float(layout_plan["estimated_height"]) - 0.5, 3)
         splitters_added = 0
         overflow_belts_added = 0
+        recycle_belts_added = 0
         separations: list[dict[str, Any]] = []
+
+        def recyclable_input_sides(audits: list[dict[str, Any]]) -> list[str]:
+            sides = {
+                str(byproduct.get("input_boundary_side") or "")
+                for audit in audits
+                for byproduct in audit.get("byproducts") or []
+                if byproduct.get("same_recipe_input") and byproduct.get("input_boundary_side")
+            }
+            return sorted(side for side in sides if side)
+
+        def recycle_return_candidates(splitter_x: float, overflow_y: float, belt_name: str, boundary: str) -> list[list[RoutePosition]]:
+            turn_x = round(min(right_boundary_x, splitter_x + 2.0), 3)
+            if turn_x <= splitter_x:
+                return []
+            candidate_offsets = [2, 3, 4, 5, 6, 7, 8, -2, -3, -4, -5, -6, -7, -8]
+            candidates: list[list[RoutePosition]] = []
+            for offset in candidate_offsets:
+                recycle_y = round(overflow_y + offset, 3)
+                if recycle_y < min_y or recycle_y > max_y:
+                    continue
+                vertical_start = round(overflow_y + (1.0 if recycle_y > overflow_y else -1.0), 3)
+                vertical_direction = DIR_SOUTH if recycle_y > overflow_y else DIR_NORTH
+                positions: list[RoutePosition] = directional_horizontal_positions(
+                    round(splitter_x + 1.0, 3),
+                    turn_x,
+                    overflow_y,
+                    f"{boundary}:output-byproduct-recycle-return",
+                    DIR_EAST,
+                    belt_name,
+                )
+                positions.extend(
+                    vertical_positions(
+                        turn_x,
+                        vertical_start,
+                        recycle_y,
+                        f"{boundary}:output-byproduct-recycle-return",
+                        vertical_direction,
+                        belt_name,
+                    )
+                )
+                positions.extend(
+                    directional_horizontal_positions(
+                        round(turn_x - 1.0, 3),
+                        left_boundary_x,
+                        recycle_y,
+                        f"{boundary}:output-byproduct-recycle-return",
+                        DIR_WEST,
+                        belt_name,
+                    )
+                )
+                candidates.append(positions)
+            return candidates
+
         for route in routes:
             if route.get("status") != "connected":
                 continue
@@ -1556,6 +1705,7 @@ def add_boundary_connectors(
                 if matching_audits
                 else "separate-or-export"
             )
+            input_sides = recyclable_input_sides(matching_audits)
             recyclable_byproducts = sorted(
                 {
                     str(byproduct)
@@ -1648,18 +1798,42 @@ def add_boundary_connectors(
             occupied_entities[splitter_key] = splitter
             splitters_added += 1
 
-            overflow_positions = [
-                (
-                    round(splitter_x + offset, 3),
-                    round(route_y + 1.0, 3),
-                    f"{boundary}:output-byproduct-overflow",
-                    DIR_EAST,
-                    belt_name,
-                )
-                for offset in range(1, overflow_length + 1)
-            ]
-            belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(overflow_positions)
-            overflow_belts_added += belts_added
+            overflow_y = round(route_y + 1.0, 3)
+            route_collisions: list[dict[str, Any]] = []
+            existing_belts_used = 0
+            belts_added = 0
+            current_handling = "finite-overflow-buffer"
+            recycle_exit: dict[str, Any] | None = None
+            recycle_flow_audit: dict[str, Any] | None = None
+            if recommended_handling == "recycle-to-input-boundary" and "left" in input_sides:
+                blocked_recycle_attempts = []
+                for recycle_positions in recycle_return_candidates(splitter_x, overflow_y, belt_name, boundary):
+                    candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
+                    if not candidate_collisions:
+                        belts_added = candidate_belts_added
+                        recycle_belts_added += candidate_belts_added
+                        current_handling = "recycle-return-to-input-boundary"
+                        last = recycle_positions[-1] if recycle_positions else (left_boundary_x, overflow_y, "", DIR_WEST, belt_name)
+                        recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "left"}
+                        recycle_flow_audit = audit_exact_route_positions("output-byproduct-recycle-return", recycle_positions)
+                        break
+                    blocked_recycle_attempts.append({"collisions": candidate_collisions})
+                if current_handling != "recycle-return-to-input-boundary":
+                    route_collisions = blocked_recycle_attempts[-1]["collisions"] if blocked_recycle_attempts else []
+
+            if current_handling == "finite-overflow-buffer":
+                overflow_positions = [
+                    (
+                        round(splitter_x + offset, 3),
+                        overflow_y,
+                        f"{boundary}:output-byproduct-overflow",
+                        DIR_EAST,
+                        belt_name,
+                    )
+                    for offset in range(1, overflow_length + 1)
+                ]
+                belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(overflow_positions)
+                overflow_belts_added += belts_added
             separations.append(
                 {
                     "boundary": boundary,
@@ -1669,19 +1843,29 @@ def add_boundary_connectors(
                     "splitter_x": splitter_x,
                     "splitter_y": splitter_y,
                     "recommended_handling": recommended_handling,
-                    "current_handling": "finite-overflow-buffer",
+                    "current_handling": current_handling,
                     "recyclable_byproducts": recyclable_byproducts,
-                    "overflow_y": round(route_y + 1.0, 3),
-                    "overflow_belts_added": belts_added,
+                    "overflow_y": overflow_y,
+                    "overflow_belts_added": belts_added if current_handling == "finite-overflow-buffer" else 0,
+                    "recycle_belts_added": belts_added if current_handling == "recycle-return-to-input-boundary" else 0,
+                    "recycle_exit": recycle_exit,
+                    "recycle_flow_audit": recycle_flow_audit,
                     "existing_belts_used": existing_belts_used,
                     "collisions": route_collisions,
-                    "route_kind": "output-byproduct-filter-splitter-overflow",
+                    "route_kind": "output-byproduct-filter-splitter-recycle-return"
+                    if current_handling == "recycle-return-to-input-boundary"
+                    else "output-byproduct-filter-splitter-overflow",
                 }
             )
-        return splitters_added, overflow_belts_added, separations
+        return splitters_added, overflow_belts_added, recycle_belts_added, separations
 
     pending_byproduct_audit = build_output_byproduct_audit()
-    output_separation_splitters, output_separation_overflow_belts, output_separations = add_output_byproduct_separation(pending_byproduct_audit)
+    (
+        output_separation_splitters,
+        output_separation_overflow_belts,
+        output_separation_recycle_belts,
+        output_separations,
+    ) = add_output_byproduct_separation(pending_byproduct_audit)
 
     def route_boundary_rate(route: dict[str, Any]) -> float | None:
         return boundary_required_rate(str(route.get("boundary") or ""))
@@ -2281,6 +2465,7 @@ def add_boundary_connectors(
         "output_fanins_added": output_fanins_added,
         "output_separation_splitters": output_separation_splitters,
         "output_separation_overflow_belts": output_separation_overflow_belts,
+        "output_separation_recycle_belts": output_separation_recycle_belts,
         "collisions": collisions,
         "routes": routes,
         "bridges": bridges,
@@ -2382,6 +2567,7 @@ def materialize_layout_with_summary(
         "output_fanins_added": 0,
         "output_separation_splitters": 0,
         "output_separation_overflow_belts": 0,
+        "output_separation_recycle_belts": 0,
         "collisions": [],
         "routes": [],
         "bridges": [],
@@ -2608,6 +2794,7 @@ def render_summary(
         "output_fanins_added": 0,
         "output_separation_splitters": 0,
         "output_separation_overflow_belts": 0,
+        "output_separation_recycle_belts": 0,
         "collisions": [],
         "routes": [],
         "bridges": [],
@@ -2688,6 +2875,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Output fan-in belts: {summary['connector_summary'].get('output_fanins_added', 0)}",
         f"- Output separation splitters: {summary['connector_summary'].get('output_separation_splitters', 0)}",
         f"- Output separation overflow belts: {summary['connector_summary'].get('output_separation_overflow_belts', 0)}",
+        f"- Output separation recycle belts: {summary['connector_summary'].get('output_separation_recycle_belts', 0)}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Belt flow status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('belt_flow_audit') or []))}",
@@ -2859,6 +3047,9 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             )
             if item.get("recyclable_byproducts"):
                 line += f" recyclable={','.join(item['recyclable_byproducts'])}"
+            if item.get("recycle_flow_audit"):
+                audit = item["recycle_flow_audit"]
+                line += f" recycle_flow={audit.get('status')} recycle_positions={audit.get('positions_checked')}"
             if item.get("existing_belts_used"):
                 line += f" existing_belts={item['existing_belts_used']}"
             if item.get("reason"):
