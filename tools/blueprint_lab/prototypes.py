@@ -84,6 +84,7 @@ class EntityBox:
     name: str
     type: str
     selection_box: tuple[tuple[float, float], tuple[float, float]]
+    collision_box: tuple[tuple[float, float], tuple[float, float]] | None = None
 
 
 @dataclass(frozen=True)
@@ -287,10 +288,11 @@ def normalize_box(value: Any) -> tuple[tuple[float, float], tuple[float, float]]
 
 
 def normalize_entity_box(name: str, entity_type: str, proto: dict[str, Any]) -> EntityBox | None:
-    box = normalize_box(proto.get("selection_box") or proto.get("collision_box"))
-    if box is None:
+    selection_box = normalize_box(proto.get("selection_box"))
+    collision_box = normalize_box(proto.get("collision_box"))
+    if selection_box is None and collision_box is None:
         return None
-    return EntityBox(name=name, type=entity_type, selection_box=box)
+    return EntityBox(name=name, type=entity_type, selection_box=selection_box or collision_box, collision_box=collision_box)
 
 
 def normalize_position(value: Any) -> tuple[float, float] | None:

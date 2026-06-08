@@ -112,7 +112,13 @@ def entity_position(entity: dict[str, Any]) -> tuple[float, float]:
     return (float(entity.get("x", 0.0)), float(entity.get("y", 0.0)))
 
 
-def point_in_entity_box(point: tuple[float, float], entity: dict[str, Any], knowledge: PrototypeKnowledge) -> bool:
+def point_in_entity_box(
+    point: tuple[float, float],
+    entity: dict[str, Any],
+    knowledge: PrototypeKnowledge,
+    *,
+    reject_corner_touch: bool = False,
+) -> bool:
     box = knowledge.entity_box(str(entity.get("name") or ""))
     if box is None:
         return False
@@ -120,10 +126,23 @@ def point_in_entity_box(point: tuple[float, float], entity: dict[str, Any], know
     (min_x, min_y), (max_x, max_y) = box.selection_box
     point_x, point_y = point
     tolerance = 0.05
-    return (
+    if not (
         entity_x + min_x - tolerance <= point_x <= entity_x + max_x + tolerance
         and entity_y + min_y - tolerance <= point_y <= entity_y + max_y + tolerance
-    )
+    ):
+        return False
+    if reject_corner_touch:
+        on_vertical_edge = (
+            abs(point_x - (entity_x + min_x)) <= tolerance
+            or abs(point_x - (entity_x + max_x)) <= tolerance
+        )
+        on_horizontal_edge = (
+            abs(point_y - (entity_y + min_y)) <= tolerance
+            or abs(point_y - (entity_y + max_y)) <= tolerance
+        )
+        if on_vertical_edge and on_horizontal_edge:
+            return False
+    return True
 
 
 def endpoint_targets(
@@ -143,7 +162,7 @@ def endpoint_targets(
             role = "machine"
         elif is_belt_like_entity_name(name):
             role = "belt"
-        if role is None or not point_in_entity_box(point, entity, knowledge):
+        if role is None or not point_in_entity_box(point, entity, knowledge, reject_corner_touch=role == "machine"):
             continue
         targets.append(
             {
@@ -450,6 +469,89 @@ def prune_template_entities_for_recipe(
     return pruned
 
 
+def upgraded_output_inserter_name(name: str, knowledge: PrototypeKnowledge) -> str | None:
+    current = knowledge.inserter(name)
+    if current is None:
+        return None
+    if name in {"bulk-inserter", "stack-inserter"}:
+        return None
+    for candidate_name in ("stack-inserter", "bulk-inserter"):
+        candidate = knowledge.inserter(candidate_name)
+        if candidate is None:
+            continue
+        if candidate.pickup_position == current.pickup_position and candidate.insert_position == current.insert_position:
+            return candidate_name
+    return None
+
+
+def upgrade_output_inserters_for_recipe(
+    template_entities: list[dict[str, Any]],
+    *,
+    target_recipe: str | None,
+    knowledge: PrototypeKnowledge | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if knowledge is None or not target_recipe:
+        return template_entities, []
+    local_entities = [dict(entity, entity_number=index + 1) for index, entity in enumerate(template_entities)]
+    target_machine_numbers = {
+        int(entity["entity_number"])
+        for entity in local_entities
+        if entity.get("recipe") == target_recipe and knowledge.entity(str(entity.get("name") or "")) is not None
+    }
+    if not target_machine_numbers:
+        return template_entities, []
+
+    upgrade_by_number: dict[int, str] = {}
+    for entity in local_entities:
+        name = str(entity.get("name") or "")
+        inserter = knowledge.inserter(name)
+        if inserter is None:
+            continue
+        number = int(entity["entity_number"])
+        origin_x, origin_y = entity_position(entity)
+        pickup_dx, pickup_dy = rotate_vector(inserter.pickup_position, entity.get("direction"))
+        insert_dx, insert_dy = rotate_vector(inserter.insert_position, entity.get("direction"))
+        pickup_targets = endpoint_targets(
+            (round(origin_x + pickup_dx, 3), round(origin_y + pickup_dy, 3)),
+            local_entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        insert_targets = endpoint_targets(
+            (round(origin_x + insert_dx, 3), round(origin_y + insert_dy, 3)),
+            local_entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        pickup_target_machine = any(target["role"] == "machine" and target["entity_number"] in target_machine_numbers for target in pickup_targets)
+        insert_belt = any(target["role"] == "belt" for target in insert_targets)
+        if not (pickup_target_machine and insert_belt):
+            continue
+        upgraded_name = upgraded_output_inserter_name(name, knowledge)
+        if upgraded_name is not None:
+            upgrade_by_number[number] = upgraded_name
+
+    if not upgrade_by_number:
+        return template_entities, []
+
+    upgraded_entities: list[dict[str, Any]] = []
+    upgrade_counts: Counter[tuple[str, str]] = Counter()
+    for entity in local_entities:
+        number = int(entity["entity_number"])
+        clean_entity = {key: value for key, value in entity.items() if key != "entity_number"}
+        upgraded_name = upgrade_by_number.get(number)
+        if upgraded_name is not None:
+            old_name = str(clean_entity.get("name") or "")
+            clean_entity["name"] = upgraded_name
+            upgrade_counts[(old_name, upgraded_name)] += 1
+        upgraded_entities.append(clean_entity)
+
+    return upgraded_entities, [
+        {"from": source, "to": target, "template_count": count}
+        for (source, target), count in sorted(upgrade_counts.items())
+    ]
+
+
 def materialized_tile(raw: dict[str, Any], *, x: float, y: float) -> dict[str, Any]:
     return {
         "name": raw["name"],
@@ -493,8 +595,10 @@ def add_boundary_connectors(
             "boundary_coverage": [],
             "boundary_capacity_audit": [],
             "boundary_contract_audit": [],
+            "output_lane_load_audit": [],
             "output_byproduct_audit": [],
             "belt_flow_audit": [],
+            "output_inserter_upgrades": [],
         }
 
     root = layout_plan["nodes"][0]
@@ -2577,10 +2681,68 @@ def add_boundary_connectors(
         coverage.extend(item for item in uncovered if item["boundary"] not in covered_boundaries)
         return coverage
 
+    def output_lane_load_audit() -> list[dict[str, Any]]:
+        if knowledge is None:
+            return []
+        node_index = {
+            str(node.get("fingerprint")): node
+            for node in layout_plan.get("nodes") or []
+            if node.get("fingerprint") is not None
+        }
+        audits: list[dict[str, Any]] = []
+        for route in routes:
+            if route.get("status") != "connected" or not route.get("port"):
+                continue
+            boundary = str(route.get("boundary") or "")
+            if not boundary.startswith("output:"):
+                continue
+            port = route["port"]
+            fingerprint = str(port.get("node_fingerprint") or "")
+            node = node_index.get(fingerprint)
+            if node is None:
+                continue
+            belt_name = connector_belt_name_for_port(port)
+            belt = knowledge.belt(belt_name)
+            if belt is None:
+                continue
+            instances = max(1, int(node.get("instances") or 1))
+            planned_net = float(node.get("planned_net_output_per_minute") or 0.0)
+            per_instance = planned_net / instances if instances else 0.0
+            start_instance = int(port.get("node_instance") or 0)
+            route_y = round(float(port.get("y") or 0.0), 3)
+            covered_instances = reachable_instances(
+                start_instance,
+                bridge_edges_for_node(fingerprint, route_y),
+                direction="reverse",
+            )
+            load_rate = per_instance * len(covered_instances)
+            capacity = float(belt.items_per_minute)
+            audits.append(
+                {
+                    "boundary": boundary,
+                    "status": "overloaded" if load_rate > capacity else "sufficient",
+                    "node_item": node.get("item"),
+                    "node_recipe": node.get("recipe"),
+                    "node_fingerprint": fingerprint,
+                    "route_y": route_y,
+                    "route_kind": route.get("route_kind"),
+                    "start_instance": start_instance,
+                    "covered_instances": covered_instances,
+                    "covered_instance_count": len(covered_instances),
+                    "per_instance_net_output_per_minute": per_instance,
+                    "load_rate_per_minute": load_rate,
+                    "belt_name": belt_name,
+                    "lane_capacity_per_minute": capacity,
+                    "overload_per_minute": max(0.0, load_rate - capacity),
+                }
+            )
+        return audits
+
     coverage = boundary_coverage()
     flow_audit = belt_flow_audit()
     capacity_audit = boundary_capacity_audit(flow_audit)
     contract_audit = boundary_contract_audit()
+    lane_load_audit = output_lane_load_audit()
     byproduct_audit = output_byproduct_audit()
     entities.extend(connectors)
     return {
@@ -2601,6 +2763,7 @@ def add_boundary_connectors(
         "boundary_coverage": coverage,
         "boundary_capacity_audit": capacity_audit,
         "boundary_contract_audit": contract_audit,
+        "output_lane_load_audit": lane_load_audit,
         "output_byproduct_audit": byproduct_audit,
         "belt_flow_audit": flow_audit,
     }
@@ -2619,6 +2782,7 @@ def materialize_layout_with_summary(
     entities: list[dict[str, Any]] = []
     tiles: list[dict[str, Any]] = []
     tile_positions: set[tuple[str, float, float]] = set()
+    output_inserter_upgrades: list[dict[str, Any]] = []
     for node in working_layout["nodes"]:
         mapping = mapping_index.get(str(node["fingerprint"])) or {}
         layout = mapping.get("layout") or {}
@@ -2629,6 +2793,24 @@ def materialize_layout_with_summary(
             knowledge=knowledge,
             layout_ports=layout.get("ports") or [],
         )
+        template_entities, node_upgrades = upgrade_output_inserters_for_recipe(
+            template_entities,
+            target_recipe=str(node.get("recipe") or ""),
+            knowledge=knowledge,
+        )
+        for upgrade in node_upgrades:
+            output_inserter_upgrades.append(
+                {
+                    "node_item": node.get("item"),
+                    "node_recipe": node.get("recipe"),
+                    "node_fingerprint": node.get("fingerprint"),
+                    "from": upgrade["from"],
+                    "to": upgrade["to"],
+                    "template_count": upgrade["template_count"],
+                    "instances": node.get("instances"),
+                    "materialized_count": int(upgrade["template_count"]) * int(node.get("instances") or 1),
+                }
+            )
         machine_ports = machine_io_port_hints(
             template_entities,
             target_recipe=str(node.get("recipe") or ""),
@@ -2704,8 +2886,10 @@ def materialize_layout_with_summary(
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
+        "output_lane_load_audit": [],
         "output_byproduct_audit": [],
         "belt_flow_audit": [],
+        "output_inserter_upgrades": output_inserter_upgrades,
     }
     if connect_boundaries:
         occupied_entities = {entity_position_key(entity): entity for entity in entities}
@@ -2717,6 +2901,7 @@ def materialize_layout_with_summary(
             occupied_entities=occupied_entities,
             knowledge=knowledge,
         )
+        connector_result["output_inserter_upgrades"] = output_inserter_upgrades
 
     target_item = str(working_layout["target_item"])
     wrapper = make_blueprint_wrapper(
@@ -2932,8 +3117,10 @@ def render_summary(
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
+        "output_lane_load_audit": [],
         "output_byproduct_audit": [],
         "belt_flow_audit": [],
+        "output_inserter_upgrades": [],
     }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
     layout_nodes = [
@@ -3005,11 +3192,13 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Output separation overflow belts: {summary['connector_summary'].get('output_separation_overflow_belts', 0)}",
         f"- Output separation recycle belts: {summary['connector_summary'].get('output_separation_recycle_belts', 0)}",
         f"- Output separation merge belts: {summary['connector_summary'].get('output_separation_merge_belts', 0)}",
+        f"- Output inserter upgrades: {sum(int(item.get('materialized_count') or 0) for item in summary['connector_summary'].get('output_inserter_upgrades') or [])}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Belt flow status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('belt_flow_audit') or []))}",
         f"- Boundary capacity status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('boundary_capacity_audit') or []))}",
         f"- Boundary contract status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('boundary_contract_audit') or []))}",
+        f"- Output lane load status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('output_lane_load_audit') or []))}",
         f"- Machine I/O status counts: {dict(Counter(item.get('status', 'unknown') for item in summary.get('machine_io_audit') or []))}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
         f"- Layout estimate: {summary['layout_estimated_width']:g} x {summary['layout_estimated_height']:g}",
@@ -3152,6 +3341,15 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"expected={item.get('expected_belt_count')}x {item.get('expected_belt_name')} "
                 f"routes={item.get('route_count')} lanes={item.get('route_ys')}"
             )
+    if summary["connector_summary"].get("output_lane_load_audit"):
+        lines.extend(["", "## Output Lane Load Audit", ""])
+        for item in summary["connector_summary"]["output_lane_load_audit"]:
+            lines.append(
+                f"- {item.get('boundary')} y={item.get('route_y')}: status={item.get('status')} "
+                f"instances={item.get('covered_instances')} load={item.get('load_rate_per_minute', 0):g}/min "
+                f"capacity={item.get('lane_capacity_per_minute', 0):g}/min "
+                f"overload={item.get('overload_per_minute', 0):g}/min"
+            )
     if summary["connector_summary"].get("output_byproduct_audit"):
         lines.extend(["", "## Output Byproduct Audit", ""])
         for item in summary["connector_summary"]["output_byproduct_audit"]:
@@ -3208,6 +3406,14 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             if item.get("unresolved"):
                 line += f" unresolved={len(item['unresolved'])}"
             lines.append(line)
+    if summary["connector_summary"].get("output_inserter_upgrades"):
+        lines.extend(["", "## Output Inserter Upgrades", ""])
+        for item in summary["connector_summary"]["output_inserter_upgrades"]:
+            lines.append(
+                f"- {item.get('node_recipe')}: {item.get('from')} -> {item.get('to')} "
+                f"template_count={item.get('template_count')} instances={item.get('instances')} "
+                f"materialized={item.get('materialized_count')}"
+            )
     if summary.get("machine_io_audit"):
         lines.extend(["", "## Machine I/O Audit", ""])
         for item in summary["machine_io_audit"]:

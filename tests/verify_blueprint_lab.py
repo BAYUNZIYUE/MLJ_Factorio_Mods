@@ -217,6 +217,16 @@ def main() -> int:
       "pickup_position": [0, -1],
       "insert_position": [0, 1],
       "selection_box": [[-0.4, -0.4], [0.4, 0.4]]
+    },
+    "bulk-inserter": {
+      "pickup_position": [0, -1],
+      "insert_position": [0, 1],
+      "selection_box": [[-0.4, -0.4], [0.4, 0.4]]
+    },
+    "stack-inserter": {
+      "pickup_position": [0, -1],
+      "insert_position": [0, 1],
+      "selection_box": [[-0.4, -0.4], [0.4, 0.4]]
     }
   },
   "module": {
@@ -403,13 +413,19 @@ def main() -> int:
             },
         }
     ]
-    _, output_port_summary = materialize_layout_with_summary(
+    output_port_wrapper, output_port_summary = materialize_layout_with_summary(
         output_port_layout,
         output_port_mappings,
         label="fixture-output-port",
         connect_boundaries=True,
         knowledge=knowledge,
     )
+    if Counter(entity["name"] for entity in output_port_wrapper["blueprint"]["entities"])["stack-inserter"] != 1:
+        print(f"FAIL: expected materializer to upgrade target output inserter to stack-inserter: {output_port_wrapper}")
+        return 1
+    if output_port_summary.get("output_inserter_upgrades", [{}])[0].get("materialized_count") != 1:
+        print(f"FAIL: expected output inserter upgrade summary: {output_port_summary}")
+        return 1
     output_routes = output_port_summary["routes"]
     if (
         len(output_routes) != 1
@@ -990,6 +1006,10 @@ def main() -> int:
         return 1
     if capacity_audit["input:metallic-asteroid-chunk"]["status"] != "sufficient":
         print(f"FAIL: expected input boundary capacity audit to pass when one turbo belt covers the input rate: {capacity_limited_summary}")
+        return 1
+    lane_load_audit = capacity_limited_summary["output_lane_load_audit"]
+    if len(lane_load_audit) != 1 or lane_load_audit[0]["status"] != "overloaded" or lane_load_audit[0]["load_rate_per_minute"] != 7200:
+        print(f"FAIL: expected output lane load audit to flag one overloaded turbo output lane: {capacity_limited_summary}")
         return 1
     capacity_multi_lane_layout = deepcopy(capacity_limited_layout)
     capacity_multi_lane_layout["nodes"][0]["source_height"] = 4

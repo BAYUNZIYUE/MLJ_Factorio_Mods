@@ -21,6 +21,8 @@ tree.
 - Connect same-row copied input ports with a conservative fanout pass that can reuse existing same-tier belt, underground-belt, and splitter entities as bus evidence instead of overwriting them.
 - Audit connected boundary belt capacity against data.raw belt speed, so generated reports can catch cases where machine coverage is high enough but the final boundary has too few belt lanes.
 - Audit production-machine inserter endpoints against data.raw entity boxes, so generated reports can distinguish target machines with belt-fed input/output from copied but disconnected machines.
+- Upgrade target recipe machine-to-belt output inserters to the strongest same-geometry inserter known in data.raw, preferring `stack-inserter` over `bulk-inserter` when both are available.
+- Audit per-output-lane planned load after fan-in reachability, so reports can catch cases where total boundary capacity is sufficient but one lane is overloaded while another lane is underused.
 - Audit target recipes for item byproducts that are not the requested output, including whether a byproduct is also a same-recipe input that should be recycled to the input boundary.
 - Insert target-item filter splitters on output routes when a target recipe has item byproducts; the current separator keeps the target item on the main output route and sends byproducts into a non-boundary overflow lane while reporting whether that overflow is only a temporary stand-in for recycling.
 - Import a generated blueprint through a real Factorio runtime scenario and attempt to build it on the matching surface type. Space platform blueprints are validated on a temporary space platform with foundation tiles pre-placed before entity building is attempted; if `build_blueprint` returns zero entities, the validator can fall back to direct `surface.create_entity` placement to prove the entity names, qualities, recipe qualities, underground-belt endpoint types, module item stacks, and occupied positions are accepted by the current game runtime.
@@ -245,12 +247,34 @@ entity selection boxes and inserter pickup/insert positions from the current
 data.raw export, rotates inserter endpoint vectors by blueprint direction, and
 checks whether each recipe machine has at least one belt-to-machine input
 inserter and one machine-to-belt output inserter when the recipe has item inputs
-and products. This is weaker than a Factorio simulation: it does not prove
-inserter throughput, stack size, filters, lane choice, item identity, or whether
-unrelated recipe machines copied from the learned cell should remain in the
-generated target box. It is still useful because it exposes when a learned
-template copies extra recipe machines that are not attached to the selected
-target bus.
+and products. For machine endpoint matching it rejects corner-only contact,
+because the current Space Age crusher template had a copied inserter whose
+endpoint touched the target machine's selection-box corner but was not a real
+runtime pickup from that machine. This is weaker than a Factorio simulation: it
+does not prove inserter throughput, stack size, filters, lane choice, item
+identity, or whether unrelated recipe machines copied from the learned cell
+should remain in the generated target box. It is still useful because it
+exposes when a learned template copies extra recipe machines that are not
+attached to the selected target bus.
+
+When data.raw contains stronger inserters with the same pickup and insert
+geometry, the materializer upgrades target recipe output inserters after pruning
+the learned template. The current policy skips inserters that are already
+`bulk-inserter` or `stack-inserter`, then prefers `stack-inserter` and falls
+back to `bulk-inserter`. This pass intentionally upgrades only inserters that
+pick up from the selected recipe machine and drop to a belt, so input inserters
+and unrelated copied machinery are not changed.
+
+Output lane load audit is separate from total boundary capacity. It walks the
+same output fan-in graph used by boundary coverage, computes how many copied
+instances feed each connected output lane, and compares the planned per-lane
+rate with that lane's data.raw belt capacity. In the current `iron-ore 2x
+turbo-transport-belt` sample, total output boundary capacity is exactly two
+turbo lanes, but the lane load audit reports `y=8.5` as overloaded:
+instances `[0, 1, 2, 3]` produce a planned `6300/min` into a `3600/min` lane,
+while `y=36.0` carries only instance `[4]` at `1575/min`. This explains why
+future layout optimization must balance copied modules across output lanes
+instead of only counting the final number of boundary belts.
 
 Runtime validation now adds an output-unloading bottleneck audit. It inspects
 recipe-machine output inventories, output inserters that pick up from those
@@ -259,10 +283,12 @@ inserters drop items. This closes the gap between the offline Machine I/O audit
 and real throughput: the offline audit can say "there is an output inserter",
 while the runtime marker can show whether that inserter actually keeps up. In
 the current `iron-ore 2x turbo-transport-belt` recycle-merge sample, the runtime
-marker reports five effective output inserters and
-`machine_output_items=iron-ore:177`. That explains the low throughput-window
-result: the current generated box is output-unloading limited before it is
-right-boundary-belt limited.
+marker reports five effective output inserters. After the output inserter
+upgrade pass those effective inserters are `stack-inserter`, but the final
+2400-tick probe still reports `machine_output_items=iron-ore:250` and four of
+five crushers at `full_output`. That explains the low throughput-window result:
+the current generated box is still output-unloading and lane-distribution
+limited before it is right-boundary-belt limited.
 
 The runtime validation command is a heavier final gate, not part of the normal
 unit regression guard. It writes a temporary scenario under the Factorio user
@@ -371,10 +397,13 @@ sink: removing items from the right boundary prevents output backup during the
 probe, so the result is evidence for delivered product rate under a test sink,
 not a complete proof of natural steady-state full-belt throughput.
 In the current `iron-ore 2x turbo-transport-belt` recycle-merge sample, the
-300-tick throughput windows after startup report about `444-456/min` delivered
-`iron-ore`, while the requested contract is `7200/min`. That is useful negative
-evidence: the generated box now has clean output and repeated runtime delivery,
-but it is still far from a sustained 2x turbo full-belt output.
+300-tick throughput windows after startup were first measured at about
+`444-456/min` delivered `iron-ore`. After upgrading the real output inserters
+from `fast-inserter` to `stack-inserter`, the same 2400-tick probe reports
+steady post-startup windows around `1224-1248/min`, while the requested contract
+is `7200/min`. That is useful negative evidence: the generated box now has
+clean output, repeated runtime delivery, and stronger output inserters, but it
+is still far from a sustained 2x turbo full-belt output.
 
 ## Commands
 
