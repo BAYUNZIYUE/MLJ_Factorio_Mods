@@ -603,6 +603,56 @@ def main() -> int:
         print(f"FAIL: expected belt flow audit to fail when an existing fanout belt points west: {semantic_fail_summary}")
         return 1
 
+    underground_mappings = [
+        {
+            "fingerprint": "replicated-port-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 0, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 0, "y": 2, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-underground-belt", "x": 1, "y": 1, "direction": DIR_EAST, "entity_type": "output", "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    underground, underground_summary = materialize_layout_with_summary(
+        replicated_layout,
+        underground_mappings,
+        label="fixture-underground",
+        connect_boundaries=True,
+    )
+    if not any(entity["name"] == "turbo-underground-belt" and entity.get("type") == "output" for entity in underground["blueprint"]["entities"]):
+        print(f"FAIL: expected materializer to preserve underground-belt type: {underground}")
+        return 1
+    underground_flow_counts = Counter(item["status"] for item in underground_summary["belt_flow_audit"])
+    if underground_flow_counts != {"pass": 4}:
+        print(f"FAIL: expected east-facing underground output to pass horizontal belt audit: {underground_summary}")
+        return 1
+
+    underground_input_mappings = [
+        {
+            "fingerprint": "replicated-port-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 0, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 0, "y": 2, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-underground-belt", "x": 1, "y": 1, "direction": DIR_EAST, "entity_type": "input", "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, underground_input_summary = materialize_layout_with_summary(
+        replicated_layout,
+        underground_input_mappings,
+        label="fixture-underground-input",
+        connect_boundaries=True,
+    )
+    if not any(item["status"] == "unresolved" and any(entry.get("reason") == "underground-belt-input-or-unknown-type" for entry in item["unresolved"]) for item in underground_input_summary["belt_flow_audit"]):
+        print(f"FAIL: expected east-facing underground input to remain unresolved without pair tracing: {underground_input_summary}")
+        return 1
+
     print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, materializes a blueprint skeleton, and generates a seed blueprint.")
     return 0
 

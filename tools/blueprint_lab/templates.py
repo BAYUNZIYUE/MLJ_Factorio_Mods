@@ -22,6 +22,7 @@ class NormalizedEntity:
     x: float
     y: float
     direction: int | None
+    entity_type: str | None
     recipe: str | None
     recipe_quality: str | None
     quality: str | None
@@ -148,6 +149,7 @@ def normalize_entities(entities: list[dict[str, Any]], origin: tuple[float, floa
                 x=round(float(position.get("x", 0)) - origin[0], 3),
                 y=round(float(position.get("y", 0)) - origin[1], 3),
                 direction=int(direction) if isinstance(direction, int) else None,
+                entity_type=str(entity["type"]) if entity.get("type") else None,
                 recipe=str(entity["recipe"]) if entity.get("recipe") else None,
                 recipe_quality=str(entity["recipe_quality"]) if entity.get("recipe_quality") else None,
                 quality=str(entity["quality"]) if entity.get("quality") else None,
@@ -183,6 +185,7 @@ def fingerprint_entities(entities: list[NormalizedEntity]) -> str:
             "x": entity.x,
             "y": entity.y,
             "direction": entity.direction,
+            "entity_type": entity.entity_type,
             "recipe": entity.recipe,
             "recipe_quality": entity.recipe_quality,
             "quality": entity.quality,

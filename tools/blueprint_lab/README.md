@@ -124,8 +124,9 @@ manageable.
 The materializer is the first step that writes a generated blueprint string from
 learned corpus templates. It copies normalized entities and tiles into the
 planned rectangle, preserves recipe/direction/quality fields and raw entity
-`items` stacks that were learned from the source blueprint, reassigns entity
-numbers, and de-duplicates identical tile placements. With
+`items` stacks that were learned from the source blueprint, preserves blueprint
+entity `type` fields such as underground-belt input/output ends, reassigns
+entity numbers, and de-duplicates identical tile placements. With
 `--connect-boundaries`, it also adds conservative transport-belt stubs in the
 reserved left/right lanes and reports exact entity-position collisions. It
 also bridges same-row adjacent repeated template instances when their learned
@@ -170,11 +171,12 @@ fanout from the entities that will actually be exported, then checks that every
 occupied position is a same-tier belt-like entity pointing east. A segment is
 `pass` when all checked entities are simple direction-compatible belt flow. It
 is `failed` when a belt is missing, the tier differs, a non-belt entity occupies
-the path, or the direction is wrong. It is `unresolved` when the path contains
-entities whose game semantics need a dedicated parser, such as underground belts
-or splitters. This is still not a full belt simulation: it does not understand
-lane filters, splitter balancing, stacked belts, underground-belt pairing
-semantics, or inserter timing.
+the path, or the direction is wrong. East-facing underground-belt `output` ends
+can pass as visible flow exits. Underground-belt `input` ends, underground belts
+without a preserved type, and splitters stay `unresolved` until a dedicated
+pairing or splitter parser can prove their semantics. This is still not a full
+belt simulation: it does not understand lane filters, splitter balancing,
+stacked belts, underground-belt pairing semantics, or inserter timing.
 
 ## Commands
 

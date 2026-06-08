@@ -56,6 +56,7 @@ class TemplateEntityHint:
     x: float
     y: float
     direction: int | None
+    entity_type: str | None
     recipe: str | None
     recipe_quality: str | None
     quality: str | None
@@ -356,6 +357,7 @@ def template_layout_hint(template: TemplateCandidate) -> TemplateLayoutHint:
                 x=entity.x,
                 y=entity.y,
                 direction=entity.direction,
+                entity_type=entity.entity_type,
                 recipe=entity.recipe,
                 recipe_quality=entity.recipe_quality,
                 quality=entity.quality,

@@ -35,6 +35,9 @@ def materialized_entity(raw: dict[str, Any], entity_number: int, *, x: float, y:
     }
     if raw.get("direction") is not None:
         entity["direction"] = int(raw["direction"])
+    entity_type = raw.get("type") or raw.get("entity_type")
+    if entity_type:
+        entity["type"] = str(entity_type)
     if raw.get("recipe"):
         entity["recipe"] = raw["recipe"]
     if raw.get("recipe_quality"):
@@ -639,8 +642,6 @@ def add_boundary_connectors(
             if canonical_transport_belt_name(entity_name) != belt_name:
                 failures.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "belt-tier-mismatch"})
                 continue
-            if entity_name.endswith("underground-belt") or entity_name.endswith("splitter"):
-                unresolved.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "complex-belt-semantics"})
             direction = entity.get("direction")
             if direction != DIR_EAST:
                 failures.append(
@@ -650,6 +651,23 @@ def add_boundary_connectors(
                         "entity_name": entity_name,
                         "direction": direction,
                         "reason": "wrong-flow-direction",
+                    }
+                )
+                continue
+            if entity_name.endswith("splitter"):
+                unresolved.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "splitter-semantics"})
+                continue
+            if entity_name.endswith("underground-belt"):
+                underground_type = entity.get("type")
+                if underground_type == "output":
+                    continue
+                unresolved.append(
+                    {
+                        "x": x,
+                        "y": belt_y,
+                        "entity_name": entity_name,
+                        "type": underground_type,
+                        "reason": "underground-belt-input-or-unknown-type",
                     }
                 )
         status = "failed" if failures else "unresolved" if unresolved else "pass"
