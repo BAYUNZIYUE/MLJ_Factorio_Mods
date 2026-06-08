@@ -75,6 +75,14 @@ def connector_belt_name_for_port(port: dict[str, Any] | None) -> str:
     return "transport-belt"
 
 
+def is_belt_like_entity_name(name: str) -> bool:
+    return name.endswith("transport-belt") or name.endswith("underground-belt") or name.endswith("splitter")
+
+
+def canonical_transport_belt_name(name: str) -> str:
+    return connector_belt_name_for_port({"entity_name": name})
+
+
 def materialized_tile(raw: dict[str, Any], *, x: float, y: float) -> dict[str, Any]:
     return {
         "name": raw["name"],
@@ -90,18 +98,22 @@ def add_boundary_connectors(
     layout_plan: dict[str, Any],
     *,
     occupied: set[tuple[float, float]],
+    occupied_entities: dict[tuple[float, float], dict[str, Any]],
 ) -> dict[str, Any]:
     connectors: list[dict[str, Any]] = []
     collisions: list[dict[str, Any]] = []
     routes: list[dict[str, Any]] = []
     bridges: list[dict[str, Any]] = []
+    input_fanouts: list[dict[str, Any]] = []
     if not layout_plan.get("nodes"):
         return {
             "connectors_added": 0,
             "bridges_added": 0,
+            "input_fanouts_added": 0,
             "collisions": collisions,
             "routes": routes,
             "bridges": bridges,
+            "input_fanouts": input_fanouts,
             "boundary_coverage": [],
         }
 
@@ -142,7 +154,49 @@ def add_boundary_connectors(
             )
             connectors.append(belt)
             occupied.add(key)
+            occupied_entities[key] = belt
         return len(connectors) - before, route_collisions
+
+    def add_positions_reusing_existing_belts(positions: list[RoutePosition]) -> tuple[int, list[dict[str, Any]], int]:
+        route_collisions: list[dict[str, Any]] = []
+        seen: set[tuple[float, float]] = set()
+        existing_belts_used = 0
+        for x, belt_y, reason, direction, belt_name in positions:
+            key = (round(x, 3), round(belt_y, 3))
+            if key in seen:
+                collision = {"x": key[0], "y": key[1], "reason": f"{reason}:duplicate-route-position"}
+                route_collisions.append(collision)
+                continue
+            seen.add(key)
+            existing = occupied_entities.get(key)
+            if existing is None:
+                continue
+            existing_name = str(existing.get("name") or "")
+            if is_belt_like_entity_name(existing_name) and canonical_transport_belt_name(existing_name) == belt_name:
+                existing_belts_used += 1
+                continue
+            collision = {"x": key[0], "y": key[1], "reason": reason}
+            route_collisions.append(collision)
+        if route_collisions:
+            collisions.extend(route_collisions)
+            return 0, route_collisions, existing_belts_used
+
+        before = len(connectors)
+        for x, belt_y, reason, direction, belt_name in positions:
+            key = (round(x, 3), round(belt_y, 3))
+            if key in occupied_entities:
+                continue
+            belt = connector_belt(
+                len(entities) + len(connectors) + 1,
+                x,
+                belt_y,
+                direction=direction,
+                name=belt_name,
+            )
+            connectors.append(belt)
+            occupied.add(key)
+            occupied_entities[key] = belt
+        return len(connectors) - before, route_collisions, existing_belts_used
 
     def horizontal_positions(start_x: float, end_x: float, y: float, reason: str, belt_name: str) -> list[RoutePosition]:
         positions: list[RoutePosition] = []
@@ -297,6 +351,13 @@ def add_boundary_connectors(
 
     bridges_added = add_inter_instance_bridges()
 
+    def node_by_fingerprint() -> dict[str, dict[str, Any]]:
+        return {
+            str(node.get("fingerprint")): node
+            for node in layout_plan.get("nodes") or []
+            if node.get("fingerprint") is not None
+        }
+
     for boundary in layout_plan.get("boundary_inputs") or []:
         ports = ports_by_distance(
             candidate_ports("left", {"input", "edge-bus", "boundary"}),
@@ -408,6 +469,105 @@ def add_boundary_connectors(
             }
         )
 
+    def add_input_fanouts() -> int:
+        before = len(connectors)
+        node_index = node_by_fingerprint()
+        for route in routes:
+            if route.get("status") != "connected":
+                continue
+            boundary = str(route.get("boundary") or "")
+            if not boundary.startswith("input:"):
+                continue
+            port = route.get("port") or {}
+            node = node_index.get(str(port.get("node_fingerprint") or ""))
+            if not node:
+                continue
+            current_instance = int(port.get("node_instance") or 0)
+            route_y = round(float(port.get("y") or 0.0), 3)
+            instances = int(node.get("instances") or 1)
+            columns = max(1, int(node.get("columns") or 1))
+            while current_instance + 1 < instances:
+                next_instance = current_instance + 1
+                if next_instance // columns != current_instance // columns:
+                    break
+                next_ports = port_by_y(
+                    ports_for_instance(node, next_instance, "left", {"input", "edge-bus", "boundary"}),
+                    prefer="leftmost",
+                )
+                next_port = next_ports.get(route_y)
+                if next_port is None:
+                    input_fanouts.append(
+                        {
+                            "boundary": boundary,
+                            "node_item": node.get("item"),
+                            "node_recipe": node.get("recipe"),
+                            "node_fingerprint": node.get("fingerprint"),
+                            "from_instance": current_instance,
+                            "to_instance": next_instance,
+                            "fanout_y": route_y,
+                            "from_port": port,
+                            "to_port": None,
+                            "status": "blocked",
+                            "belts_added": 0,
+                            "collisions": [],
+                            "reason": "no-next-left-port-on-route-y",
+                            "route_kind": "input-fanout-direct",
+                        }
+                    )
+                    break
+                start_x = float(port["x"]) + 1.0
+                end_x = float(next_port["x"]) - 1.0
+                if start_x > end_x:
+                    input_fanouts.append(
+                        {
+                            "boundary": boundary,
+                            "node_item": node.get("item"),
+                            "node_recipe": node.get("recipe"),
+                            "node_fingerprint": node.get("fingerprint"),
+                            "from_instance": current_instance,
+                            "to_instance": next_instance,
+                            "fanout_y": route_y,
+                            "from_port": port,
+                            "to_port": next_port,
+                            "status": "blocked",
+                            "belts_added": 0,
+                            "collisions": [],
+                            "reason": "no-horizontal-gap",
+                            "route_kind": "input-fanout-direct",
+                        }
+                    )
+                    break
+                belt_name = connector_belt_name_for_port(port)
+                reason = f"fanout:{boundary}:{current_instance}->{next_instance}:{route_y:g}"
+                positions = horizontal_positions(start_x, end_x, route_y, reason, belt_name)
+                belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(positions)
+                status = "connected" if not route_collisions else "blocked"
+                input_fanouts.append(
+                    {
+                        "boundary": boundary,
+                        "node_item": node.get("item"),
+                        "node_recipe": node.get("recipe"),
+                        "node_fingerprint": node.get("fingerprint"),
+                        "from_instance": current_instance,
+                        "to_instance": next_instance,
+                        "fanout_y": route_y,
+                        "from_port": port,
+                        "to_port": next_port,
+                        "status": status,
+                        "belts_added": belts_added,
+                        "existing_belts_used": existing_belts_used,
+                        "collisions": route_collisions,
+                        "route_kind": "input-fanout-direct",
+                    }
+                )
+                if route_collisions:
+                    break
+                port = next_port
+                current_instance = next_instance
+        return len(connectors) - before
+
+    input_fanouts_added = add_input_fanouts()
+
     def route_boundary_rate(route: dict[str, Any]) -> float | None:
         boundary = str(route.get("boundary") or "")
         if boundary.startswith("output:"):
@@ -434,6 +594,14 @@ def add_boundary_connectors(
             if round(float(bridge.get("bridge_y") or 0.0), 3) != round(y, 3):
                 continue
             edges.append((int(bridge["from_instance"]), int(bridge["to_instance"])))
+        for fanout in input_fanouts:
+            if fanout.get("status") != "connected":
+                continue
+            if str(fanout.get("node_fingerprint") or "") != fingerprint:
+                continue
+            if round(float(fanout.get("fanout_y") or 0.0), 3) != round(y, 3):
+                continue
+            edges.append((int(fanout["from_instance"]), int(fanout["to_instance"])))
         return edges
 
     def reachable_instances(start: int, edges: list[tuple[int, int]], *, direction: str) -> list[int]:
@@ -517,9 +685,11 @@ def add_boundary_connectors(
     return {
         "connectors_added": len(connectors),
         "bridges_added": bridges_added,
+        "input_fanouts_added": input_fanouts_added,
         "collisions": collisions,
         "routes": routes,
         "bridges": bridges,
+        "input_fanouts": input_fanouts,
         "boundary_coverage": coverage,
     }
 
@@ -571,14 +741,22 @@ def materialize_layout_with_summary(
     connector_result = {
         "connectors_added": 0,
         "bridges_added": 0,
+        "input_fanouts_added": 0,
         "collisions": [],
         "routes": [],
         "bridges": [],
+        "input_fanouts": [],
         "boundary_coverage": [],
     }
     if connect_boundaries:
-        occupied = {entity_position_key(entity) for entity in entities}
-        connector_result = add_boundary_connectors(entities, layout_plan, occupied=occupied)
+        occupied_entities = {entity_position_key(entity): entity for entity in entities}
+        occupied = set(occupied_entities)
+        connector_result = add_boundary_connectors(
+            entities,
+            layout_plan,
+            occupied=occupied,
+            occupied_entities=occupied_entities,
+        )
 
     target_item = str(layout_plan["target_item"])
     wrapper = make_blueprint_wrapper(
@@ -650,9 +828,11 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
     summary = connector_summary or {
         "connectors_added": 0,
         "bridges_added": 0,
+        "input_fanouts_added": 0,
         "collisions": [],
         "routes": [],
         "bridges": [],
+        "input_fanouts": [],
         "boundary_coverage": [],
     }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
@@ -712,6 +892,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Tiles: {summary['tile_count']}",
         f"- Connector belts: {summary['connector_summary']['connectors_added']}",
         f"- Inter-instance bridge belts: {summary['connector_summary'].get('bridges_added', 0)}",
+        f"- Input fanout belts: {summary['connector_summary'].get('input_fanouts_added', 0)}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
@@ -774,6 +955,25 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                     f" from=({item['from_port']['x']},{item['from_port']['y']})"
                     f" to=({item['to_port']['x']},{item['to_port']['y']})"
                 )
+            if item.get("route_kind"):
+                line += f" route={item['route_kind']}"
+            lines.append(line)
+    if summary["connector_summary"].get("input_fanouts"):
+        lines.extend(["", "## Input Fanouts", ""])
+        for item in summary["connector_summary"]["input_fanouts"]:
+            line = (
+                f"- {item['boundary']}: status={item['status']} belts={item['belts_added']} "
+                f"instances={item['from_instance']}->{item['to_instance']} y={item.get('fanout_y')}"
+            )
+            if item.get("existing_belts_used"):
+                line += f" existing_belts={item['existing_belts_used']}"
+            if item.get("to_port"):
+                line += (
+                    f" from=({item['from_port']['x']},{item['from_port']['y']})"
+                    f" to=({item['to_port']['x']},{item['to_port']['y']})"
+                )
+            if item.get("reason"):
+                line += f" reason={item['reason']}"
             if item.get("route_kind"):
                 line += f" route={item['route_kind']}"
             lines.append(line)

@@ -374,8 +374,14 @@ def main() -> int:
         label="fixture-connected",
         connect_boundaries=True,
     )
-    if connector_summary["connectors_added"] != 27 or connector_summary["collisions"]:
+    if connector_summary["connectors_added"] != 41 or connector_summary["collisions"]:
         print(f"FAIL: expected connector belts without collisions: {connector_summary}")
+        return 1
+    if connector_summary["input_fanouts_added"] != 14:
+        print(f"FAIL: expected input fanout belts across the first repeated row: {connector_summary}")
+        return 1
+    if len(connector_summary["input_fanouts"]) != 7 or any(fanout["status"] != "connected" for fanout in connector_summary["input_fanouts"]):
+        print(f"FAIL: expected seven connected input fanout segments: {connector_summary}")
         return 1
     if [route["status"] for route in connector_summary["routes"]] != ["connected", "stub-only"]:
         print(f"FAIL: expected input connected and output stub-only route states: {connector_summary}")
@@ -383,7 +389,14 @@ def main() -> int:
     if connector_summary["routes"][0]["port"]["node_item"] != "iron-plate":
         print(f"FAIL: expected input route to choose the plate template port: {connector_summary}")
         return 1
-    if len(connected["blueprint"]["entities"]) != 44:
+    connector_coverage = {item["boundary"]: item for item in connector_summary["boundary_coverage"]}
+    if connector_coverage["input:iron-ore"]["status"] != "partial" or connector_coverage["input:iron-ore"]["covered_instances"] != list(range(8)):
+        print(f"FAIL: expected input fanout to cover only the first repeated row: {connector_summary}")
+        return 1
+    if connector_coverage["output:iron-gear-wheel"]["status"] != "uncovered":
+        print(f"FAIL: expected output route without a learned port to stay uncovered: {connector_summary}")
+        return 1
+    if len(connected["blueprint"]["entities"]) != 58:
         print(f"FAIL: expected connected blueprint to add connector belts: {connected}")
         return 1
     if "blueprint_lab_connector_summary" in connected["blueprint"]:
@@ -527,17 +540,23 @@ def main() -> int:
     if replicated_summary["collisions"]:
         print(f"FAIL: expected replicated-port routing to avoid collisions: {replicated_summary}")
         return 1
+    if replicated_summary["connectors_added"] != 20 or replicated_summary["input_fanouts_added"] != 7:
+        print(f"FAIL: expected replicated routing to add output bridge plus input fanout belts: {replicated_summary}")
+        return 1
     if replicated_summary["bridges_added"] != 6 or replicated_summary["bridges"][0]["status"] != "connected":
         print(f"FAIL: expected replicated-port routing to bridge adjacent template instances: {replicated_summary}")
+        return 1
+    if len(replicated_summary["input_fanouts"]) != 1 or replicated_summary["input_fanouts"][0]["status"] != "connected":
+        print(f"FAIL: expected replicated-port routing to fan out the input lane: {replicated_summary}")
         return 1
     replicated_coverage = {item["boundary"]: item for item in replicated_summary["boundary_coverage"]}
     if replicated_coverage["output:iron-ore"]["status"] != "covered" or replicated_coverage["output:iron-ore"]["covered_instances"] != [0, 1] or not replicated_coverage["output:iron-ore"]["meets_required_rate"]:
         print(f"FAIL: expected replicated output coverage to cover both instances and meet the boundary rate: {replicated_summary}")
         return 1
-    if replicated_coverage["input:metallic-asteroid-chunk"]["status"] != "partial" or replicated_coverage["input:metallic-asteroid-chunk"]["covered_instances"] != [0]:
-        print(f"FAIL: expected lane-aware input coverage to avoid crossing unrelated output bridges: {replicated_summary}")
+    if replicated_coverage["input:metallic-asteroid-chunk"]["status"] != "covered" or replicated_coverage["input:metallic-asteroid-chunk"]["covered_instances"] != [0, 1]:
+        print(f"FAIL: expected input fanout to cover both replicated input ports: {replicated_summary}")
         return 1
-    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 15:
+    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 22:
         print(f"FAIL: expected replicated-port route and bridge to add turbo belts: {replicated}")
         return 1
     if decode_blueprint_string(encode_blueprint_string(replicated)) != replicated:

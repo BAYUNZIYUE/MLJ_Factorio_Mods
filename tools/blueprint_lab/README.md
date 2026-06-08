@@ -18,6 +18,7 @@ tree.
 - Plan a production DAG seed from learned production templates: target item rate, whole-template instance counts, upstream template needs, and external black-box inputs.
 - Turn a production DAG seed into a rectangular layout plan with repeated template grids, estimated module dimensions, and left/right black-box boundaries.
 - Materialize a layout plan into an importable blueprint skeleton by copying learned normalized template entities and tiles into the planned rectangle.
+- Connect same-row copied input ports with a conservative fanout pass that can reuse existing same-tier belt, underground-belt, and splitter entities as bus evidence instead of overwriting them.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -154,8 +155,13 @@ from the selected input port. Coverage is lane-aware: only bridges on the same
 y coordinate as the selected boundary port are used for reachability. This lets
 the report distinguish "the boundary belt touches one copied module" from "the
 boundary belt reaches every copied module needed to cover the requested target
-rate", and it also exposes when an input bus is still partial even though the
-output bus is connected.
+rate". Input fanouts extend that same reachability graph for copied modules on
+the same row. They add belts only on empty positions and can treat existing
+same-tier transport belts, underground belts, or splitters as already-built bus
+segments; non-belt collisions still block the fanout. This is a structural
+coverage audit, not a full belt simulation: it still does not understand lane
+filters, splitter balancing, stacked belts, underground-belt pairing semantics,
+or inserter timing.
 
 ## Commands
 
