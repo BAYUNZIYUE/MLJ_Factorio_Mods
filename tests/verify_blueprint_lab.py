@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
 from tools.blueprint_lab.analysis import blueprint_metrics, summarize_library
 from tools.blueprint_lab.codec import decode_blueprint_string, encode_blueprint_string, walk_nodes
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
+from tools.blueprint_lab.learn import learn_library
 
 
 def main() -> int:
@@ -42,7 +43,16 @@ def main() -> int:
         print(f"FAIL: generated seed summary is wrong: {summary}")
         return 1
 
-    print("PASS: blueprint_lab encodes, decodes, analyzes, and generates a seed blueprint.")
+    learned = learn_library([tmp])
+    categories = {item["category"]: item for item in learned["category_summaries"]}
+    if "smelting" not in categories:
+        print(f"FAIL: expected generated seed to classify as smelting: {learned}")
+        return 1
+    if not learned["blackbox_candidates"]:
+        print(f"FAIL: expected generated seed to be a black-box candidate: {learned}")
+        return 1
+
+    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, and generates a seed blueprint.")
     return 0
 
 
