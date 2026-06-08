@@ -743,6 +743,41 @@ def main() -> int:
     if capacity_audit["input:metallic-asteroid-chunk"]["status"] != "sufficient":
         print(f"FAIL: expected input boundary capacity audit to pass when one turbo belt covers the input rate: {capacity_limited_summary}")
         return 1
+    capacity_multi_lane_layout = deepcopy(capacity_limited_layout)
+    capacity_multi_lane_layout["nodes"][0]["source_height"] = 4
+    capacity_multi_lane_layout["nodes"][0]["planned_height"] = 4
+    capacity_multi_lane_layout["nodes"][0]["ports"] = [
+        *capacity_multi_lane_layout["nodes"][0]["ports"],
+        {"side": "left", "role": "edge-bus", "entity_name": "turbo-transport-belt", "x": 0, "y": 3},
+        {"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 1, "y": 3},
+    ]
+    capacity_multi_lane_mappings = deepcopy(replicated_mappings)
+    capacity_multi_lane_mappings[0]["layout"]["entities"].extend(
+        [
+            {"name": "turbo-transport-belt", "x": 0, "y": 3, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+            {"name": "turbo-transport-belt", "x": 1, "y": 3, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+        ]
+    )
+    _, capacity_multi_lane_summary = materialize_layout_with_summary(
+        capacity_multi_lane_layout,
+        capacity_multi_lane_mappings,
+        label="fixture-capacity-multi-lane",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    multi_lane_capacity = {item["boundary"]: item for item in capacity_multi_lane_summary["boundary_capacity_audit"]}
+    output_routes = [route for route in capacity_multi_lane_summary["routes"] if route["boundary"] == "output:iron-ore"]
+    if (
+        multi_lane_capacity["output:iron-ore"]["status"] != "sufficient"
+        or multi_lane_capacity["output:iron-ore"]["capacity_per_minute"] != 7200
+        or multi_lane_capacity["output:iron-ore"]["route_count"] != 2
+        or len(output_routes) != 2
+    ):
+        print(f"FAIL: expected 2x full-belt demand to generate two output boundary lanes: {capacity_multi_lane_summary}")
+        return 1
+    if capacity_multi_lane_summary["collisions"]:
+        print(f"FAIL: expected multi-lane boundary routing to avoid connector collisions: {capacity_multi_lane_summary}")
+        return 1
 
     semantic_fail_mappings = [
         {

@@ -625,6 +625,14 @@ def add_boundary_connectors(
                 selected[y] = port
         return selected
 
+    def port_by_y_matching(
+        ports: list[dict[str, Any]],
+        *,
+        prefer: str,
+        predicate,
+    ) -> dict[float, dict[str, Any]]:
+        return port_by_y([port for port in ports if predicate(port)], prefer=prefer)
+
     def can_start_horizontal_flow(port: dict[str, Any]) -> bool:
         entity_name = str(port.get("entity_name") or "")
         if entity_name.endswith("underground-belt") and port.get("entity_type") == "input":
@@ -637,63 +645,100 @@ def add_boundary_connectors(
             return False
         return True
 
+    def is_simple_surface_belt_port(port: dict[str, Any]) -> bool:
+        entity_name = str(port.get("entity_name") or "")
+        return entity_name.endswith("transport-belt") and not entity_name.endswith("underground-belt")
+
+    def bridge_already_recorded(node: dict[str, Any], instance: int, next_instance: int, y: float) -> bool:
+        fingerprint = str(node.get("fingerprint") or "")
+        def bridge_instance(bridge: dict[str, Any], key: str) -> int:
+            value = bridge.get(key)
+            return int(value) if isinstance(value, int) else -1
+        return any(
+            str(bridge.get("node_fingerprint") or "") == fingerprint
+            and bridge_instance(bridge, "from_instance") == instance
+            and bridge_instance(bridge, "to_instance") == next_instance
+            and round(float(bridge.get("bridge_y") or 0.0), 3) == round(y, 3)
+            for bridge in bridges
+        )
+
+    def add_inter_instance_bridge_lane(node: dict[str, Any], y: float, *, require_simple_surface: bool) -> int:
+        before = len(connectors)
+        instances = int(node.get("instances") or 1)
+        columns = max(1, int(node.get("columns") or 1))
+        if instances < 2 or columns < 2:
+            return 0
+        for instance in range(instances - 1):
+            col = instance % columns
+            next_instance = instance + 1
+            if next_instance >= instances or next_instance // columns != instance // columns:
+                continue
+            if col + 1 >= columns:
+                continue
+            if bridge_already_recorded(node, instance, next_instance, y):
+                continue
+
+            def bridge_port_filter(port: dict[str, Any], endpoint_check) -> bool:
+                if round(float(port.get("y") or 0.0), 3) != round(y, 3):
+                    return False
+                if not endpoint_check(port):
+                    return False
+                if require_simple_surface and not is_simple_surface_belt_port(port):
+                    return False
+                return True
+
+            right_ports = port_by_y_matching(
+                ports_for_instance(node, instance, "right", {"output", "edge-bus", "boundary"}),
+                prefer="rightmost",
+                predicate=lambda port: bridge_port_filter(port, can_start_horizontal_flow),
+            )
+            left_ports = port_by_y_matching(
+                ports_for_instance(node, next_instance, "left", {"input", "edge-bus", "boundary"}),
+                prefer="leftmost",
+                predicate=lambda port: bridge_port_filter(port, can_end_horizontal_flow),
+            )
+            right_port = right_ports.get(round(y, 3))
+            left_port = left_ports.get(round(y, 3))
+            if right_port is None or left_port is None:
+                continue
+            start_x = float(right_port["x"]) + 1.0
+            end_x = float(left_port["x"]) - 1.0
+            if start_x > end_x:
+                continue
+            belt_name = connector_belt_name_for_port(right_port)
+            reason = f"bridge:{node.get('item')}:{instance}->{next_instance}:{y:g}"
+            positions = horizontal_positions(start_x, end_x, y, reason, belt_name)
+            belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(positions)
+            status = "connected" if not route_collisions else "blocked"
+            bridges.append(
+                {
+                    "node_item": node.get("item"),
+                    "node_recipe": node.get("recipe"),
+                    "node_fingerprint": node.get("fingerprint"),
+                    "from_instance": instance,
+                    "to_instance": next_instance,
+                    "bridge_y": y,
+                    "from_port": right_port,
+                    "to_port": left_port,
+                    "status": status,
+                    "belts_added": belts_added,
+                    "existing_belts_used": existing_belts_used,
+                    "collisions": route_collisions,
+                    "route_kind": "inter-instance-direct",
+                }
+            )
+        return len(connectors) - before
+
     def add_inter_instance_bridges() -> int:
         before = len(connectors)
         for node in layout_plan.get("nodes") or []:
-            instances = int(node.get("instances") or 1)
-            columns = max(1, int(node.get("columns") or 1))
-            if instances < 2 or columns < 2:
-                continue
-            for instance in range(instances - 1):
-                col = instance % columns
-                next_instance = instance + 1
-                if next_instance >= instances or next_instance // columns != instance // columns:
-                    continue
-                if col + 1 >= columns:
-                    continue
-                right_ports = port_by_y(
-                    ports_for_instance(node, instance, "right", {"output", "edge-bus", "boundary"}),
-                    prefer="rightmost",
-                )
-                left_ports = port_by_y(
-                    ports_for_instance(node, next_instance, "left", {"input", "edge-bus", "boundary"}),
-                    prefer="leftmost",
-                )
-                for y, right_port in sorted(right_ports.items()):
-                    if not can_start_horizontal_flow(right_port):
-                        continue
-                    left_port = left_ports.get(y)
-                    if left_port is None:
-                        continue
-                    if not can_end_horizontal_flow(left_port):
-                        continue
-                    start_x = float(right_port["x"]) + 1.0
-                    end_x = float(left_port["x"]) - 1.0
-                    if start_x > end_x:
-                        continue
-                    belt_name = connector_belt_name_for_port(right_port)
-                    reason = f"bridge:{node.get('item')}:{instance}->{next_instance}:{y:g}"
-                    positions = horizontal_positions(start_x, end_x, y, reason, belt_name)
-                    belts_added, route_collisions = add_positions(positions, record_collisions=False)
-                    status = "connected" if not route_collisions else "blocked"
-                    if route_collisions:
-                        collisions.extend(route_collisions)
-                    bridges.append(
-                        {
-                            "node_item": node.get("item"),
-                            "node_recipe": node.get("recipe"),
-                            "node_fingerprint": node.get("fingerprint"),
-                            "from_instance": instance,
-                            "to_instance": next_instance,
-                            "bridge_y": y,
-                            "from_port": right_port,
-                            "to_port": left_port,
-                            "status": status,
-                            "belts_added": belts_added,
-                            "collisions": route_collisions,
-                            "route_kind": "inter-instance-direct",
-                        }
-                    )
+            ys = {
+                round(float(port.get("y") or 0.0), 3)
+                for port in ports_for_instance(node, 0, "right", {"output", "edge-bus", "boundary"})
+                if can_start_horizontal_flow(port) and is_simple_surface_belt_port(port)
+            }
+            for y in sorted(ys):
+                add_inter_instance_bridge_lane(node, y, require_simple_surface=True)
         return len(connectors) - before
 
     bridges_added = add_inter_instance_bridges()
@@ -705,18 +750,154 @@ def add_boundary_connectors(
             if node.get("fingerprint") is not None
         }
 
+    def boundary_required_rate(boundary_label: str) -> float | None:
+        if boundary_label.startswith("output:"):
+            item = boundary_label.split(":", 1)[1]
+            for output in layout_plan.get("boundary_outputs") or []:
+                if str(output.get("item")) == item:
+                    rate = output.get("rate_per_minute")
+                    return float(rate) if isinstance(rate, (int, float)) else None
+        if boundary_label.startswith("input:"):
+            item = boundary_label.split(":", 1)[1]
+            for input_item in layout_plan.get("boundary_inputs") or []:
+                if str(input_item.get("item")) == item:
+                    rate = input_item.get("rate_per_minute")
+                    return float(rate) if isinstance(rate, (int, float)) else None
+        return None
+
+    def route_capacity_for_port(port: dict[str, Any] | None) -> float | None:
+        if knowledge is None or not port:
+            return None
+        belt = knowledge.belt(connector_belt_name_for_port(port))
+        return float(belt.items_per_minute) if belt is not None else None
+
+    def connected_boundary_capacity(boundary_label: str, fingerprint: str) -> float | None:
+        if knowledge is None:
+            return None
+        total = 0.0
+        for route in routes:
+            if route.get("status") != "connected":
+                continue
+            if str(route.get("boundary") or "") != boundary_label:
+                continue
+            port = route.get("port") or {}
+            if str(port.get("node_fingerprint") or "") != fingerprint:
+                continue
+            capacity = route_capacity_for_port(port)
+            if capacity is None:
+                return None
+            total += capacity
+        return total
+
+    def used_boundary_route_lanes(boundary_label: str, fingerprint: str) -> set[float]:
+        lanes: set[float] = set()
+        for route in routes:
+            if str(route.get("boundary") or "") != boundary_label:
+                continue
+            port = route.get("port") or {}
+            if str(port.get("node_fingerprint") or "") != fingerprint:
+                continue
+            if port.get("y") is not None:
+                lanes.add(round(float(port["y"]), 3))
+        return lanes
+
+    def add_boundary_route_from_candidates(
+        boundary_label: str,
+        candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]],
+    ) -> dict[str, Any]:
+        belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
+        status = "connected" if port is not None and not route_collisions else "blocked"
+        route = {
+            "boundary": boundary_label,
+            "status": status,
+            "belts_added": belts_added,
+            "collisions": route_collisions,
+            "port": port,
+            "route_kind": route_kind,
+            "blocked_attempts": blocked_attempts,
+        }
+        routes.append(route)
+        return route
+
+    def boundary_route_candidates(
+        row_ports: list[dict[str, Any]],
+        *,
+        side: str,
+        boundary_label: str,
+    ) -> list[tuple[dict[str, Any], str, list[RoutePosition]]]:
+        row_y = min(float(port["y"]) for port in row_ports)
+        ports = ports_by_distance(row_ports, row_y, side)
+        candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]] = []
+        for port in ports:
+            belt_name = connector_belt_name_for_port(port)
+            if side == "left":
+                start_x = 0.5
+                end_x = float(port["x"]) - 0.5
+            else:
+                start_x = float(port["x"]) + 1.0
+                end_x = float(layout_plan["estimated_width"]) - 0.5
+            candidates.append(
+                (
+                    port,
+                    *route_candidate(
+                        start_x=start_x,
+                        end_x=end_x,
+                        y=float(port["y"]),
+                        reason=boundary_label,
+                        belt_name=belt_name,
+                    ),
+                )
+            )
+        return candidates
+
+    def add_boundary_routes(
+        boundary_label: str,
+        *,
+        side: str,
+        row_groups: list[list[dict[str, Any]]],
+    ) -> None:
+        candidates_by_fingerprint: dict[str, list[tuple[dict[str, Any], str, list[RoutePosition]]]] = {}
+        for row_ports in row_groups:
+            candidates = boundary_route_candidates(row_ports, side=side, boundary_label=boundary_label)
+            if not candidates:
+                continue
+            fingerprint = str(candidates[0][0].get("node_fingerprint") or "")
+            candidates_by_fingerprint.setdefault(fingerprint, []).extend(candidates)
+            add_boundary_route_from_candidates(boundary_label, candidates)
+
+        required_rate = boundary_required_rate(boundary_label)
+        if required_rate is None or knowledge is None:
+            return
+        for fingerprint, candidates in candidates_by_fingerprint.items():
+            while True:
+                current_capacity = connected_boundary_capacity(boundary_label, fingerprint)
+                if current_capacity is None or current_capacity >= required_rate:
+                    break
+                used_lanes = used_boundary_route_lanes(boundary_label, fingerprint)
+                remaining = [
+                    candidate
+                    for candidate in candidates
+                    if round(float(candidate[0].get("y") or 0.0), 3) not in used_lanes
+                ]
+                if not remaining:
+                    break
+                route = add_boundary_route_from_candidates(boundary_label, remaining)
+                if route.get("status") != "connected":
+                    break
+
     for boundary in layout_plan.get("boundary_inputs") or []:
+        boundary_label = f"input:{boundary['item']}"
         row_groups = port_groups_by_row(candidate_ports("left", {"input", "edge-bus", "boundary"}))
         if not row_groups:
             left_end = int(max(0, float(root["x"]) - 1))
             positions = [
-                (float(x), default_y, f"input:{boundary['item']}", DIR_EAST, "transport-belt")
+                (float(x), default_y, boundary_label, DIR_EAST, "transport-belt")
                 for x in range(0, left_end + 1)
             ]
             belts_added, route_collisions = add_positions(positions)
             routes.append(
                 {
-                    "boundary": f"input:{boundary['item']}",
+                    "boundary": boundary_label,
                     "status": "stub-only" if not route_collisions else "blocked",
                     "belts_added": belts_added,
                     "collisions": route_collisions,
@@ -725,53 +906,22 @@ def add_boundary_connectors(
             )
             continue
 
-        for row_ports in row_groups:
-            row_y = min(float(port["y"]) for port in row_ports)
-            ports = ports_by_distance(row_ports, row_y, "left")
-            candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]] = []
-            reason = f"input:{boundary['item']}"
-            for port in ports:
-                start_x = 0.5
-                end_x = float(port["x"]) - 0.5
-                belt_name = connector_belt_name_for_port(port)
-                candidates.append(
-                    (
-                        port,
-                        *route_candidate(
-                            start_x=start_x,
-                            end_x=end_x,
-                            y=float(port["y"]),
-                            reason=reason,
-                            belt_name=belt_name,
-                        ),
-                    )
-                )
-            belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
-            routes.append(
-                {
-                    "boundary": f"input:{boundary['item']}",
-                    "status": "connected" if not route_collisions else "blocked",
-                    "belts_added": belts_added,
-                    "collisions": route_collisions,
-                    "port": port,
-                    "route_kind": route_kind,
-                    "blocked_attempts": blocked_attempts,
-                }
-            )
+        add_boundary_routes(boundary_label, side="left", row_groups=row_groups)
 
     for boundary in layout_plan.get("boundary_outputs") or []:
+        boundary_label = f"output:{boundary['item']}"
         row_groups = port_groups_by_row(candidate_ports("right", {"output", "edge-bus", "boundary"}))
         if not row_groups:
             right_start = int(float(root["x"]) + float(root["planned_width"]) + 1)
             right_end = int(max(right_start - 1, float(layout_plan["estimated_width"]) - 1))
             positions = [
-                (float(x), default_y, f"output:{boundary['item']}", DIR_EAST, "transport-belt")
+                (float(x), default_y, boundary_label, DIR_EAST, "transport-belt")
                 for x in range(right_start, right_end + 1)
             ]
             belts_added, route_collisions = add_positions(positions)
             routes.append(
                 {
-                    "boundary": f"output:{boundary['item']}",
+                    "boundary": boundary_label,
                     "status": "stub-only" if not route_collisions else "blocked",
                     "belts_added": belts_added,
                     "collisions": route_collisions,
@@ -780,39 +930,29 @@ def add_boundary_connectors(
             )
             continue
 
-        for row_ports in row_groups:
-            row_y = min(float(port["y"]) for port in row_ports)
-            ports = ports_by_distance(row_ports, row_y, "right")
-            candidates = []
-            reason = f"output:{boundary['item']}"
-            end_x = float(layout_plan["estimated_width"]) - 0.5
-            for port in ports:
-                start_x = float(port["x"]) + 1.0
-                belt_name = connector_belt_name_for_port(port)
-                candidates.append(
-                    (
-                        port,
-                        *route_candidate(
-                            start_x=start_x,
-                            end_x=end_x,
-                            y=float(port["y"]),
-                            reason=reason,
-                            belt_name=belt_name,
-                        ),
-                    )
-                )
-            belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
-            routes.append(
-                {
-                    "boundary": f"output:{boundary['item']}",
-                    "status": "connected" if not route_collisions else "blocked",
-                    "belts_added": belts_added,
-                    "collisions": route_collisions,
-                    "port": port,
-                    "route_kind": route_kind,
-                    "blocked_attempts": blocked_attempts,
-                }
+        add_boundary_routes(boundary_label, side="right", row_groups=row_groups)
+
+    def add_bridges_for_selected_boundary_routes() -> int:
+        before = len(connectors)
+        node_index = node_by_fingerprint()
+        for route in routes:
+            if route.get("status") != "connected":
+                continue
+            boundary = str(route.get("boundary") or "")
+            if not boundary.startswith("output:"):
+                continue
+            port = route.get("port") or {}
+            node = node_index.get(str(port.get("node_fingerprint") or ""))
+            if not node:
+                continue
+            add_inter_instance_bridge_lane(
+                node,
+                round(float(port.get("y") or 0.0), 3),
+                require_simple_surface=False,
             )
+        return len(connectors) - before
+
+    bridges_added += add_bridges_for_selected_boundary_routes()
 
     def add_input_fanouts() -> int:
         before = len(connectors)
@@ -914,20 +1054,7 @@ def add_boundary_connectors(
     input_fanouts_added = add_input_fanouts()
 
     def route_boundary_rate(route: dict[str, Any]) -> float | None:
-        boundary = str(route.get("boundary") or "")
-        if boundary.startswith("output:"):
-            item = boundary.split(":", 1)[1]
-            for output in layout_plan.get("boundary_outputs") or []:
-                if str(output.get("item")) == item:
-                    rate = output.get("rate_per_minute")
-                    return float(rate) if isinstance(rate, (int, float)) else None
-        if boundary.startswith("input:"):
-            item = boundary.split(":", 1)[1]
-            for input_item in layout_plan.get("boundary_inputs") or []:
-                if str(input_item.get("item")) == item:
-                    rate = input_item.get("rate_per_minute")
-                    return float(rate) if isinstance(rate, (int, float)) else None
-        return None
+        return boundary_required_rate(str(route.get("boundary") or ""))
 
     def boundary_capacity_audit() -> list[dict[str, Any]]:
         if knowledge is None:

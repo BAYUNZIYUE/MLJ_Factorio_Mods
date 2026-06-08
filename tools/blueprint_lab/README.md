@@ -157,21 +157,27 @@ A blocked route found a port but refused to add partial belts because an exact
 entity-position collision was detected. The router evaluates all compatible
 ports on the requested side before declaring a route blocked; failed direct
 candidates are retained in `blocked_attempts` so the report can explain why a
-later port was chosen. Connector belts inherit the selected port belt tier when
-the port is a transport belt, underground belt, or splitter. Blueprint Lab uses
-Factorio 2.x direction values, where cardinal belts use north `0`, east `4`,
-south `8`, and west `12`. Learned port roles are direction-aware evidence, not
-an absolute route truth: boundary routing first prefers ports on already
-connected horizontal bridge lanes, then prefers simple surface belt lanes, and
-uses role plus distance as tie breakers. That keeps full-belt copies on the
-same learned bus instead of blindly choosing a labeled port that cannot fan out
-across repeated instances. Inter-instance bridges are reported separately from
-boundary routes so a generated full-belt box can show whether repeated module
-edge buses were connected before the final boundary output was attached. The
-bridge generator does not start a visible horizontal bridge from an
-underground-belt `input` end or terminate one at an underground-belt `output`
-end, because those are tunnel entrance/exit semantics rather than ordinary
-surface belts. Boundary coverage then audits the route plus bridges as a graph:
+later port was chosen. When data.raw belt capacity shows that one boundary
+route cannot carry the requested rate, the router keeps choosing additional
+learned ports on different lanes until the boundary has enough connected belt
+capacity or no usable learned lane remains. Connector belts inherit the selected
+port belt tier when the port is a transport belt, underground belt, or splitter.
+Blueprint Lab uses Factorio 2.x direction values, where cardinal belts use
+north `0`, east `4`, south `8`, and west `12`. Learned port roles are
+direction-aware evidence, not an absolute route truth: boundary routing first
+prefers ports on already connected horizontal bridge lanes, then prefers simple
+surface belt lanes, and uses role plus distance as tie breakers. That keeps
+full-belt copies on the same learned bus instead of blindly choosing a labeled
+port that cannot fan out across repeated instances. Inter-instance bridges are
+reported separately from boundary routes so a generated full-belt box can show
+whether repeated module edge buses were connected before the final boundary
+output was attached. The default bridge pass connects simple surface belt lanes
+first; extra learned lanes chosen by multi-belt boundary routing get their own
+on-demand bridge pass. The bridge generator does not start a visible horizontal
+bridge from an underground-belt `input` end or terminate one at an
+underground-belt `output` end, because those are tunnel entrance/exit semantics
+rather than ordinary surface belts. Boundary coverage then audits the route plus
+bridges as a graph:
 output coverage walks backward from the selected output port through connected
 instance bridges, while input coverage walks forward from the selected input
 port. Coverage is lane-aware: only bridges on the same y coordinate as the
@@ -192,7 +198,10 @@ of the connected boundary routes themselves and compares it with the boundary
 input or output rate. This matters for multi-belt targets: a generated box may
 have enough machines and internal buses for `2x turbo-transport-belt`, but one
 connected turbo output lane still only has 3600 items/minute of boundary
-capacity.
+capacity. The materializer can now add a second connected boundary route when a
+second learned lane is available; underground-backed lanes remain `unresolved`
+in belt flow audit until a dedicated underground-pair parser can prove their
+semantics.
 
 The belt flow audit is a stricter pass over those connected segments. It
 rebuilds each horizontal boundary route, inter-instance bridge, and input
