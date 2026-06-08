@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 from tools.blueprint_lab.analysis import blueprint_metrics, summarize_library
 from tools.blueprint_lab.codec import decode_blueprint_string, encode_blueprint_string, walk_nodes
 from tools.blueprint_lab.decompose import decompose_blueprint
-from tools.blueprint_lab.directions import DIR_EAST, DIR_WEST
+from tools.blueprint_lab.directions import DIR_EAST, DIR_SOUTH, DIR_WEST
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
@@ -69,6 +69,7 @@ def main() -> int:
         "runtime_audit_wait_ticks=",
         "recipe_machine_audit",
         "recipe_machine_runtime",
+        "recipe_machine_output_items",
         "input_probe_mode",
         'input_probe_mode == "left"',
         'input_probe_mode == "pickup"',
@@ -79,6 +80,10 @@ def main() -> int:
         "inserter.drop_target",
         "pickup_target.get_item_insert_specification",
         "transport_item_audit",
+        "transport_item_extents",
+        "transport_item_y_distribution",
+        "transport_item_samples",
+        "right_boundary_transport_item_audit",
         "script.on_event(defines.events.on_tick",
     ]:
         if expected not in validation_lua:
@@ -301,6 +306,72 @@ def main() -> int:
     pickup_flow_counts = Counter(item["status"] for item in pickup_port_summary["belt_flow_audit"])
     if pickup_flow_counts != {"pass": 2}:
         print(f"FAIL: expected machine-input boundary routes to pass belt flow audit: {pickup_port_summary}")
+        return 1
+    output_port_layout = {
+        "target_item": "iron-gear-wheel",
+        "target_rate_per_minute": 150,
+        "spacing": 1,
+        "estimated_width": 14,
+        "estimated_height": 14,
+        "boundary_inputs": [],
+        "boundary_outputs": [{"item": "iron-gear-wheel", "rate_per_minute": 150, "side": "right"}],
+        "nodes": [
+            {
+                "item": "iron-gear-wheel",
+                "recipe": "iron-gear-wheel",
+                "fingerprint": "output-port-template",
+                "instances": 1,
+                "source_width": 3,
+                "source_height": 6,
+                "source_entity_count": 3,
+                "source_tile_count": 0,
+                "columns": 1,
+                "rows": 1,
+                "planned_width": 3,
+                "planned_height": 6,
+                "planned_net_output_per_minute": 150,
+                "x": 4,
+                "y": 4,
+                "ports": [],
+                "port_counts": [],
+                "source": "fixture",
+                "path": "/output-port",
+            }
+        ],
+    }
+    output_port_mappings = [
+        {
+            "fingerprint": "output-port-template",
+            "layout": {
+                "entities": [
+                    {"name": "assembling-machine-3", "x": 0, "y": 2, "direction": None, "recipe": "iron-gear-wheel", "recipe_quality": None, "quality": None},
+                    {"name": "fast-inserter", "x": 0, "y": 3, "direction": 0, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "transport-belt", "x": 0, "y": 4, "direction": DIR_SOUTH, "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, output_port_summary = materialize_layout_with_summary(
+        output_port_layout,
+        output_port_mappings,
+        label="fixture-output-port",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    output_routes = output_port_summary["routes"]
+    if (
+        len(output_routes) != 1
+        or output_routes[0]["status"] != "connected"
+        or output_routes[0]["port"]["role"] != "machine-output"
+        or output_routes[0]["route_kind"] != "machine-output-side-load-0"
+        or output_routes[0]["port"]["source"] != "machine-io"
+    ):
+        print(f"FAIL: expected output boundary route to use a machine I/O drop belt port: {output_port_summary}")
+        return 1
+    output_flow_counts = Counter(item["status"] for item in output_port_summary["belt_flow_audit"])
+    if output_flow_counts != {"pass": 1}:
+        print(f"FAIL: expected machine-output side-load route to pass belt flow audit: {output_port_summary}")
         return 1
     pruned_entities = prune_template_entities_for_recipe(
         [

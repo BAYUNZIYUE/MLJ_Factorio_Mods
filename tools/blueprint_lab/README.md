@@ -291,20 +291,25 @@ fed at the real pickup lane. The next generator problem is to make the external
 boundary route and input fanout connect to those proven pickup lanes instead of
 only to a learned left-edge bus.
 
-The materializer now promotes those machine input pickup belts into routeable
-`machine-input` ports. For vertical pickup lanes, it can generate a side-load
-route from the left boundary into the pickup belt lane instead of pretending
-that a horizontal edge bus reaches the machine. The current `iron-ore` 2x turbo
-full-belt sample generates five `machine-input-side-load` input routes, one for
-each copied crusher cell. A left-only runtime probe against that generated
-blueprint imported 420 entities, placed them through the direct-placement
-fallback, inserted `metallic-asteroid-chunk` only on left-edge transport lines,
-and then reported all five crushers at `full_output` with
-`products_finished=10` and `output_items=195`. That proves the generated
-external input boundary can now feed the real crusher pickup lanes. It still
-does not prove output flow: the same probe did not see `iron-ore` on transport
-lines, so the next validation boundary is machine output unloading and output
-boundary flow.
+The materializer now promotes machine input pickup belts and machine output
+drop belts into routeable `machine-input` / `machine-output` ports. For vertical
+pickup lanes, it can generate a left-boundary route into the real pickup belt
+instead of pretending that a horizontal edge bus reaches the machine. For output
+ports, route scoring prefers the actual drop lane over the topmost adjacent lane
+when both are structurally available. The current `iron-ore` 2x turbo full-belt
+sample generates five machine-input routes and five machine-output routes, one
+pair for each copied crusher cell.
+
+A left-only runtime probe against that generated blueprint imports 480 entities,
+places them through the direct-placement fallback, inserts
+`metallic-asteroid-chunk` only on left-edge transport lines, and then reports all
+five crushers at `full_output`. After 600 ticks, the transport audit reports
+`iron-ore:327`, item extents `iron-ore:count=327:x=71.5..87.5:y=18.5..88.5`,
+and right-boundary items `iron-ore:18`. That proves the generated external input
+boundary can feed the real crusher pickup lanes and that product items can reach
+the generated right boundary. It still does not prove full-belt sustained
+throughput, long-run stability, clean output lanes, or player `build_blueprint`
+success on a platform surface.
 
 ## Commands
 

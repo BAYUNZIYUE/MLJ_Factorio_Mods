@@ -19,9 +19,10 @@ def lua_long_string(value: str) -> str:
     return f"[[{value}]]"
 
 
-def render_control_lua(blueprint_string: str, *, input_probe: str = "both") -> str:
+def render_control_lua(blueprint_string: str, *, input_probe: str = "both", runtime_audit_wait_ticks: int = 120) -> str:
     return f"""local blueprint_string = {lua_long_string(blueprint_string)}
 local input_probe_mode = {lua_long_string(input_probe)}
+local runtime_audit_wait_ticks = {int(runtime_audit_wait_ticks)}
 
 local function validation_fail(message)
   log("BLUEPRINT_LAB_VALIDATION fail " .. tostring(message))
@@ -103,6 +104,29 @@ local function audit_recipe_machines(surface)
   end
   log("BLUEPRINT_LAB_VALIDATION recipe_machine_audit machines=" .. tostring(recipe_machine_count) .. " recipes=" .. sorted_count_string(recipe_counts) .. " status=" .. sorted_count_string(status_counts))
   log("BLUEPRINT_LAB_VALIDATION recipe_machine_runtime crafting_speed_positive=" .. tostring(crafting_speed_positive) .. " electric_connected=" .. tostring(electric_connected_count) .. "/" .. tostring(electric_checked_count) .. " products_finished=" .. tostring(products_finished_total) .. " module_items=" .. tostring(module_item_total) .. " output_items=" .. tostring(output_item_total))
+end
+
+local function audit_recipe_machine_output_items(surface)
+  local output_counts = {{}}
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_recipe, recipe = pcall(function()
+      return entity.get_recipe()
+    end)
+    if ok_recipe and recipe ~= nil then
+      local output_inventory = entity.get_output_inventory()
+      if output_inventory ~= nil then
+        for _, product in pairs(recipe.products or {{}}) do
+          if product.name ~= nil and product.type ~= "fluid" then
+            local count = output_inventory.get_item_count(product.name)
+            if count ~= nil and count > 0 then
+              output_counts[product.name] = (output_counts[product.name] or 0) + count
+            end
+          end
+        end
+      end
+    end
+  end
+  log("BLUEPRINT_LAB_VALIDATION recipe_machine_output_items items=" .. sorted_count_string(output_counts))
 end
 
 local function collect_recipe_input_items(surface)
@@ -187,6 +211,136 @@ local function audit_transport_items(surface)
   log("BLUEPRINT_LAB_VALIDATION transport_item_audit belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count) .. " items=" .. sorted_count_string(item_counts))
 end
 
+local function audit_transport_item_extents(surface)
+  local tracked_items = {{}}
+  for item_name, _ in pairs(collect_recipe_input_items(surface)) do
+    tracked_items[item_name] = true
+  end
+  for item_name, _ in pairs(collect_recipe_product_items(surface)) do
+    tracked_items[item_name] = true
+  end
+
+  local extents = {{}}
+  local y_counts = {{}}
+  local samples = {{}}
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_line_count, max_line_index = pcall(function()
+      return entity.get_max_transport_line_index()
+    end)
+    if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+      for line_index = 1, max_line_index do
+        local line = entity.get_transport_line(line_index)
+        if line ~= nil then
+          for item_name, _ in pairs(tracked_items) do
+            local ok_count, item_count = pcall(function()
+              return line.get_item_count(item_name)
+            end)
+            if ok_count and item_count ~= nil and item_count > 0 then
+              local info = extents[item_name]
+              if info == nil then
+                info = {{count = 0, min_x = entity.position.x, max_x = entity.position.x, min_y = entity.position.y, max_y = entity.position.y}}
+                extents[item_name] = info
+              end
+              info.count = info.count + item_count
+              if entity.position.x < info.min_x then info.min_x = entity.position.x end
+              if entity.position.x > info.max_x then info.max_x = entity.position.x end
+              if entity.position.y < info.min_y then info.min_y = entity.position.y end
+              if entity.position.y > info.max_y then info.max_y = entity.position.y end
+
+              local y_key = item_name .. "@" .. tostring(entity.position.y)
+              y_counts[y_key] = (y_counts[y_key] or 0) + item_count
+              if samples[item_name] == nil then
+                samples[item_name] = {{}}
+              end
+              if #samples[item_name] < 6 then
+                samples[item_name][#samples[item_name] + 1] = tostring(entity.name) .. "@x" .. tostring(entity.position.x) .. "y" .. tostring(entity.position.y) .. "l" .. tostring(line_index) .. ":" .. tostring(item_count)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  local item_names = sorted_keys(extents)
+  if #item_names == 0 then
+    log("BLUEPRINT_LAB_VALIDATION transport_item_extents items=")
+    return
+  end
+
+  local parts = {{}}
+  for _, item_name in pairs(item_names) do
+    local info = extents[item_name]
+    parts[#parts + 1] = item_name .. ":count=" .. tostring(info.count) .. ":x=" .. tostring(info.min_x) .. ".." .. tostring(info.max_x) .. ":y=" .. tostring(info.min_y) .. ".." .. tostring(info.max_y)
+  end
+  log("BLUEPRINT_LAB_VALIDATION transport_item_extents items=" .. table.concat(parts, ";"))
+
+  local y_keys = sorted_keys(y_counts)
+  local y_parts = {{}}
+  for _, y_key in pairs(y_keys) do
+    y_parts[#y_parts + 1] = y_key .. ":" .. tostring(y_counts[y_key])
+  end
+  log("BLUEPRINT_LAB_VALIDATION transport_item_y_distribution items=" .. table.concat(y_parts, ","))
+
+  local sample_parts = {{}}
+  for _, item_name in pairs(item_names) do
+    sample_parts[#sample_parts + 1] = item_name .. "=" .. table.concat(samples[item_name] or {{}}, "|")
+  end
+  log("BLUEPRINT_LAB_VALIDATION transport_item_samples items=" .. table.concat(sample_parts, ";"))
+end
+
+local function audit_right_boundary_transport_items(surface)
+  local input_items = collect_recipe_input_items(surface)
+  local product_items = collect_recipe_product_items(surface)
+  local max_x = nil
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_line_count, max_line_index = pcall(function()
+      return entity.get_max_transport_line_index()
+    end)
+    if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+      if max_x == nil or entity.position.x > max_x then
+        max_x = entity.position.x
+      end
+    end
+  end
+  local item_counts = {{}}
+  local belt_count = 0
+  local line_count = 0
+  if max_x ~= nil then
+    for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+      local ok_line_count, max_line_index = pcall(function()
+        return entity.get_max_transport_line_index()
+      end)
+      if ok_line_count and max_line_index ~= nil and max_line_index > 0 and entity.position.x >= max_x - 0.1 then
+        belt_count = belt_count + 1
+        for line_index = 1, max_line_index do
+          local line = entity.get_transport_line(line_index)
+          if line ~= nil then
+            line_count = line_count + 1
+            for item_name, _ in pairs(input_items) do
+              local ok_count, item_count = pcall(function()
+                return line.get_item_count(item_name)
+              end)
+              if ok_count and item_count ~= nil and item_count > 0 then
+                item_counts[item_name] = (item_counts[item_name] or 0) + item_count
+              end
+            end
+            for item_name, _ in pairs(product_items) do
+              local ok_count, item_count = pcall(function()
+                return line.get_item_count(item_name)
+              end)
+              if ok_count and item_count ~= nil and item_count > 0 then
+                item_counts[item_name] = (item_counts[item_name] or 0) + item_count
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  log("BLUEPRINT_LAB_VALIDATION right_boundary_transport_item_audit max_x=" .. tostring(max_x) .. " belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count) .. " items=" .. sorted_count_string(item_counts))
+end
+
 local function inject_input_items_to_left_belts(surface)
   local input_items = collect_recipe_input_items(surface)
   local item_names = sorted_keys(input_items)
@@ -216,7 +370,7 @@ local function inject_input_items_to_left_belts(surface)
   local insertion_failures = 0
   if min_x ~= nil then
     for _, candidate in pairs(belt_candidates) do
-      if candidate.x <= min_x + 6 then
+      if candidate.x <= min_x + 0.1 then
         belt_count = belt_count + 1
         for line_index = 1, candidate.line_count do
           local line = candidate.entity.get_transport_line(line_index)
@@ -401,8 +555,6 @@ end
 local validation_started = false
 local pending_audit_surface = nil
 local pending_audit_tick = nil
-local runtime_audit_wait_ticks = 120
-
 local function run_validation()
   log("BLUEPRINT_LAB_VALIDATION start")
   game.forces.player.enable_all_recipes()
@@ -663,7 +815,10 @@ script.on_event(defines.events.on_tick, function(event)
   if pending_audit_surface ~= nil and game.tick >= pending_audit_tick then
     script.on_event(defines.events.on_tick, nil)
     audit_recipe_machines(pending_audit_surface)
+    audit_recipe_machine_output_items(pending_audit_surface)
     audit_transport_items(pending_audit_surface)
+    audit_transport_item_extents(pending_audit_surface)
+    audit_right_boundary_transport_items(pending_audit_surface)
     log("BLUEPRINT_LAB_VALIDATION success")
     validation_fail("completed")
   end
@@ -677,6 +832,7 @@ def write_validation_scenario(
     scenario_name: str,
     blueprint_string: str,
     input_probe: str = "both",
+    runtime_audit_wait_ticks: int = 120,
 ) -> Path:
     scenario_dir = user_data_dir / "scenarios" / scenario_name
     scenario_dir.mkdir(parents=True, exist_ok=True)
@@ -694,7 +850,14 @@ def write_validation_scenario(
         ),
         encoding="utf-8",
     )
-    (scenario_dir / "control.lua").write_text(render_control_lua(blueprint_string, input_probe=input_probe), encoding="utf-8")
+    (scenario_dir / "control.lua").write_text(
+        render_control_lua(
+            blueprint_string,
+            input_probe=input_probe,
+            runtime_audit_wait_ticks=runtime_audit_wait_ticks,
+        ),
+        encoding="utf-8",
+    )
     return scenario_dir
 
 
@@ -778,6 +941,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--until-tick", type=int, default=2)
     parser.add_argument("--timeout-seconds", type=float, default=45)
     parser.add_argument("--input-probe", choices=["left", "pickup", "both"], default="both")
+    parser.add_argument("--runtime-audit-wait-ticks", type=int, default=120)
     args = parser.parse_args(argv)
 
     blueprint_string = args.blueprint.read_text(encoding="utf-8").strip()
@@ -786,6 +950,7 @@ def main(argv: list[str] | None = None) -> int:
         scenario_name=args.scenario_name,
         blueprint_string=blueprint_string,
         input_probe=args.input_probe,
+        runtime_audit_wait_ticks=args.runtime_audit_wait_ticks,
     )
 
     args.console_log.parent.mkdir(parents=True, exist_ok=True)
