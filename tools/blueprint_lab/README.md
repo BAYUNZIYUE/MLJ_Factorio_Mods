@@ -321,18 +321,17 @@ recycle-return belts, and per-route `recycle_flow=pass` audits over 80 and 26
 checked belt positions. This is a structural return-to-input-boundary route, not
 yet a proven internal merge back into the input bus.
 
-Left-only runtime probes against the earlier filtered-output generated blueprint
-imported 656 entities, placed them through the direct-placement fallback, inserted
-`metallic-asteroid-chunk` only on left-edge transport lines, and restored splitter
-filters/priorities with zero splitter-setting failures. After 1200 and 2400 ticks,
-that earlier filtered-output blueprint reported a clean right boundary containing
-only `iron-ore`. A fresh 1200/2400 tick probe against the newer 704-entity
-recycle-return geometry still imports and places every entity with zero splitter
-setting failures, but the right-boundary audit is currently `empty` rather than
-`clean` with product samples. This means the structural recycle-return route is
-not yet runtime-proven as a sustained output blueprint. It also still does not
-prove sustained full-belt throughput, internal byproduct merge, long-run
-stability, or player `build_blueprint` success on a platform surface.
+Left-only runtime probes against the current recycle-return blueprint import 704
+entities, place them through the direct-placement fallback, insert
+`metallic-asteroid-chunk` only on left-edge transport lines, and restore splitter
+filters/priorities with zero splitter-setting failures. A 2400-tick runtime audit
+reports `right_boundary_cleanliness status=clean` with `iron-ore` on the right
+boundary and no input/byproduct items there. The same probe still observes some
+`metallic-asteroid-chunk` on internal transport lines, so this proves the audited
+right output boundary is clean for the tested window, not that the internal
+recycle loop is fully drained, perfectly merged, or long-run stable. It also
+still does not prove sustained full-belt throughput or player `build_blueprint`
+success on a platform surface.
 
 ## Commands
 

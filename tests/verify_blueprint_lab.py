@@ -21,7 +21,12 @@ from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
 from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe, select_best_materialized_layout
-from tools.blueprint_lab.factorio_validate import render_control_lua, write_factorio_config, write_server_settings
+from tools.blueprint_lab.factorio_validate import (
+    effective_runtime_audit_wait_ticks,
+    render_control_lua,
+    write_factorio_config,
+    write_server_settings,
+)
 
 
 def main() -> int:
@@ -103,6 +108,9 @@ def main() -> int:
     factorio_config = write_factorio_config(ROOT / ".codex" / "tests" / "factorio_validation_fixture").read_text(encoding="utf-8")
     if "write-data=" not in factorio_config or "enable-blueprint-storage-cloud-sync=false" not in factorio_config:
         print(f"FAIL: expected Factorio validation config to pin isolated write-data: {factorio_config}")
+        return 1
+    if effective_runtime_audit_wait_ticks(2, 120) != 120 or effective_runtime_audit_wait_ticks(2400, 120) != 2400:
+        print("FAIL: expected Factorio validation to wait at least until --until-tick before runtime audit")
         return 1
 
     learned = learn_library([tmp])

@@ -899,6 +899,10 @@ end)
 """
 
 
+def effective_runtime_audit_wait_ticks(until_tick: int, runtime_audit_wait_ticks: int) -> int:
+    return max(int(until_tick), int(runtime_audit_wait_ticks))
+
+
 def write_validation_scenario(
     *,
     user_data_dir: Path,
@@ -1057,7 +1061,7 @@ def main(argv: list[str] | None = None) -> int:
         scenario_name=args.scenario_name,
         blueprint_string=blueprint_string,
         input_probe=args.input_probe,
-        runtime_audit_wait_ticks=args.runtime_audit_wait_ticks,
+        runtime_audit_wait_ticks=effective_runtime_audit_wait_ticks(args.until_tick, args.runtime_audit_wait_ticks),
     )
 
     args.console_log.parent.mkdir(parents=True, exist_ok=True)
