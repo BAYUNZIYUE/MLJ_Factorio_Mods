@@ -770,6 +770,7 @@ def main() -> int:
     if (
         multi_lane_capacity["output:iron-ore"]["status"] != "sufficient"
         or multi_lane_capacity["output:iron-ore"]["capacity_per_minute"] != 7200
+        or multi_lane_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 7200
         or multi_lane_capacity["output:iron-ore"]["route_count"] != 2
         or len(output_routes) != 2
     ):
@@ -777,6 +778,43 @@ def main() -> int:
         return 1
     if capacity_multi_lane_summary["collisions"]:
         print(f"FAIL: expected multi-lane boundary routing to avoid connector collisions: {capacity_multi_lane_summary}")
+        return 1
+    capacity_unresolved_lane_mappings = deepcopy(capacity_multi_lane_mappings)
+    capacity_unresolved_lane_mappings[0]["layout"]["entities"][-1] = {
+        "name": "turbo-splitter",
+        "x": 1,
+        "y": 3,
+        "direction": DIR_EAST,
+        "recipe": None,
+        "recipe_quality": None,
+        "quality": None,
+    }
+    capacity_unresolved_lane_layout = deepcopy(capacity_multi_lane_layout)
+    capacity_unresolved_lane_layout["nodes"][0]["ports"][-1] = {
+        "side": "right",
+        "role": "output",
+        "entity_name": "turbo-splitter",
+        "x": 1,
+        "y": 3,
+    }
+    _, capacity_unresolved_lane_summary = materialize_layout_with_summary(
+        capacity_unresolved_lane_layout,
+        capacity_unresolved_lane_mappings,
+        label="fixture-capacity-unresolved-lane",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    unresolved_lane_capacity = {item["boundary"]: item for item in capacity_unresolved_lane_summary["boundary_capacity_audit"]}
+    unresolved_output = unresolved_lane_capacity["output:iron-ore"]
+    if (
+        unresolved_output["status"] != "unresolved"
+        or unresolved_output["capacity_per_minute"] != 7200
+        or unresolved_output["proven_capacity_per_minute"] != 3600
+        or unresolved_output["unresolved_capacity_per_minute"] != 3600
+        or not unresolved_output["structural_meets_required_rate"]
+        or unresolved_output["meets_required_rate"]
+    ):
+        print(f"FAIL: expected structural 2x capacity with one unresolved lane to stay unresolved, not sufficient: {capacity_unresolved_lane_summary}")
         return 1
 
     semantic_fail_mappings = [

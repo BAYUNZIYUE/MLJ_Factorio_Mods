@@ -193,15 +193,18 @@ already-built bus segments; non-belt collisions still block the fanout.
 
 Boundary capacity audit is separate from boundary coverage. Coverage proves
 that connected routes and repeated-instance buses reach the copied machines that
-can produce the requested rate. Capacity audit sums the data.raw belt throughput
-of the connected boundary routes themselves and compares it with the boundary
-input or output rate. This matters for multi-belt targets: a generated box may
-have enough machines and internal buses for `2x turbo-transport-belt`, but one
-connected turbo output lane still only has 3600 items/minute of boundary
-capacity. The materializer can now add a second connected boundary route when a
-second learned lane is available; underground-backed lanes remain `unresolved`
-in belt flow audit until a dedicated underground-pair parser can prove their
-semantics.
+can produce the requested rate. Capacity audit groups connected boundary routes
+by boundary and learned template, sums their data.raw belt throughput, and now
+uses the belt flow audit before marking that capacity as proven. This matters
+for multi-belt targets: a generated box may have enough machines and internal
+buses for `2x turbo-transport-belt`, but one connected turbo output lane still
+only has 3600 items/minute of boundary capacity. Two connected turbo lanes have
+7200 items/minute of structural capacity, but the audit reports `unresolved`
+instead of `sufficient` if one lane depends on splitter or underground-belt
+semantics that the belt flow audit has not proven. The materializer can add a
+second connected boundary route when a second learned lane is available;
+underground-backed lanes remain `unresolved` in belt flow audit until a
+dedicated underground-pair parser can prove their semantics.
 
 The belt flow audit is a stricter pass over those connected segments. It
 rebuilds each horizontal boundary route, inter-instance bridge, and input
