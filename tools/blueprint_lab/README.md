@@ -150,9 +150,12 @@ box can show whether repeated module edge buses were connected before the final
 boundary output was attached. Boundary coverage then audits the route plus
 bridges as a graph: output coverage walks backward from the selected output
 port through connected instance bridges, while input coverage walks forward
-from the selected input port. This lets the report distinguish "the boundary
-belt touches one copied module" from "the boundary belt reaches every copied
-module needed to cover the requested target rate."
+from the selected input port. Coverage is lane-aware: only bridges on the same
+y coordinate as the selected boundary port are used for reachability. This lets
+the report distinguish "the boundary belt touches one copied module" from "the
+boundary belt reaches every copied module needed to cover the requested target
+rate", and it also exposes when an input bus is still partial even though the
+output bus is connected.
 
 ## Commands
 

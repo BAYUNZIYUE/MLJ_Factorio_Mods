@@ -221,9 +221,10 @@ def add_boundary_connectors(
         return ports
 
     def ports_by_distance(ports: list[dict[str, Any]], y: float, side: str) -> list[dict[str, Any]]:
+        role_priority = {"input": 0, "output": 0, "edge-bus": 1, "boundary": 2}
         if side == "right":
-            return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), -float(port["x"])))
-        return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), float(port["x"])))
+            return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), role_priority.get(str(port.get("role")), 9), -float(port["x"])))
+        return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), role_priority.get(str(port.get("role")), 9), float(port["x"])))
 
     def port_by_y(ports: list[dict[str, Any]], *, prefer: str) -> dict[float, dict[str, Any]]:
         selected: dict[float, dict[str, Any]] = {}
@@ -283,6 +284,7 @@ def add_boundary_connectors(
                             "node_fingerprint": node.get("fingerprint"),
                             "from_instance": instance,
                             "to_instance": next_instance,
+                            "bridge_y": y,
                             "from_port": right_port,
                             "to_port": left_port,
                             "status": status,
@@ -422,12 +424,14 @@ def add_boundary_connectors(
                     return float(rate) if isinstance(rate, (int, float)) else None
         return None
 
-    def bridge_edges_for_node(fingerprint: str) -> list[tuple[int, int]]:
+    def bridge_edges_for_node(fingerprint: str, y: float) -> list[tuple[int, int]]:
         edges: list[tuple[int, int]] = []
         for bridge in bridges:
             if bridge.get("status") != "connected":
                 continue
             if str(bridge.get("node_fingerprint") or "") != fingerprint:
+                continue
+            if round(float(bridge.get("bridge_y") or 0.0), 3) != round(y, 3):
                 continue
             edges.append((int(bridge["from_instance"]), int(bridge["to_instance"])))
         return edges
@@ -471,18 +475,21 @@ def add_boundary_connectors(
                 )
                 continue
             start_instance = int(port.get("node_instance") or 0)
+            route_y = round(float(port.get("y") or 0.0), 3)
             boundary = str(route.get("boundary") or "")
             direction = "reverse" if boundary.startswith("output:") else "forward"
             instances = max(1, int(node.get("instances") or 1))
             covered_instances = reachable_instances(
                 start_instance,
-                bridge_edges_for_node(fingerprint),
+                bridge_edges_for_node(fingerprint, route_y),
                 direction=direction,
             )
+            coverage_status = "covered" if len(covered_instances) >= instances else "partial"
             item: dict[str, Any] = {
                 "boundary": route.get("boundary"),
-                "status": "covered",
+                "status": coverage_status,
                 "direction": direction,
+                "route_y": route_y,
                 "node_item": node.get("item"),
                 "node_recipe": node.get("recipe"),
                 "node_fingerprint": fingerprint,

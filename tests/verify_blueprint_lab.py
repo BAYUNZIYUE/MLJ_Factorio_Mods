@@ -472,7 +472,7 @@ def main() -> int:
         "spacing": 4,
         "estimated_width": 17,
         "estimated_height": 10,
-        "boundary_inputs": [],
+        "boundary_inputs": [{"item": "metallic-asteroid-chunk", "rate_per_minute": 120, "side": "left", "reason": "boundary-input"}],
         "boundary_outputs": [{"item": "iron-ore", "rate_per_minute": 3600, "side": "right"}],
         "nodes": [
             {
@@ -493,9 +493,10 @@ def main() -> int:
                 "y": 4,
                 "ports": [
                     {"side": "left", "role": "edge-bus", "entity_name": "turbo-transport-belt", "x": 0, "y": 1},
+                    {"side": "left", "role": "input", "entity_name": "turbo-transport-belt", "x": 0, "y": 2},
                     {"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 1, "y": 1},
                 ],
-                "port_counts": [("left:edge-bus", 1), ("right:output", 1)],
+                "port_counts": [("left:edge-bus", 1), ("left:input", 1), ("right:output", 1)],
                 "source": "fixture",
                 "path": "/replicated",
             }
@@ -518,7 +519,8 @@ def main() -> int:
         label="fixture-replicated",
         connect_boundaries=True,
     )
-    replicated_route = replicated_summary["routes"][0]
+    replicated_routes = {route["boundary"]: route for route in replicated_summary["routes"]}
+    replicated_route = replicated_routes["output:iron-ore"]
     if replicated_route["status"] != "connected" or replicated_route["port"]["node_instance"] != 1:
         print(f"FAIL: expected output route to use the rightmost replicated template port: {replicated_summary}")
         return 1
@@ -528,11 +530,14 @@ def main() -> int:
     if replicated_summary["bridges_added"] != 6 or replicated_summary["bridges"][0]["status"] != "connected":
         print(f"FAIL: expected replicated-port routing to bridge adjacent template instances: {replicated_summary}")
         return 1
-    replicated_coverage = replicated_summary["boundary_coverage"][0]
-    if replicated_coverage["covered_instances"] != [0, 1] or not replicated_coverage["meets_required_rate"]:
+    replicated_coverage = {item["boundary"]: item for item in replicated_summary["boundary_coverage"]}
+    if replicated_coverage["output:iron-ore"]["status"] != "covered" or replicated_coverage["output:iron-ore"]["covered_instances"] != [0, 1] or not replicated_coverage["output:iron-ore"]["meets_required_rate"]:
         print(f"FAIL: expected replicated output coverage to cover both instances and meet the boundary rate: {replicated_summary}")
         return 1
-    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 11:
+    if replicated_coverage["input:metallic-asteroid-chunk"]["status"] != "partial" or replicated_coverage["input:metallic-asteroid-chunk"]["covered_instances"] != [0]:
+        print(f"FAIL: expected lane-aware input coverage to avoid crossing unrelated output bridges: {replicated_summary}")
+        return 1
+    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 15:
         print(f"FAIL: expected replicated-port route and bridge to add turbo belts: {replicated}")
         return 1
     if decode_blueprint_string(encode_blueprint_string(replicated)) != replicated:
