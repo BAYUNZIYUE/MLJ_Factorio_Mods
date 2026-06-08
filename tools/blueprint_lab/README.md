@@ -22,6 +22,7 @@ tree.
 - Audit connected boundary belt capacity against data.raw belt speed, so generated reports can catch cases where machine coverage is high enough but the final boundary has too few belt lanes.
 - Audit production-machine inserter endpoints against data.raw entity boxes, so generated reports can distinguish target machines with belt-fed input/output from copied but disconnected machines.
 - Audit target recipes for item byproducts that are not the requested output, so generated reports can explain when a clean black-box output boundary needs filtering, recycling, or another separation strategy.
+- Insert target-item filter splitters on output routes when a target recipe has item byproducts; the current separator keeps the target item on the main output route and sends byproducts into a non-boundary overflow lane.
 - Import a generated blueprint through a real Factorio runtime scenario and attempt to build it on the matching surface type. Space platform blueprints are validated on a temporary space platform with foundation tiles pre-placed before entity building is attempted; if `build_blueprint` returns zero entities, the validator can fall back to direct `surface.create_entity` placement to prove the entity names, qualities, recipe qualities, underground-belt endpoint types, module item stacks, and occupied positions are accepted by the current game runtime.
 - The runtime fallback also restores splitter filters and input/output priorities, so future item-separation passes can be validated on platform blueprints that still require direct placement. Runtime boundary audit records right-boundary samples and cleanliness separately, distinguishing a boundary that contains target products from one that also leaks recipe input or byproduct items.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
@@ -234,7 +235,7 @@ route generator treats the tiles between that pair as hidden tunnel span instead
 of filling them with visible connector belts. Underground endpoints that do not
 form such an explicit input-to-output pair, underground belts without a
 preserved type, overlong pairs beyond the data.raw `max_distance`, and
-splitters stay `unresolved` until a stronger parser can prove their semantics.
+splitters stay `unresolved` until a stronger parser can prove their semantics. The current exception is an east-facing target-output filter splitter with `output_priority=left`; this is accepted as proven for the target output route because a runtime splitter probe confirmed that the filtered item stays on the main route while non-target items leave on the side output.
 This is still not a full belt simulation: it does not understand lane filters,
 splitter balancing, stacked belts, cross-segment underground-belt pairing, or
 inserter timing.
@@ -299,30 +300,30 @@ pickup lanes, it can generate a left-boundary route into the real pickup belt
 instead of pretending that a horizontal edge bus reaches the machine. For output
 ports, route scoring prefers the actual drop lane over the topmost adjacent lane
 when both are structurally available. The current `iron-ore` 2x turbo full-belt
-sample generates five machine-input routes and five machine-output routes, one
-pair for each copied crusher cell.
+sample selects a 4x2 copied-crusher grid with five machine-input routes and two
+right-side `turbo-transport-belt` output routes.
 
-A left-only runtime probe against that generated blueprint imports 480 entities,
-places them through the direct-placement fallback, inserts
-`metallic-asteroid-chunk` only on left-edge transport lines, and then reports all
-five crushers at `full_output`. After 600 ticks, the transport audit reports
-`iron-ore:327`, item extents `iron-ore:count=327:x=71.5..87.5:y=18.5..88.5`,
-and right-boundary items `iron-ore:18`. That proves the generated external input
-boundary can feed the real crusher pickup lanes and that product items can reach
-the generated right boundary. It still does not prove full-belt sustained
-throughput, long-run stability, clean output lanes, or player `build_blueprint`
-success on a platform surface.
+Full-belt targets carry a boundary-contract audit. For a target such as `2x
+turbo-transport-belt`, the audit expects exactly two connected output routes
+using `turbo-transport-belt`; the current `iron-ore` 2x turbo sample reports
+`exact` with lanes `[8.5, 36.0]`. The same sample now also detects that
+`metallic-asteroid-crushing` can return `metallic-asteroid-chunk` as a 0.2
+probability item byproduct. The materializer inserts two target-item filter
+splitters, keeps `iron-ore` on the main output routes, and sends byproduct chunks
+into non-boundary overflow lanes.
 
-Full-belt targets now also carry a boundary-contract audit. For a target such as
-`2x turbo-transport-belt`, the audit expects exactly two connected output routes
-using `turbo-transport-belt`. The current `iron-ore` 2x turbo sample is therefore
-reported as `over-provisioned`: it can move product to the right boundary, but it
-uses five output routes rather than the requested two output belts. Candidate
-multi-column layouts can produce an exact two-route output contract, but the
-current machine-input routing creates failed overlapping input routes on those
-layouts, so the selector rejects them instead of trading a clean boundary shape
-for broken input flow. The next generator problem is a row-level machine-input
-manifold that can feed several copied crusher cells from one proven input lane.
+Left-only runtime probes against that generated blueprint import 656 entities,
+place them through the direct-placement fallback, insert
+`metallic-asteroid-chunk` only on left-edge transport lines, and restore splitter
+filters/priorities with zero splitter-setting failures. After 1200 and 2400 ticks,
+the right-boundary cleanliness audit reports `clean`; the 2400-tick probe shows
+right-boundary samples containing only `iron-ore`, while byproduct chunks remain
+off-boundary with max x below the output boundary. This proves the current sample
+can feed crushers from the external input boundary, produce `iron-ore`, and keep
+the audited right output boundary free of the recipe byproduct for the tested
+runtime window. It still does not prove sustained full-belt throughput, infinite
+byproduct handling, long-run stability, or player `build_blueprint` success on a
+platform surface.
 
 ## Commands
 

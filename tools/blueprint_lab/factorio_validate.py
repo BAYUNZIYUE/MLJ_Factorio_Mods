@@ -966,6 +966,40 @@ def write_server_settings(path: Path) -> Path:
     return path
 
 
+def factorio_windows_path(path: Path) -> str:
+    resolved = path.resolve()
+    parts = resolved.parts
+    if len(parts) >= 4 and parts[0] == "/" and parts[1] == "mnt" and len(parts[2]) == 1:
+        drive = parts[2].upper()
+        return drive + ":\\" + "\\".join(parts[3:])
+    return str(resolved)
+
+
+def write_factorio_config(user_data_dir: Path) -> Path:
+    config_dir = user_data_dir / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "codex-blueprint-lab-config.ini"
+    config_path.write_text(
+        "\n".join(
+            [
+                "; version=13",
+                "[path]",
+                "read-data=__PATH__system-read-data__",
+                f"write-data={factorio_windows_path(user_data_dir)}",
+                "",
+                "[general]",
+                "locale=auto",
+                "",
+                "[other]",
+                "enable-blueprint-storage-cloud-sync=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
 def validation_markers(log_text: str) -> list[str]:
     return [line for line in log_text.splitlines() if "BLUEPRINT_LAB_VALIDATION" in line]
 
@@ -1028,8 +1062,11 @@ def main(argv: list[str] | None = None) -> int:
 
     args.console_log.parent.mkdir(parents=True, exist_ok=True)
     server_settings = write_server_settings(args.console_log.parent / "blueprint-lab-server-settings.json")
+    factorio_config = write_factorio_config(args.user_data_dir)
     command = [
         str(args.factorio_exe),
+        "--config",
+        str(factorio_config),
         "--start-server-load-scenario",
         args.scenario_name,
         "--server-settings",

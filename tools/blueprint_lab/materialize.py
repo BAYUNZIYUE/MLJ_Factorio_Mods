@@ -80,6 +80,14 @@ def connector_belt_name_for_port(port: dict[str, Any] | None) -> str:
     return "transport-belt"
 
 
+def splitter_name_for_belt_name(belt_name: str) -> str:
+    if belt_name == "transport-belt":
+        return "splitter"
+    if belt_name.endswith("transport-belt"):
+        return belt_name.replace("transport-belt", "splitter")
+    return "splitter"
+
+
 def is_belt_like_entity_name(name: str) -> bool:
     return name.endswith("transport-belt") or name.endswith("underground-belt") or name.endswith("splitter")
 
@@ -472,11 +480,14 @@ def add_boundary_connectors(
             "bridges_added": 0,
             "input_fanouts_added": 0,
             "output_fanins_added": 0,
+            "output_separation_splitters": 0,
+            "output_separation_overflow_belts": 0,
             "collisions": collisions,
             "routes": routes,
             "bridges": bridges,
             "input_fanouts": input_fanouts,
             "output_fanins": output_fanins,
+            "output_separations": [],
             "boundary_coverage": [],
             "boundary_capacity_audit": [],
             "boundary_contract_audit": [],
@@ -1436,8 +1447,194 @@ def add_boundary_connectors(
 
     output_fanins_added = add_output_fanins()
 
+    def build_output_byproduct_audit() -> list[dict[str, Any]]:
+        if knowledge is None:
+            return []
+        target_item = str(layout_plan.get("target_item") or "")
+        audits: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for node in layout_plan.get("nodes") or []:
+            recipe_name = str(node.get("recipe") or "")
+            if not recipe_name or recipe_name in seen:
+                continue
+            seen.add(recipe_name)
+            recipe = knowledge.recipe(recipe_name)
+            if recipe is None:
+                continue
+            byproducts = []
+            for product in recipe.products:
+                if product.type != "item" or product.name == target_item:
+                    continue
+                byproducts.append(
+                    {
+                        "item": product.name,
+                        "amount": product.amount,
+                        "probability": product.probability,
+                    }
+                )
+            if not byproducts:
+                continue
+            audits.append(
+                {
+                    "recipe": recipe_name,
+                    "target_item": target_item,
+                    "status": "requires-separation",
+                    "byproducts": byproducts,
+                }
+            )
+        return audits
+
+    def add_output_byproduct_separation(byproduct_audit: list[dict[str, Any]]) -> tuple[int, int, list[dict[str, Any]]]:
+        if not byproduct_audit:
+            return 0, 0, []
+        target_items = {
+            str(item.get("target_item") or "")
+            for item in byproduct_audit
+            if item.get("target_item")
+        }
+        if not target_items:
+            return 0, 0, []
+        right_boundary_x = round(float(layout_plan["estimated_width"]) - 0.5, 3)
+        splitters_added = 0
+        overflow_belts_added = 0
+        separations: list[dict[str, Any]] = []
+        for route in routes:
+            if route.get("status") != "connected":
+                continue
+            boundary = str(route.get("boundary") or "")
+            if not boundary.startswith("output:"):
+                continue
+            target_item = boundary.split(":", 1)[1]
+            if target_item not in target_items:
+                continue
+            port = route.get("port") or {}
+            belt_name = connector_belt_name_for_port(port)
+            splitter_name = splitter_name_for_belt_name(belt_name)
+            route_y = round(float(port.get("y") or 0.0), 3)
+            port_x = round(float(port.get("x") or 0.0), 3)
+            min_splitter_x = round(port_x + 1.0, 3)
+            preferred_splitter_x = round(min_splitter_x + 12.0, 3)
+            if right_boundary_x - preferred_splitter_x - 1.0 >= 1.0:
+                min_splitter_x = preferred_splitter_x
+            available_overflow = int(math.floor(right_boundary_x - min_splitter_x - 1.0))
+            if available_overflow < 1:
+                separations.append(
+                    {
+                        "boundary": boundary,
+                        "status": "blocked",
+                        "reason": "route-too-short-for-overflow-separation",
+                        "route_y": route_y,
+                    }
+                )
+                continue
+            overflow_length = available_overflow
+            splitter_x = min_splitter_x
+            route_key = (splitter_x, route_y)
+            existing = occupied_entities.get(route_key)
+            existing_name = str((existing or {}).get("name") or "")
+            if (
+                existing is None
+                or not any(existing is connector for connector in connectors)
+                or not existing_name.endswith("transport-belt")
+                or canonical_transport_belt_name(existing_name) != belt_name
+                or existing.get("direction") != DIR_EAST
+            ):
+                separations.append(
+                    {
+                        "boundary": boundary,
+                        "status": "blocked",
+                        "reason": "splitter-input-position-not-removable-east-connector-belt",
+                        "route_y": route_y,
+                        "splitter_x": splitter_x,
+                        "entity_name": existing_name,
+                    }
+                )
+                continue
+            connectors.remove(existing)
+            occupied.discard(route_key)
+            occupied_entities.pop(route_key, None)
+
+            splitter_y = round(route_y + 0.5, 3)
+            splitter_key = (splitter_x, splitter_y)
+            if splitter_key in occupied_entities:
+                separations.append(
+                    {
+                        "boundary": boundary,
+                        "status": "blocked",
+                        "reason": "splitter-center-position-occupied",
+                        "route_y": route_y,
+                        "splitter_x": splitter_x,
+                        "splitter_y": splitter_y,
+                        "entity_name": str(occupied_entities[splitter_key].get("name") or ""),
+                    }
+                )
+                continue
+            splitter = connector_belt(
+                len(entities) + len(connectors) + 1,
+                splitter_x,
+                splitter_y,
+                direction=DIR_EAST,
+                name=splitter_name,
+            )
+            splitter["filter"] = {"name": target_item, "quality": "normal", "comparator": "="}
+            splitter["output_priority"] = "left"
+            connectors.append(splitter)
+            occupied.add(splitter_key)
+            occupied_entities[splitter_key] = splitter
+            splitters_added += 1
+
+            overflow_positions = [
+                (
+                    round(splitter_x + offset, 3),
+                    round(route_y + 1.0, 3),
+                    f"{boundary}:output-byproduct-overflow",
+                    DIR_EAST,
+                    belt_name,
+                )
+                for offset in range(1, overflow_length + 1)
+            ]
+            belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(overflow_positions)
+            overflow_belts_added += belts_added
+            separations.append(
+                {
+                    "boundary": boundary,
+                    "status": "connected" if not route_collisions else "blocked",
+                    "target_item": target_item,
+                    "splitter_name": splitter_name,
+                    "splitter_x": splitter_x,
+                    "splitter_y": splitter_y,
+                    "overflow_y": round(route_y + 1.0, 3),
+                    "overflow_belts_added": belts_added,
+                    "existing_belts_used": existing_belts_used,
+                    "collisions": route_collisions,
+                    "route_kind": "output-byproduct-filter-splitter-overflow",
+                }
+            )
+        return splitters_added, overflow_belts_added, separations
+
+    pending_byproduct_audit = build_output_byproduct_audit()
+    output_separation_splitters, output_separation_overflow_belts, output_separations = add_output_byproduct_separation(pending_byproduct_audit)
+
     def route_boundary_rate(route: dict[str, Any]) -> float | None:
         return boundary_required_rate(str(route.get("boundary") or ""))
+
+    def target_output_splitter_for_route(x: float, y: float, boundary: str | None) -> dict[str, Any] | None:
+        if not boundary or not boundary.startswith("output:"):
+            return None
+        target_item = boundary.split(":", 1)[1]
+        entity = occupied_entities.get((round(float(x), 3), round(float(y) + 0.5, 3)))
+        if entity is None:
+            return None
+        entity_name = str(entity.get("name") or "")
+        splitter_filter = entity.get("filter") or {}
+        if (
+            entity_name.endswith("splitter")
+            and entity.get("direction") == DIR_EAST
+            and splitter_filter.get("name") == target_item
+            and entity.get("output_priority") == "left"
+        ):
+            return entity
+        return None
 
     def boundary_capacity_audit(flow_audit: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if knowledge is None:
@@ -1573,41 +1770,7 @@ def add_boundary_connectors(
         ]
 
     def output_byproduct_audit() -> list[dict[str, Any]]:
-        if knowledge is None:
-            return []
-        target_item = str(layout_plan.get("target_item") or "")
-        audits: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for node in layout_plan.get("nodes") or []:
-            recipe_name = str(node.get("recipe") or "")
-            if not recipe_name or recipe_name in seen:
-                continue
-            seen.add(recipe_name)
-            recipe = knowledge.recipe(recipe_name)
-            if recipe is None:
-                continue
-            byproducts = []
-            for product in recipe.products:
-                if product.type != "item" or product.name == target_item:
-                    continue
-                byproducts.append(
-                    {
-                        "item": product.name,
-                        "amount": product.amount,
-                        "probability": product.probability,
-                    }
-                )
-            if not byproducts:
-                continue
-            audits.append(
-                {
-                    "recipe": recipe_name,
-                    "target_item": target_item,
-                    "status": "requires-separation",
-                    "byproducts": byproducts,
-                }
-            )
-        return audits
+        return pending_byproduct_audit
 
     def bridge_edges_for_node(fingerprint: str, y: float) -> list[tuple[int, int]]:
         edges: list[tuple[int, int]] = []
@@ -1692,6 +1855,9 @@ def add_boundary_connectors(
             x, belt_y = positions[index]
             entity = occupied_entities.get((x, belt_y))
             if entity is None:
+                if target_output_splitter_for_route(x, belt_y, boundary) is not None:
+                    index += 1
+                    continue
                 failures.append({"x": x, "y": belt_y, "reason": "missing-belt"})
                 index += 1
                 continue
@@ -1718,6 +1884,11 @@ def add_boundary_connectors(
                 index += 1
                 continue
             if entity_name.endswith("splitter"):
+                target_item = boundary.split(":", 1)[1] if boundary and boundary.startswith("output:") else ""
+                splitter_filter = entity.get("filter") or {}
+                if target_item and splitter_filter.get("name") == target_item and entity.get("output_priority") == "left":
+                    index += 1
+                    continue
                 unresolved.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "splitter-semantics"})
                 index += 1
                 continue
@@ -1793,6 +1964,8 @@ def add_boundary_connectors(
             key = (round(float(x), 3), round(float(belt_y), 3))
             entity = occupied_entities.get(key)
             if entity is None:
+                if target_output_splitter_for_route(key[0], key[1], str(route.get("boundary") or "")) is not None:
+                    continue
                 failures.append({"x": key[0], "y": key[1], "reason": "missing-belt"})
                 continue
             entity_name = str(entity.get("name") or "")
@@ -1815,6 +1988,11 @@ def add_boundary_connectors(
                 )
                 continue
             if entity_name.endswith("splitter"):
+                boundary = str(route.get("boundary") or "")
+                target_item = boundary.split(":", 1)[1] if boundary.startswith("output:") else ""
+                splitter_filter = entity.get("filter") or {}
+                if target_item and splitter_filter.get("name") == target_item and entity.get("output_priority") == "left":
+                    continue
                 unresolved.append({"x": key[0], "y": key[1], "entity_name": entity_name, "reason": "splitter-semantics"})
         status = "failed" if failures else "unresolved" if unresolved else "pass"
         port = route.get("port") or {}
@@ -2033,11 +2211,14 @@ def add_boundary_connectors(
         "bridges_added": bridges_added,
         "input_fanouts_added": input_fanouts_added,
         "output_fanins_added": output_fanins_added,
+        "output_separation_splitters": output_separation_splitters,
+        "output_separation_overflow_belts": output_separation_overflow_belts,
         "collisions": collisions,
         "routes": routes,
         "bridges": bridges,
         "input_fanouts": input_fanouts,
         "output_fanins": output_fanins,
+        "output_separations": output_separations,
         "boundary_coverage": coverage,
         "boundary_capacity_audit": capacity_audit,
         "boundary_contract_audit": contract_audit,
@@ -2131,11 +2312,14 @@ def materialize_layout_with_summary(
         "bridges_added": 0,
         "input_fanouts_added": 0,
         "output_fanins_added": 0,
+        "output_separation_splitters": 0,
+        "output_separation_overflow_belts": 0,
         "collisions": [],
         "routes": [],
         "bridges": [],
         "input_fanouts": [],
         "output_fanins": [],
+        "output_separations": [],
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
@@ -2354,14 +2538,18 @@ def render_summary(
         "bridges_added": 0,
         "input_fanouts_added": 0,
         "output_fanins_added": 0,
+        "output_separation_splitters": 0,
+        "output_separation_overflow_belts": 0,
         "collisions": [],
         "routes": [],
         "bridges": [],
         "input_fanouts": [],
         "output_fanins": [],
+        "output_separations": [],
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
+        "output_byproduct_audit": [],
         "belt_flow_audit": [],
     }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
@@ -2430,6 +2618,8 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Inter-instance bridge belts: {summary['connector_summary'].get('bridges_added', 0)}",
         f"- Input fanout belts: {summary['connector_summary'].get('input_fanouts_added', 0)}",
         f"- Output fan-in belts: {summary['connector_summary'].get('output_fanins_added', 0)}",
+        f"- Output separation splitters: {summary['connector_summary'].get('output_separation_splitters', 0)}",
+        f"- Output separation overflow belts: {summary['connector_summary'].get('output_separation_overflow_belts', 0)}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Belt flow status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('belt_flow_audit') or []))}",
@@ -2589,6 +2779,19 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"- {item.get('recipe')}: status={item.get('status')} "
                 f"target={item.get('target_item')} byproducts={byproducts}"
             )
+    if summary["connector_summary"].get("output_separations"):
+        lines.extend(["", "## Output Separations", ""])
+        for item in summary["connector_summary"]["output_separations"]:
+            line = (
+                f"- {item.get('boundary')}: status={item.get('status')} "
+                f"splitter={item.get('splitter_name')} at=({item.get('splitter_x')},{item.get('splitter_y')}) "
+                f"overflow_y={item.get('overflow_y')} overflow_belts={item.get('overflow_belts_added', 0)}"
+            )
+            if item.get("existing_belts_used"):
+                line += f" existing_belts={item['existing_belts_used']}"
+            if item.get("reason"):
+                line += f" reason={item['reason']}"
+            lines.append(line)
     if summary["connector_summary"].get("belt_flow_audit"):
         lines.extend(["", "## Belt Flow Audit", ""])
         for item in summary["connector_summary"]["belt_flow_audit"]:

@@ -21,7 +21,7 @@ from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
 from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe, select_best_materialized_layout
-from tools.blueprint_lab.factorio_validate import render_control_lua, write_server_settings
+from tools.blueprint_lab.factorio_validate import render_control_lua, write_factorio_config, write_server_settings
 
 
 def main() -> int:
@@ -100,6 +100,10 @@ def main() -> int:
     if '"auto_pause": false' not in server_settings or '"visibility"' not in server_settings:
         print(f"FAIL: expected Factorio validation server settings to disable auto-pause: {server_settings}")
         return 1
+    factorio_config = write_factorio_config(ROOT / ".codex" / "tests" / "factorio_validation_fixture").read_text(encoding="utf-8")
+    if "write-data=" not in factorio_config or "enable-blueprint-storage-cloud-sync=false" not in factorio_config:
+        print(f"FAIL: expected Factorio validation config to pin isolated write-data: {factorio_config}")
+        return 1
 
     learned = learn_library([tmp])
     categories = {item["category"]: item for item in learned["category_summaries"]}
@@ -154,14 +158,23 @@ def main() -> int:
     data_raw_path.write_text(
         """
 {
-  "recipe": {
-    "iron-gear-wheel": {
-      "category": "crafting",
-      "energy_required": 0.5,
-      "ingredients": [["iron-plate", 2]],
-      "result": "iron-gear-wheel"
-    }
-  },
+	  "recipe": {
+	    "iron-gear-wheel": {
+	      "category": "crafting",
+	      "energy_required": 0.5,
+	      "ingredients": [["iron-plate", 2]],
+	      "result": "iron-gear-wheel"
+	    },
+	    "fixture-byproduct-crushing": {
+	      "category": "crushing",
+	      "energy_required": 2,
+	      "ingredients": [["metallic-asteroid-chunk", 1]],
+	      "results": [
+	        {"type": "item", "name": "iron-ore", "amount": 20},
+	        {"type": "item", "name": "metallic-asteroid-chunk", "amount": 1, "probability": 0.2}
+	      ]
+	    }
+	  },
   "assembling-machine": {
     "assembling-machine-3": {
       "crafting_categories": ["crafting"],
@@ -187,11 +200,14 @@ def main() -> int:
     "normal": {"level": 0},
     "legendary": {"level": 5}
   },
-  "transport-belt": {
-    "transport-belt": {"speed": 0.03125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]},
-    "turbo-transport-belt": {"speed": 0.125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]}
-  },
-  "underground-belt": {
+	  "transport-belt": {
+	    "transport-belt": {"speed": 0.03125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]},
+	    "turbo-transport-belt": {"speed": 0.125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]}
+	  },
+	  "splitter": {
+	    "turbo-splitter": {"speed": 0.125, "selection_box": [[-1, -0.5], [1, 0.5]]}
+	  },
+	  "underground-belt": {
     "turbo-underground-belt": {"speed": 0.125, "max_distance": 11, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]}
   }
 }
@@ -981,6 +997,73 @@ def main() -> int:
         return 1
     if capacity_multi_lane_summary["collisions"]:
         print(f"FAIL: expected multi-lane boundary routing to avoid connector collisions: {capacity_multi_lane_summary}")
+        return 1
+    byproduct_layout = {
+        "target_item": "iron-ore",
+        "target_rate_per_minute": 3600,
+        "target_rate_basis": {"kind": "full-belt", "belt_name": "turbo-transport-belt", "belt_count": 1, "items_per_second_per_belt": 60},
+        "spacing": 2,
+        "estimated_width": 20,
+        "estimated_height": 12,
+        "boundary_inputs": [],
+        "boundary_outputs": [{"item": "iron-ore", "rate_per_minute": 3600, "side": "right"}],
+        "nodes": [
+            {
+                "item": "iron-ore",
+                "recipe": "fixture-byproduct-crushing",
+                "fingerprint": "byproduct-template",
+                "instances": 1,
+                "source_width": 4,
+                "source_height": 4,
+                "source_entity_count": 1,
+                "source_tile_count": 0,
+                "columns": 1,
+                "rows": 1,
+                "planned_width": 4,
+                "planned_height": 4,
+                "planned_net_output_per_minute": 3600,
+                "x": 4,
+                "y": 4,
+                "ports": [{"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 2, "y": 1}],
+                "port_counts": [("right:output", 1)],
+                "source": "fixture",
+                "path": "/byproduct",
+            }
+        ],
+    }
+    byproduct_mappings = [
+        {
+            "fingerprint": "byproduct-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 2, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    byproduct_wrapper, byproduct_summary = materialize_layout_with_summary(
+        byproduct_layout,
+        byproduct_mappings,
+        label="fixture-byproduct-separation",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    byproduct_splitters = [
+        entity
+        for entity in byproduct_wrapper["blueprint"]["entities"]
+        if entity["name"] == "turbo-splitter"
+    ]
+    if (
+        byproduct_summary["output_separation_splitters"] != 1
+        or byproduct_summary["output_separation_overflow_belts"] <= 0
+        or len(byproduct_splitters) != 1
+        or byproduct_splitters[0].get("filter", {}).get("name") != "iron-ore"
+        or byproduct_splitters[0].get("output_priority") != "left"
+        or byproduct_summary["output_separations"][0]["status"] != "connected"
+        or Counter(item["status"] for item in byproduct_summary["belt_flow_audit"]) != {"pass": 1}
+    ):
+        print(f"FAIL: expected byproduct output route to get a target filter splitter and overflow lane: {byproduct_summary} {byproduct_wrapper}")
         return 1
     capacity_unresolved_lane_mappings = deepcopy(capacity_multi_lane_mappings)
     capacity_unresolved_lane_mappings[0]["layout"]["entities"][-1] = {
