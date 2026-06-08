@@ -263,6 +263,7 @@ def add_boundary_connectors(
                     "side": port.get("side"),
                     "role": port.get("role"),
                     "entity_name": port.get("entity_name"),
+                    "entity_type": port.get("entity_type"),
                     "x": round(origin_x + float(port.get("x") or 0), 3),
                     "y": round(origin_y + float(port.get("y") or 0), 3),
                 }
@@ -296,6 +297,18 @@ def add_boundary_connectors(
                 selected[y] = port
         return selected
 
+    def can_start_horizontal_flow(port: dict[str, Any]) -> bool:
+        entity_name = str(port.get("entity_name") or "")
+        if entity_name.endswith("underground-belt") and port.get("entity_type") == "input":
+            return False
+        return True
+
+    def can_end_horizontal_flow(port: dict[str, Any]) -> bool:
+        entity_name = str(port.get("entity_name") or "")
+        if entity_name.endswith("underground-belt") and port.get("entity_type") == "output":
+            return False
+        return True
+
     def add_inter_instance_bridges() -> int:
         before = len(connectors)
         for node in layout_plan.get("nodes") or []:
@@ -319,8 +332,12 @@ def add_boundary_connectors(
                     prefer="leftmost",
                 )
                 for y, right_port in sorted(right_ports.items()):
+                    if not can_start_horizontal_flow(right_port):
+                        continue
                     left_port = left_ports.get(y)
                     if left_port is None:
+                        continue
+                    if not can_end_horizontal_flow(left_port):
                         continue
                     start_x = float(right_port["x"]) + 1.0
                     end_x = float(left_port["x"]) - 1.0
@@ -630,7 +647,8 @@ def add_boundary_connectors(
         unresolved: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
         positions = horizontal_span_positions(start_x, end_x, y)
-        for x, belt_y in positions:
+        last_index = len(positions) - 1
+        for index, (x, belt_y) in enumerate(positions):
             entity = occupied_entities.get((x, belt_y))
             if entity is None:
                 failures.append({"x": x, "y": belt_y, "reason": "missing-belt"})
@@ -659,7 +677,9 @@ def add_boundary_connectors(
                 continue
             if entity_name.endswith("underground-belt"):
                 underground_type = entity.get("type")
-                if underground_type == "output":
+                if underground_type == "output" and index == 0:
+                    continue
+                if underground_type == "input" and index == last_index:
                     continue
                 unresolved.append(
                     {
@@ -667,7 +687,8 @@ def add_boundary_connectors(
                         "y": belt_y,
                         "entity_name": entity_name,
                         "type": underground_type,
-                        "reason": "underground-belt-input-or-unknown-type",
+                        "position_in_segment": "start" if index == 0 else "end" if index == last_index else "middle",
+                        "reason": "underground-belt-endpoint-not-proven",
                     }
                 )
         status = "failed" if failures else "unresolved" if unresolved else "pass"

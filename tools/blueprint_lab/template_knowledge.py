@@ -45,6 +45,7 @@ class TemplatePortHint:
     side: str
     role: str
     entity_name: str
+    entity_type: str | None
     direction: int | None
     x: float
     y: float
@@ -337,6 +338,7 @@ def template_layout_hint(template: TemplateCandidate) -> TemplateLayoutHint:
                 side=side,
                 role=role,
                 entity_name=entity.name,
+                entity_type=entity.entity_type,
                 direction=entity.direction,
                 x=entity.x,
                 y=entity.y,

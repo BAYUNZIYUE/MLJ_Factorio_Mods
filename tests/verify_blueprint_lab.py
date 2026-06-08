@@ -649,7 +649,7 @@ def main() -> int:
         label="fixture-underground-input",
         connect_boundaries=True,
     )
-    if not any(item["status"] == "unresolved" and any(entry.get("reason") == "underground-belt-input-or-unknown-type" for entry in item["unresolved"]) for item in underground_input_summary["belt_flow_audit"]):
+    if not any(item["status"] == "unresolved" and any(entry.get("reason") == "underground-belt-endpoint-not-proven" for entry in item["unresolved"]) for item in underground_input_summary["belt_flow_audit"]):
         print(f"FAIL: expected east-facing underground input to remain unresolved without pair tracing: {underground_input_summary}")
         return 1
 

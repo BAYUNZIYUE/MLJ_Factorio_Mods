@@ -152,9 +152,12 @@ south `8`, and west `12`. Learned port roles are direction-aware: for example,
 a left-edge east-facing belt is an input, while a left-edge west-facing belt is
 an output. Inter-instance bridges are reported separately from boundary routes
 so a generated full-belt box can show whether repeated module edge buses were
-connected before the final boundary output was attached. Boundary coverage then
-audits the route plus bridges as a graph: output coverage walks backward from
-the selected output port through connected instance bridges, while input
+connected before the final boundary output was attached. The bridge generator
+does not start a visible horizontal bridge from an underground-belt `input` end
+or terminate one at an underground-belt `output` end, because those are tunnel
+entrance/exit semantics rather than ordinary surface belts. Boundary coverage
+then audits the route plus bridges as a graph: output coverage walks backward
+from the selected output port through connected instance bridges, while input
 coverage walks forward from the selected input port. Coverage is lane-aware:
 only bridges on the same y coordinate as the selected boundary port are used for
 reachability. This lets the report distinguish "the boundary belt touches one
@@ -172,11 +175,13 @@ occupied position is a same-tier belt-like entity pointing east. A segment is
 `pass` when all checked entities are simple direction-compatible belt flow. It
 is `failed` when a belt is missing, the tier differs, a non-belt entity occupies
 the path, or the direction is wrong. East-facing underground-belt `output` ends
-can pass as visible flow exits. Underground-belt `input` ends, underground belts
-without a preserved type, and splitters stay `unresolved` until a dedicated
-pairing or splitter parser can prove their semantics. This is still not a full
-belt simulation: it does not understand lane filters, splitter balancing,
-stacked belts, underground-belt pairing semantics, or inserter timing.
+can pass at the start of a visible segment, and east-facing underground-belt
+`input` ends can pass at the end of one. Underground belts in the middle of a
+visible segment, underground belts without a preserved type, and splitters stay
+`unresolved` until a dedicated pairing or splitter parser can prove their
+semantics. This is still not a full belt simulation: it does not understand lane
+filters, splitter balancing, stacked belts, underground-belt pairing semantics,
+or inserter timing.
 
 ## Commands
 
