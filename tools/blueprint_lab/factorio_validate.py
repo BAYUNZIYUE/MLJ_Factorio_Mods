@@ -19,10 +19,21 @@ def lua_long_string(value: str) -> str:
     return f"[[{value}]]"
 
 
-def render_control_lua(blueprint_string: str, *, input_probe: str = "both", runtime_audit_wait_ticks: int = 120) -> str:
+def render_control_lua(
+    blueprint_string: str,
+    *,
+    input_probe: str = "both",
+    runtime_audit_wait_ticks: int = 120,
+    sustained_input_interval_ticks: int = 0,
+) -> str:
     return f"""local blueprint_string = {lua_long_string(blueprint_string)}
 local input_probe_mode = {lua_long_string(input_probe)}
 local runtime_audit_wait_ticks = {int(runtime_audit_wait_ticks)}
+local sustained_input_interval_ticks = {int(sustained_input_interval_ticks)}
+local next_sustained_input_tick = nil
+local sustained_input_cycles = 0
+local sustained_input_inserted = 0
+local sustained_input_failures = 0
 
 local function validation_fail(message)
   log("BLUEPRINT_LAB_VALIDATION fail " .. tostring(message))
@@ -372,12 +383,14 @@ local function audit_right_boundary_transport_items(surface)
   log("BLUEPRINT_LAB_VALIDATION right_boundary_cleanliness status=" .. cleanliness_status .. " product_items=" .. tostring(product_item_count) .. " input_items=" .. tostring(input_item_count))
 end
 
-local function inject_input_items_to_left_belts(surface)
+local function inject_input_items_to_left_belts(surface, should_log)
   local input_items = collect_recipe_input_items(surface)
   local item_names = sorted_keys(input_items)
   if #item_names == 0 then
-    log("BLUEPRINT_LAB_VALIDATION input_injection items= belts=0 lines=0 inserted=0 failures=0")
-    return
+    if should_log ~= false then
+      log("BLUEPRINT_LAB_VALIDATION input_injection items= belts=0 lines=0 inserted=0 failures=0")
+    end
+    return {{inserted = 0, failures = 0}}
   end
 
   local belt_candidates = {{}}
@@ -427,7 +440,10 @@ local function inject_input_items_to_left_belts(surface)
       end
     end
   end
-  log("BLUEPRINT_LAB_VALIDATION input_injection items=" .. table.concat(item_names, ",") .. " belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count_total) .. " inserted=" .. tostring(inserted_count) .. " failures=" .. tostring(insertion_failures))
+  if should_log ~= false then
+    log("BLUEPRINT_LAB_VALIDATION input_injection items=" .. table.concat(item_names, ",") .. " belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count_total) .. " inserted=" .. tostring(inserted_count) .. " failures=" .. tostring(insertion_failures))
+  end
+  return {{inserted = inserted_count, failures = insertion_failures}}
 end
 
 local function inject_input_items_to_machine_pickup_belts(surface)
@@ -876,7 +892,11 @@ local function run_validation()
   end
   pending_audit_surface = surface
   pending_audit_tick = game.tick + runtime_audit_wait_ticks
+  if sustained_input_interval_ticks > 0 and (input_probe_mode == "left" or input_probe_mode == "both") then
+    next_sustained_input_tick = game.tick + sustained_input_interval_ticks
+  end
   log("BLUEPRINT_LAB_VALIDATION runtime_audit_wait_ticks=" .. tostring(runtime_audit_wait_ticks))
+  log("BLUEPRINT_LAB_VALIDATION sustained_input_interval_ticks=" .. tostring(sustained_input_interval_ticks))
 end
 
 script.on_event(defines.events.on_tick, function(event)
@@ -885,8 +905,17 @@ script.on_event(defines.events.on_tick, function(event)
     run_validation()
     return
   end
+  if pending_audit_surface ~= nil and next_sustained_input_tick ~= nil and game.tick >= next_sustained_input_tick and game.tick < pending_audit_tick then
+    local result = inject_input_items_to_left_belts(pending_audit_surface, false)
+    sustained_input_cycles = sustained_input_cycles + 1
+    sustained_input_inserted = sustained_input_inserted + (result.inserted or 0)
+    sustained_input_failures = sustained_input_failures + (result.failures or 0)
+    next_sustained_input_tick = game.tick + sustained_input_interval_ticks
+    return
+  end
   if pending_audit_surface ~= nil and game.tick >= pending_audit_tick then
     script.on_event(defines.events.on_tick, nil)
+    log("BLUEPRINT_LAB_VALIDATION sustained_input_injection interval_ticks=" .. tostring(sustained_input_interval_ticks) .. " cycles=" .. tostring(sustained_input_cycles) .. " inserted=" .. tostring(sustained_input_inserted) .. " failures=" .. tostring(sustained_input_failures))
     audit_recipe_machines(pending_audit_surface)
     audit_recipe_machine_output_items(pending_audit_surface)
     audit_transport_items(pending_audit_surface)
@@ -910,6 +939,7 @@ def write_validation_scenario(
     blueprint_string: str,
     input_probe: str = "both",
     runtime_audit_wait_ticks: int = 120,
+    sustained_input_interval_ticks: int = 0,
 ) -> Path:
     scenario_dir = user_data_dir / "scenarios" / scenario_name
     scenario_dir.mkdir(parents=True, exist_ok=True)
@@ -932,6 +962,7 @@ def write_validation_scenario(
             blueprint_string,
             input_probe=input_probe,
             runtime_audit_wait_ticks=runtime_audit_wait_ticks,
+            sustained_input_interval_ticks=sustained_input_interval_ticks,
         ),
         encoding="utf-8",
     )
@@ -1053,6 +1084,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-seconds", type=float, default=45)
     parser.add_argument("--input-probe", choices=["left", "pickup", "both"], default="both")
     parser.add_argument("--runtime-audit-wait-ticks", type=int, default=120)
+    parser.add_argument("--sustained-input-interval-ticks", type=int, default=0)
     args = parser.parse_args(argv)
 
     blueprint_string = args.blueprint.read_text(encoding="utf-8").strip()
@@ -1062,6 +1094,7 @@ def main(argv: list[str] | None = None) -> int:
         blueprint_string=blueprint_string,
         input_probe=args.input_probe,
         runtime_audit_wait_ticks=effective_runtime_audit_wait_ticks(args.until_tick, args.runtime_audit_wait_ticks),
+        sustained_input_interval_ticks=args.sustained_input_interval_ticks,
     )
 
     args.console_log.parent.mkdir(parents=True, exist_ok=True)

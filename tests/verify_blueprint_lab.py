@@ -76,6 +76,8 @@ def main() -> int:
         "created.splitter_output_priority",
         "created.set_recipe(entity.recipe, entity.recipe_quality)",
         "runtime_audit_wait_ticks=",
+        "sustained_input_interval_ticks=",
+        "sustained_input_injection",
         "recipe_machine_audit",
         "recipe_machine_runtime",
         "recipe_machine_output_items",
@@ -111,6 +113,10 @@ def main() -> int:
         return 1
     if effective_runtime_audit_wait_ticks(2, 120) != 120 or effective_runtime_audit_wait_ticks(2400, 120) != 2400:
         print("FAIL: expected Factorio validation to wait at least until --until-tick before runtime audit")
+        return 1
+    sustained_lua = render_control_lua(encoded, input_probe="left", runtime_audit_wait_ticks=2400, sustained_input_interval_ticks=300)
+    if "local sustained_input_interval_ticks = 300" not in sustained_lua or "sustained_input_cycles" not in sustained_lua:
+        print("FAIL: expected Factorio validation scenario to support sustained left-boundary input injection")
         return 1
 
     learned = learn_library([tmp])

@@ -333,6 +333,20 @@ recycle loop is fully drained or long-run stable. It also still does not prove
 sustained full-belt throughput or player `build_blueprint` success on a platform
 surface.
 
+The runtime validator can also repeat the left-boundary input injection before
+the final audit with `--sustained-input-interval-ticks`. This is a stronger
+runtime stress probe than a single initial injection because it keeps feeding
+the copied boundary during the audit window, while still remaining a diagnostic
+input source rather than a real throughput meter. In the current `iron-ore 2x
+turbo-transport-belt` recycle-merge sample, a 2400-tick probe with a 300-tick
+interval reports `sustained_input_injection interval_ticks=300 cycles=7
+inserted=308 failures=0`, five crushers at `status=full_output`, `iron-ore`
+reaching the right boundary, and `right_boundary_cleanliness status=clean`.
+Internal `metallic-asteroid-chunk` remains visible on transport lines, so the
+result should be read as "right boundary stayed clean under periodic test
+feeding for this window", not as sustained full-belt or infinite-stability
+proof.
+
 ## Commands
 
 Analyze a blueprint directory:
@@ -400,6 +414,12 @@ Validate one generated blueprint with a real Factorio runtime scenario:
 
 ```bash
 python3 -m tools.blueprint_lab.factorio_validate --blueprint .codex/tests/blueprint-connected-iron-ore.txt --mod-directory /mnt/c/Users/MLJ/AppData/Roaming/Factorio/mods --console-log .codex/tests/blueprint-lab-factorio-validation.log
+```
+
+Run a longer sustained left-boundary input probe:
+
+```bash
+python3 -m tools.blueprint_lab.factorio_validate --scenario-name blueprint_lab_validation_recycle_merge_sustained_2400 --blueprint .codex/tests/blueprint-routed-iron-ore-2x-turbo-belt.txt --user-data-dir .codex/tests/factorio-probe-write-data --mod-directory /mnt/c/Users/MLJ/AppData/Roaming/Factorio/mods --console-log .codex/tests/blueprint-lab-factorio-recycle-merge-sustained-2400.log --until-tick 2400 --timeout-seconds 120 --input-probe left --runtime-audit-wait-ticks 2400 --sustained-input-interval-ticks 300
 ```
 
 Generate the current seed blueprint:
