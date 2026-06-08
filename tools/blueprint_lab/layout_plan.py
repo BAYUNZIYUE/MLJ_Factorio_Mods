@@ -59,6 +59,42 @@ def flatten_plan_nodes(node: dict[str, Any]) -> list[dict[str, Any]]:
     return nodes
 
 
+def choose_repeated_columns(
+    *,
+    instances: int,
+    max_columns: int,
+    source_width: float,
+    source_height: float,
+    spacing: float,
+    lane_width: float = 4.0,
+) -> int:
+    """Pick a copy grid that favors reusable straight buses over sparse tail rows."""
+    max_candidate = max(1, min(max_columns, instances))
+    best: tuple[float, float, float, int] | None = None
+    best_columns = max_candidate
+    for columns in range(1, max_candidate + 1):
+        rows = max(1, math.ceil(instances / columns))
+        row_counts = [min(columns, max(0, instances - row * columns)) for row in range(rows)]
+        empty_cells = columns * rows - instances
+        bridge_segments = sum(max(0, count - 1) for count in row_counts)
+        boundary_routes = rows * 2
+        incomplete_output_span = sum((columns - count) * (source_width + spacing) for count in row_counts if count)
+        connector_estimate = bridge_segments * 2 + boundary_routes * lane_width + incomplete_output_span
+        planned_width = columns * source_width + max(0, columns - 1) * spacing
+        planned_height = rows * source_height + max(0, rows - 1) * spacing
+        area = (planned_width + lane_width * 2) * (planned_height + lane_width)
+        score = (
+            connector_estimate,
+            empty_cells,
+            area,
+            rows,
+        )
+        if best is None or score < best:
+            best = score
+            best_columns = columns
+    return best_columns
+
+
 def node_layout(
     node: dict[str, Any],
     mapping: dict[str, Any],
@@ -67,12 +103,20 @@ def node_layout(
     y: float,
     max_columns: int,
     spacing: float,
+    lane_width: float = 4.0,
 ) -> LayoutNode:
     layout = mapping.get("layout") or {}
     source_width = float(layout.get("width") or mapping.get("cell_size") or 1)
     source_height = float(layout.get("height") or mapping.get("cell_size") or 1)
     instances = int(node["instances"])
-    columns = max(1, min(max_columns, instances))
+    columns = choose_repeated_columns(
+        instances=instances,
+        max_columns=max_columns,
+        source_width=source_width,
+        source_height=source_height,
+        spacing=spacing,
+        lane_width=lane_width,
+    )
     rows = max(1, math.ceil(instances / columns))
     planned_width = columns * source_width + max(0, columns - 1) * spacing
     planned_height = rows * source_height + max(0, rows - 1) * spacing
@@ -108,7 +152,7 @@ def build_layout_plan(
     production_plan: dict[str, Any],
     mappings: list[dict[str, Any]],
     *,
-    max_columns: int = 8,
+    max_columns: int = 12,
     spacing: float = 2.0,
     lane_width: float = 4.0,
 ) -> dict[str, Any]:
@@ -126,6 +170,7 @@ def build_layout_plan(
             y=cursor_y,
             max_columns=max_columns,
             spacing=spacing,
+            lane_width=lane_width,
         )
         layout_nodes.append(planned)
         cursor_y += planned.planned_height + spacing
@@ -255,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top", type=int, default=8)
     parser.add_argument("--cell-size", type=int, default=16)
     parser.add_argument("--max-depth", type=int, default=4)
-    parser.add_argument("--max-columns", type=int, default=8)
+    parser.add_argument("--max-columns", type=int, default=12)
     parser.add_argument("--spacing", type=float, default=2.0)
     parser.add_argument("--lane-width", type=float, default=4.0)
     parser.add_argument("--json-output", type=Path)

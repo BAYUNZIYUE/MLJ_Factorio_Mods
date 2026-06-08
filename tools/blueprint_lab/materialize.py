@@ -1045,7 +1045,7 @@ def build_materialized_blueprint(
     target_recipe: str | None = None,
     max_depth: int = 4,
     boundary_items: set[str] | None = None,
-    max_columns: int = 8,
+    max_columns: int = 12,
     spacing: float = 2.0,
     lane_width: float = 4.0,
     label: str | None = None,
@@ -1296,7 +1296,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top", type=int, default=8)
     parser.add_argument("--cell-size", type=int, default=16)
     parser.add_argument("--max-depth", type=int, default=4)
-    parser.add_argument("--max-columns", type=int, default=8)
+    parser.add_argument("--max-columns", type=int, default=12)
     parser.add_argument("--spacing", type=float, default=2.0)
     parser.add_argument("--lane-width", type=float, default=4.0)
     parser.add_argument("--label")

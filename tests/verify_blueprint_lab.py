@@ -342,6 +342,54 @@ def main() -> int:
     if layout["boundary_outputs"] != [{"item": "iron-gear-wheel", "rate_per_minute": 150, "side": "right"}]:
         print(f"FAIL: expected layout boundary output on the right side: {layout}")
         return 1
+    compact_layout_9 = build_layout_plan(
+        {
+            "target_item": "iron-plate",
+            "target_rate_per_minute": 168.75,
+            "root": {
+                "item": "iron-plate",
+                "recipe": "iron-plate",
+                "fingerprint": "plate-template",
+                "instances": 9,
+                "source": "fixture",
+                "path": "/plate",
+                "planned_net_output_per_minute": 168.75,
+                "rate_basis": "fixture",
+            },
+            "external_inputs": [{"item": "iron-ore", "rate_per_minute": 168.75, "reason": "boundary-input"}],
+        },
+        dag_mappings,
+        max_columns=12,
+        spacing=1,
+        lane_width=4,
+    )
+    if compact_layout_9["nodes"][0]["columns"] != 9 or compact_layout_9["nodes"][0]["rows"] != 1:
+        print(f"FAIL: expected compact column choice to keep nine copied modules on one bus row: {compact_layout_9}")
+        return 1
+    compact_layout_16 = build_layout_plan(
+        {
+            "target_item": "iron-plate",
+            "target_rate_per_minute": 300,
+            "root": {
+                "item": "iron-plate",
+                "recipe": "iron-plate",
+                "fingerprint": "plate-template",
+                "instances": 16,
+                "source": "fixture",
+                "path": "/plate",
+                "planned_net_output_per_minute": 300,
+                "rate_basis": "fixture",
+            },
+            "external_inputs": [{"item": "iron-ore", "rate_per_minute": 300, "reason": "boundary-input"}],
+        },
+        dag_mappings,
+        max_columns=12,
+        spacing=1,
+        lane_width=4,
+    )
+    if compact_layout_16["nodes"][0]["columns"] != 8 or compact_layout_16["nodes"][0]["rows"] != 2:
+        print(f"FAIL: expected compact column choice to avoid a sparse 12x2 tail row: {compact_layout_16}")
+        return 1
     materialized = build_materialized_blueprint(
         dag_mappings,
         target_item="iron-gear-wheel",

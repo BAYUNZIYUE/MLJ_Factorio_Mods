@@ -116,10 +116,13 @@ order: `effective_with_beacons`, `effective_direct_modules`, then
 The layout plan converts DAG nodes into conservative rectangular units. It
 keeps each learned template as the copyable atom, arranges repeated instances in
 rows, reserves a left input boundary and right output boundary, and reports the
-estimated rectangle before any connector belts or pipes are generated. This
-matches the corpus lesson that integrated black boxes usually preserve local
-module geometry first, then use long boundary buses to make the final rectangle
-manageable.
+estimated rectangle before any connector belts or pipes are generated. The
+repeat-grid column chooser scores candidate grids by estimated connector work,
+sparse tail cells, and rectangle area. This prefers straight reusable bus rows
+when they avoid a nearly empty final row, while still allowing multi-row grids
+when they reduce sparse output spans. This matches the corpus lesson that
+integrated black boxes usually preserve local module geometry first, then use
+long boundary buses to make the final rectangle manageable.
 
 The materializer is the first step that writes a generated blueprint string from
 learned corpus templates. It copies normalized entities and tiles into the
