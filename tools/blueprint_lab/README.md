@@ -148,25 +148,30 @@ candidates are retained in `blocked_attempts` so the report can explain why a
 later port was chosen. Connector belts inherit the selected port belt tier when
 the port is a transport belt, underground belt, or splitter. Blueprint Lab uses
 Factorio 2.x direction values, where cardinal belts use north `0`, east `4`,
-south `8`, and west `12`. Learned port roles are direction-aware: for example,
-a left-edge east-facing belt is an input, while a left-edge west-facing belt is
-an output. Inter-instance bridges are reported separately from boundary routes
-so a generated full-belt box can show whether repeated module edge buses were
-connected before the final boundary output was attached. The bridge generator
-does not start a visible horizontal bridge from an underground-belt `input` end
-or terminate one at an underground-belt `output` end, because those are tunnel
-entrance/exit semantics rather than ordinary surface belts. Boundary coverage
-then audits the route plus bridges as a graph: output coverage walks backward
-from the selected output port through connected instance bridges, while input
-coverage walks forward from the selected input port. Coverage is lane-aware:
-only bridges on the same y coordinate as the selected boundary port are used for
-reachability. This lets the report distinguish "the boundary belt touches one
-copied module" from "the boundary belt reaches every copied module needed to
-cover the requested target rate". Input fanouts extend that same reachability
-graph for copied modules on the same row. They add belts only on empty positions
-and can treat existing same-tier transport belts, underground belts, or
-splitters as already-built bus segments; non-belt collisions still block the
-fanout.
+south `8`, and west `12`. Learned port roles are direction-aware evidence, not
+an absolute route truth: boundary routing first prefers ports on already
+connected horizontal bridge lanes, then prefers simple surface belt lanes, and
+uses role plus distance as tie breakers. That keeps full-belt copies on the
+same learned bus instead of blindly choosing a labeled port that cannot fan out
+across repeated instances. Inter-instance bridges are reported separately from
+boundary routes so a generated full-belt box can show whether repeated module
+edge buses were connected before the final boundary output was attached. The
+bridge generator does not start a visible horizontal bridge from an
+underground-belt `input` end or terminate one at an underground-belt `output`
+end, because those are tunnel entrance/exit semantics rather than ordinary
+surface belts. Boundary coverage then audits the route plus bridges as a graph:
+output coverage walks backward from the selected output port through connected
+instance bridges, while input coverage walks forward from the selected input
+port. Coverage is lane-aware: only bridges on the same y coordinate as the
+selected boundary port are used for reachability. Repeated template rows are
+handled independently, then coverage for the same boundary and template is
+aggregated so a multi-row plan can prove that every copied instance is reached.
+This lets the report distinguish "the boundary belt touches one copied module"
+from "the boundary belt reaches every copied module needed to cover the
+requested target rate". Input fanouts extend that same reachability graph for
+copied modules on the same row. They add belts only on empty positions and can
+treat existing same-tier transport belts, underground belts, or splitters as
+already-built bus segments; non-belt collisions still block the fanout.
 
 The belt flow audit is a stricter pass over those connected segments. It
 rebuilds each horizontal boundary route, inter-instance bridge, and input

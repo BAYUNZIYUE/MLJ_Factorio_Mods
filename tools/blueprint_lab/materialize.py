@@ -277,11 +277,66 @@ def add_boundary_connectors(
                 ports.extend(ports_for_instance(node, instance, side, roles))
         return ports
 
+    def port_groups_by_row(ports: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        groups: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        for port in ports:
+            key = (str(port.get("node_fingerprint") or ""), int(port.get("node_row") or 0))
+            groups.setdefault(key, []).append(port)
+        return [
+            groups[key]
+            for key in sorted(
+                groups,
+                key=lambda item: (
+                    min(float(port["y"]) for port in groups[item]),
+                    min(float(port["x"]) for port in groups[item]),
+                ),
+            )
+        ]
+
     def ports_by_distance(ports: list[dict[str, Any]], y: float, side: str) -> list[dict[str, Any]]:
         role_priority = {"input": 0, "output": 0, "edge-bus": 1, "boundary": 2}
+        def bridge_lane_score(port: dict[str, Any]) -> int:
+            fingerprint = str(port.get("node_fingerprint") or "")
+            port_y = round(float(port.get("y") or 0.0), 3)
+            return sum(
+                1
+                for bridge in bridges
+                if bridge.get("status") == "connected"
+                and str(bridge.get("node_fingerprint") or "") == fingerprint
+                and round(float(bridge.get("bridge_y") or 0.0), 3) == port_y
+            )
+
+        def belt_surface_priority(port: dict[str, Any]) -> int:
+            entity_name = str(port.get("entity_name") or "")
+            if entity_name.endswith("transport-belt") and not entity_name.endswith("underground-belt"):
+                return 0
+            if entity_name.endswith("splitter"):
+                return 1
+            if entity_name.endswith("underground-belt"):
+                return 2
+            return 3
+
         if side == "right":
-            return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), role_priority.get(str(port.get("role")), 9), -float(port["x"])))
-        return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), role_priority.get(str(port.get("role")), 9), float(port["x"])))
+            return sorted(
+                ports,
+                key=lambda port: (
+                    -bridge_lane_score(port),
+                    belt_surface_priority(port),
+                    role_priority.get(str(port.get("role")), 9),
+                    abs(float(port["y"]) - y),
+                    -float(port["x"]),
+                ),
+            )
+        return sorted(
+            ports,
+            key=lambda port: (
+                -bridge_lane_score(port),
+                belt_surface_priority(port),
+                role_priority.get(str(port.get("role")), 9),
+                abs(float(port["y"]) - y),
+                float(port["x"]),
+            ),
+        )
 
     def port_by_y(ports: list[dict[str, Any]], *, prefer: str) -> dict[float, dict[str, Any]]:
         selected: dict[float, dict[str, Any]] = {}
@@ -378,12 +433,8 @@ def add_boundary_connectors(
         }
 
     for boundary in layout_plan.get("boundary_inputs") or []:
-        ports = ports_by_distance(
-            candidate_ports("left", {"input", "edge-bus", "boundary"}),
-            default_y,
-            "left",
-        )
-        if not ports:
+        row_groups = port_groups_by_row(candidate_ports("left", {"input", "edge-bus", "boundary"}))
+        if not row_groups:
             left_end = int(max(0, float(root["x"]) - 1))
             positions = [
                 (float(x), default_y, f"input:{boundary['item']}", DIR_EAST, "transport-belt")
@@ -401,44 +452,43 @@ def add_boundary_connectors(
             )
             continue
 
-        candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]] = []
-        reason = f"input:{boundary['item']}"
-        for port in ports:
-            start_x = 0.5
-            end_x = float(port["x"]) - 0.5
-            belt_name = connector_belt_name_for_port(port)
-            candidates.append(
-                (
-                    port,
-                    *route_candidate(
-                        start_x=start_x,
-                        end_x=end_x,
-                        y=float(port["y"]),
-                        reason=reason,
-                        belt_name=belt_name,
-                    ),
+        for row_ports in row_groups:
+            row_y = min(float(port["y"]) for port in row_ports)
+            ports = ports_by_distance(row_ports, row_y, "left")
+            candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]] = []
+            reason = f"input:{boundary['item']}"
+            for port in ports:
+                start_x = 0.5
+                end_x = float(port["x"]) - 0.5
+                belt_name = connector_belt_name_for_port(port)
+                candidates.append(
+                    (
+                        port,
+                        *route_candidate(
+                            start_x=start_x,
+                            end_x=end_x,
+                            y=float(port["y"]),
+                            reason=reason,
+                            belt_name=belt_name,
+                        ),
+                    )
                 )
+            belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
+            routes.append(
+                {
+                    "boundary": f"input:{boundary['item']}",
+                    "status": "connected" if not route_collisions else "blocked",
+                    "belts_added": belts_added,
+                    "collisions": route_collisions,
+                    "port": port,
+                    "route_kind": route_kind,
+                    "blocked_attempts": blocked_attempts,
+                }
             )
-        belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
-        routes.append(
-            {
-                "boundary": f"input:{boundary['item']}",
-                "status": "connected" if not route_collisions else "blocked",
-                "belts_added": belts_added,
-                "collisions": route_collisions,
-                "port": port,
-                "route_kind": route_kind,
-                "blocked_attempts": blocked_attempts,
-            }
-        )
 
     for boundary in layout_plan.get("boundary_outputs") or []:
-        ports = ports_by_distance(
-            candidate_ports("right", {"output", "edge-bus", "boundary"}),
-            default_y,
-            "right",
-        )
-        if not ports:
+        row_groups = port_groups_by_row(candidate_ports("right", {"output", "edge-bus", "boundary"}))
+        if not row_groups:
             right_start = int(float(root["x"]) + float(root["planned_width"]) + 1)
             right_end = int(max(right_start - 1, float(layout_plan["estimated_width"]) - 1))
             positions = [
@@ -457,36 +507,39 @@ def add_boundary_connectors(
             )
             continue
 
-        candidates = []
-        reason = f"output:{boundary['item']}"
-        end_x = float(layout_plan["estimated_width"]) - 0.5
-        for port in ports:
-            start_x = float(port["x"]) + 1.0
-            belt_name = connector_belt_name_for_port(port)
-            candidates.append(
-                (
-                    port,
-                    *route_candidate(
-                        start_x=start_x,
-                        end_x=end_x,
-                        y=float(port["y"]),
-                        reason=reason,
-                        belt_name=belt_name,
-                    ),
+        for row_ports in row_groups:
+            row_y = min(float(port["y"]) for port in row_ports)
+            ports = ports_by_distance(row_ports, row_y, "right")
+            candidates = []
+            reason = f"output:{boundary['item']}"
+            end_x = float(layout_plan["estimated_width"]) - 0.5
+            for port in ports:
+                start_x = float(port["x"]) + 1.0
+                belt_name = connector_belt_name_for_port(port)
+                candidates.append(
+                    (
+                        port,
+                        *route_candidate(
+                            start_x=start_x,
+                            end_x=end_x,
+                            y=float(port["y"]),
+                            reason=reason,
+                            belt_name=belt_name,
+                        ),
+                    )
                 )
+            belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
+            routes.append(
+                {
+                    "boundary": f"output:{boundary['item']}",
+                    "status": "connected" if not route_collisions else "blocked",
+                    "belts_added": belts_added,
+                    "collisions": route_collisions,
+                    "port": port,
+                    "route_kind": route_kind,
+                    "blocked_attempts": blocked_attempts,
+                }
             )
-        belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
-        routes.append(
-            {
-                "boundary": f"output:{boundary['item']}",
-                "status": "connected" if not route_collisions else "blocked",
-                "belts_added": belts_added,
-                "collisions": route_collisions,
-                "port": port,
-                "route_kind": route_kind,
-                "blocked_attempts": blocked_attempts,
-            }
-        )
 
     def add_input_fanouts() -> int:
         before = len(connectors)
@@ -802,13 +855,14 @@ def add_boundary_connectors(
             for node in layout_plan.get("nodes") or []
             if node.get("fingerprint") is not None
         }
-        coverage: list[dict[str, Any]] = []
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        uncovered: list[dict[str, Any]] = []
         for route in routes:
             port = route.get("port") or {}
             fingerprint = str(port.get("node_fingerprint") or "")
             node = node_index.get(fingerprint)
             if route.get("status") != "connected" or not node:
-                coverage.append(
+                uncovered.append(
                     {
                         "boundary": route.get("boundary"),
                         "status": "uncovered",
@@ -826,32 +880,49 @@ def add_boundary_connectors(
                 bridge_edges_for_node(fingerprint, route_y),
                 direction=direction,
             )
-            coverage_status = "covered" if len(covered_instances) >= instances else "partial"
-            item: dict[str, Any] = {
-                "boundary": route.get("boundary"),
-                "status": coverage_status,
-                "direction": direction,
-                "route_y": route_y,
-                "node_item": node.get("item"),
-                "node_recipe": node.get("recipe"),
-                "node_fingerprint": fingerprint,
-                "start_instance": start_instance,
-                "covered_instances": covered_instances,
-                "covered_instance_count": len(covered_instances),
-                "total_instances": instances,
-            }
+            key = (boundary, fingerprint)
+            item = grouped.setdefault(
+                key,
+                {
+                    "boundary": route.get("boundary"),
+                    "status": "partial",
+                    "direction": direction,
+                    "route_ys": [],
+                    "node_item": node.get("item"),
+                    "node_recipe": node.get("recipe"),
+                    "node_fingerprint": fingerprint,
+                    "start_instances": [],
+                    "covered_instances": [],
+                    "covered_instance_count": 0,
+                    "total_instances": instances,
+                    "route_count": 0,
+                },
+            )
+            item["route_count"] += 1
+            item["route_ys"].append(route_y)
+            item["start_instances"].append(start_instance)
+            item["covered_instances"] = sorted(set(item["covered_instances"]) | set(covered_instances))
+            item["covered_instance_count"] = len(item["covered_instances"])
             required_rate = route_boundary_rate(route)
             if required_rate is not None:
                 item["required_rate_per_minute"] = required_rate
             if boundary.startswith("output:"):
                 planned_net = float(node.get("planned_net_output_per_minute") or 0.0)
                 per_instance = planned_net / instances if instances else 0.0
-                covered_rate = per_instance * len(covered_instances)
+                covered_rate = per_instance * len(item["covered_instances"])
                 item["covered_rate_per_minute"] = covered_rate
                 item["per_instance_net_output_per_minute"] = per_instance
                 if required_rate is not None:
                     item["meets_required_rate"] = covered_rate >= required_rate
-            coverage.append(item)
+        coverage = list(grouped.values())
+        for item in coverage:
+            item["route_ys"] = sorted(set(item["route_ys"]))
+            item["start_instances"] = sorted(set(item["start_instances"]))
+            item["status"] = "covered" if item["covered_instance_count"] >= item["total_instances"] else "partial"
+            if item["boundary"].startswith("output:") and item.get("required_rate_per_minute") is not None:
+                item["meets_required_rate"] = item.get("covered_rate_per_minute", 0.0) >= item["required_rate_per_minute"]
+        covered_boundaries = {item["boundary"] for item in coverage}
+        coverage.extend(item for item in uncovered if item["boundary"] not in covered_boundaries)
         return coverage
 
     coverage = boundary_coverage()

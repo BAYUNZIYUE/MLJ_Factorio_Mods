@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 import sys
 
@@ -376,33 +377,43 @@ def main() -> int:
         label="fixture-connected",
         connect_boundaries=True,
     )
-    if connector_summary["connectors_added"] != 41 or connector_summary["collisions"]:
+    if connector_summary["connectors_added"] != 59 or connector_summary["collisions"]:
         print(f"FAIL: expected connector belts without collisions: {connector_summary}")
         return 1
-    if connector_summary["input_fanouts_added"] != 14:
-        print(f"FAIL: expected input fanout belts across the first repeated row: {connector_summary}")
+    if connector_summary["input_fanouts_added"] != 28:
+        print(f"FAIL: expected input fanout belts across both repeated rows: {connector_summary}")
         return 1
-    if len(connector_summary["input_fanouts"]) != 7 or any(fanout["status"] != "connected" for fanout in connector_summary["input_fanouts"]):
-        print(f"FAIL: expected seven connected input fanout segments: {connector_summary}")
+    if len(connector_summary["input_fanouts"]) != 14 or any(fanout["status"] != "connected" for fanout in connector_summary["input_fanouts"]):
+        print(f"FAIL: expected fourteen connected input fanout segments: {connector_summary}")
         return 1
-    if [route["status"] for route in connector_summary["routes"]] != ["connected", "stub-only"]:
-        print(f"FAIL: expected input connected and output stub-only route states: {connector_summary}")
+    if [route["status"] for route in connector_summary["routes"]] != ["connected", "connected", "stub-only"]:
+        print(f"FAIL: expected two input connected routes and one output stub-only route: {connector_summary}")
         return 1
-    if connector_summary["routes"][0]["port"]["node_item"] != "iron-plate":
-        print(f"FAIL: expected input route to choose the plate template port: {connector_summary}")
+    connected_input_routes = [route for route in connector_summary["routes"] if route["boundary"] == "input:iron-ore"]
+    if [route["port"]["node_instance"] for route in connected_input_routes] != [0, 8]:
+        print(f"FAIL: expected input routes to start each repeated plate row: {connector_summary}")
+        return 1
+    if any(route["port"]["node_item"] != "iron-plate" for route in connected_input_routes):
+        print(f"FAIL: expected input routes to choose plate template ports: {connector_summary}")
         return 1
     connector_coverage = {item["boundary"]: item for item in connector_summary["boundary_coverage"]}
-    if connector_coverage["input:iron-ore"]["status"] != "partial" or connector_coverage["input:iron-ore"]["covered_instances"] != list(range(8)):
-        print(f"FAIL: expected input fanout to cover only the first repeated row: {connector_summary}")
+    input_coverage = connector_coverage["input:iron-ore"]
+    if (
+        input_coverage["status"] != "covered"
+        or input_coverage["covered_instances"] != list(range(16))
+        or input_coverage["route_count"] != 2
+        or input_coverage["start_instances"] != [0, 8]
+    ):
+        print(f"FAIL: expected input fanout to cover both repeated rows: {connector_summary}")
         return 1
     if connector_coverage["output:iron-gear-wheel"]["status"] != "uncovered":
         print(f"FAIL: expected output route without a learned port to stay uncovered: {connector_summary}")
         return 1
     flow_counts = Counter(item["status"] for item in connector_summary["belt_flow_audit"])
-    if flow_counts != {"pass": 1, "failed": 7}:
+    if flow_counts != {"pass": 2, "failed": 14}:
         print(f"FAIL: expected fixture fanouts to expose non-belt endpoints in belt flow audit: {connector_summary}")
         return 1
-    if len(connected["blueprint"]["entities"]) != 58:
+    if len(connected["blueprint"]["entities"]) != 76:
         print(f"FAIL: expected connected blueprint to add connector belts: {connected}")
         return 1
     if any(entity["name"] == "transport-belt" and entity.get("direction") != DIR_EAST for entity in connected["blueprint"]["entities"]):
@@ -551,14 +562,18 @@ def main() -> int:
     if replicated_summary["collisions"]:
         print(f"FAIL: expected replicated-port routing to avoid collisions: {replicated_summary}")
         return 1
-    if replicated_summary["connectors_added"] != 20 or replicated_summary["input_fanouts_added"] != 7:
-        print(f"FAIL: expected replicated routing to add output bridge plus input fanout belts: {replicated_summary}")
+    if replicated_summary["connectors_added"] != 13 or replicated_summary["input_fanouts_added"] != 0:
+        print(f"FAIL: expected replicated routing to reuse the bridge lane for input fanout: {replicated_summary}")
         return 1
     if replicated_summary["bridges_added"] != 6 or replicated_summary["bridges"][0]["status"] != "connected":
         print(f"FAIL: expected replicated-port routing to bridge adjacent template instances: {replicated_summary}")
         return 1
-    if len(replicated_summary["input_fanouts"]) != 1 or replicated_summary["input_fanouts"][0]["status"] != "connected":
-        print(f"FAIL: expected replicated-port routing to fan out the input lane: {replicated_summary}")
+    if (
+        len(replicated_summary["input_fanouts"]) != 1
+        or replicated_summary["input_fanouts"][0]["status"] != "connected"
+        or replicated_summary["input_fanouts"][0]["existing_belts_used"] != 7
+    ):
+        print(f"FAIL: expected replicated-port routing to fan out through existing bridge-lane belts: {replicated_summary}")
         return 1
     replicated_coverage = {item["boundary"]: item for item in replicated_summary["boundary_coverage"]}
     if replicated_coverage["output:iron-ore"]["status"] != "covered" or replicated_coverage["output:iron-ore"]["covered_instances"] != [0, 1] or not replicated_coverage["output:iron-ore"]["meets_required_rate"]:
@@ -571,7 +586,7 @@ def main() -> int:
     if replicated_flow_counts != {"pass": 4}:
         print(f"FAIL: expected replicated route, bridge, and fanout to pass belt flow audit: {replicated_summary}")
         return 1
-    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 26:
+    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 19:
         print(f"FAIL: expected replicated-port route and bridge to add turbo belts: {replicated}")
         return 1
     if decode_blueprint_string(encode_blueprint_string(replicated)) != replicated:
@@ -592,8 +607,14 @@ def main() -> int:
             },
         }
     ]
+    semantic_fail_layout = deepcopy(replicated_layout)
+    semantic_fail_layout["boundary_outputs"] = []
+    semantic_fail_layout["nodes"][0]["ports"] = [
+        port for port in semantic_fail_layout["nodes"][0]["ports"]
+        if not (port["side"] == "right" and port["role"] == "output")
+    ]
     _, semantic_fail_summary = materialize_layout_with_summary(
-        replicated_layout,
+        semantic_fail_layout,
         semantic_fail_mappings,
         label="fixture-semantic-fail",
         connect_boundaries=True,
@@ -626,8 +647,8 @@ def main() -> int:
         print(f"FAIL: expected materializer to preserve underground-belt type: {underground}")
         return 1
     underground_flow_counts = Counter(item["status"] for item in underground_summary["belt_flow_audit"])
-    if underground_flow_counts != {"pass": 4}:
-        print(f"FAIL: expected east-facing underground output to pass horizontal belt audit: {underground_summary}")
+    if underground_flow_counts != {"pass": 3, "unresolved": 1}:
+        print(f"FAIL: expected middle underground output to stay unresolved in reused fanout audit: {underground_summary}")
         return 1
 
     underground_input_mappings = [
