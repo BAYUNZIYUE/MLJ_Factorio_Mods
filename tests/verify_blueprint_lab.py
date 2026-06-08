@@ -12,6 +12,7 @@ from tools.blueprint_lab.codec import decode_blueprint_string, encode_blueprint_
 from tools.blueprint_lab.decompose import decompose_blueprint
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
+from tools.blueprint_lab.templates import extract_templates_from_blueprint
 
 
 def main() -> int:
@@ -62,7 +63,15 @@ def main() -> int:
         print(f"FAIL: expected generated seed to expose repeated module signatures: {decomposition}")
         return 1
 
-    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, and generates a seed blueprint.")
+    templates = extract_templates_from_blueprint("generated", "/", blueprints[0].payload, category="smelting", cell_size=4)
+    if not templates:
+        print("FAIL: expected generated seed to expose template candidates")
+        return 1
+    if not all(template.fingerprint for template in templates):
+        print(f"FAIL: expected template candidates to have fingerprints: {templates}")
+        return 1
+
+    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, and generates a seed blueprint.")
     return 0
 
 

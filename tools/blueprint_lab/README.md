@@ -12,6 +12,7 @@ tree.
 - Scan a local blueprint corpus and produce JSON or Markdown reports.
 - Classify blueprint families and choose representative examples for later template extraction.
 - Decompose learned black-box candidates into boundary ports, coarse grid signatures, and repeated module candidates.
+- Extract normalized entity subgraph templates from repeated grid signatures.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -65,6 +66,13 @@ candidates:
 - Grid signatures group nearby entity families into coarse cells so repeated cells can be inspected as possible modules.
 - Decomposition lessons are intentionally conservative. A repeated cell is not automatically a recipe module; it is a candidate for later extraction and in-game validation.
 
+The first template extraction pass turns repeated grid cells into normalized
+entity subgraphs:
+
+- Each template records a fingerprint, normalized entities, entity families, recipes, module/request items, and control/connection clues.
+- Recipe-bearing templates are stronger generation material than route-only or platform-fill templates.
+- Template candidates are still evidence, not proof. They need recipe data and in-game validation before becoming production modules.
+
 ## Commands
 
 Analyze a blueprint directory:
@@ -83,6 +91,12 @@ Decompose learned black-box candidates:
 
 ```bash
 python3 -m tools.blueprint_lab.decompose /mnt/d/Desktop/游戏/异星工厂/蓝图 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-decomposition-summary.json --markdown-output .codex/tests/blueprint-decomposition-report.md
+```
+
+Extract template candidates:
+
+```bash
+python3 -m tools.blueprint_lab.templates /mnt/d/Desktop/游戏/异星工厂/蓝图 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-template-summary.json --markdown-output .codex/tests/blueprint-template-report.md
 ```
 
 Generate the current seed blueprint:
