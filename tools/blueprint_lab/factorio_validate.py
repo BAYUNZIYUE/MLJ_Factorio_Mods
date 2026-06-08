@@ -27,8 +27,93 @@ local function validation_fail(message)
   error(message, 0)
 end
 
+local function sorted_count_string(counts)
+  local keys = {{}}
+  for key, _ in pairs(counts) do
+    keys[#keys + 1] = key
+  end
+  table.sort(keys)
+  local parts = {{}}
+  for _, key in pairs(keys) do
+    parts[#parts + 1] = tostring(key) .. ":" .. tostring(counts[key])
+  end
+  return table.concat(parts, ",")
+end
+
+local function add_count(counts, key)
+  local count_key = tostring(key)
+  counts[count_key] = (counts[count_key] or 0) + 1
+end
+
+local function entity_status_name(status)
+  if status == nil then
+    return "nil"
+  end
+  for name, value in pairs(defines.entity_status) do
+    if value == status then
+      return name
+    end
+  end
+  return tostring(status)
+end
+
+local function audit_recipe_machines(surface)
+  local recipe_machine_count = 0
+  local recipe_counts = {{}}
+  local status_counts = {{}}
+  local crafting_speed_positive = 0
+  local products_finished_total = 0
+  local electric_connected_count = 0
+  local electric_checked_count = 0
+  local module_item_total = 0
+  local output_item_total = 0
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_recipe, recipe = pcall(function()
+      return entity.get_recipe()
+    end)
+    if ok_recipe and recipe ~= nil then
+      recipe_machine_count = recipe_machine_count + 1
+      add_count(recipe_counts, recipe.name)
+      add_count(status_counts, entity_status_name(entity.status))
+      if entity.crafting_speed ~= nil and entity.crafting_speed > 0 then
+        crafting_speed_positive = crafting_speed_positive + 1
+      end
+      if entity.products_finished ~= nil then
+        products_finished_total = products_finished_total + entity.products_finished
+      end
+      local ok_connected, connected = pcall(function()
+        return entity.is_connected_to_electric_network()
+      end)
+      if ok_connected then
+        electric_checked_count = electric_checked_count + 1
+        if connected then
+          electric_connected_count = electric_connected_count + 1
+        end
+      end
+      local module_inventory = entity.get_module_inventory()
+      if module_inventory ~= nil then
+        module_item_total = module_item_total + module_inventory.get_item_count()
+      end
+      local output_inventory = entity.get_output_inventory()
+      if output_inventory ~= nil then
+        output_item_total = output_item_total + output_inventory.get_item_count()
+      end
+    end
+  end
+  log("BLUEPRINT_LAB_VALIDATION recipe_machine_audit machines=" .. tostring(recipe_machine_count) .. " recipes=" .. sorted_count_string(recipe_counts) .. " status=" .. sorted_count_string(status_counts))
+  log("BLUEPRINT_LAB_VALIDATION recipe_machine_runtime crafting_speed_positive=" .. tostring(crafting_speed_positive) .. " electric_connected=" .. tostring(electric_connected_count) .. "/" .. tostring(electric_checked_count) .. " products_finished=" .. tostring(products_finished_total) .. " module_items=" .. tostring(module_item_total) .. " output_items=" .. tostring(output_item_total))
+end
+
+local validation_started = false
+local pending_audit_surface = nil
+local pending_audit_tick = nil
+local runtime_audit_wait_ticks = 120
+
 local function run_validation()
   log("BLUEPRINT_LAB_VALIDATION start")
+  game.forces.player.enable_all_recipes()
+  game.forces.player.enable_all_technologies()
+  log("BLUEPRINT_LAB_VALIDATION force_unlocks=all_recipes,all_technologies")
 
   local inventory = game.create_inventory(1)
   local stack = inventory[1]
@@ -202,7 +287,11 @@ local function run_validation()
         end
         if entity.recipe ~= nil then
           local ok_recipe, recipe_result = pcall(function()
-            created.set_recipe(entity.recipe, entity.recipe_quality)
+            if entity.recipe_quality == nil or entity.recipe_quality == "normal" then
+              created.set_recipe(entity.recipe)
+            else
+              created.set_recipe(entity.recipe, entity.recipe_quality)
+            end
           end)
           if not ok_recipe then
             recipe_failures = recipe_failures + 1
@@ -260,13 +349,23 @@ local function run_validation()
 
   local surface_entities = surface.find_entities_filtered{{force = game.forces.player}}
   log("BLUEPRINT_LAB_VALIDATION surface_entities=" .. tostring(#surface_entities))
-  log("BLUEPRINT_LAB_VALIDATION success")
-  validation_fail("completed")
+  pending_audit_surface = surface
+  pending_audit_tick = game.tick + runtime_audit_wait_ticks
+  log("BLUEPRINT_LAB_VALIDATION runtime_audit_wait_ticks=" .. tostring(runtime_audit_wait_ticks))
 end
 
 script.on_event(defines.events.on_tick, function(event)
-  script.on_event(defines.events.on_tick, nil)
-  run_validation()
+  if not validation_started then
+    validation_started = true
+    run_validation()
+    return
+  end
+  if pending_audit_surface ~= nil and game.tick >= pending_audit_tick then
+    script.on_event(defines.events.on_tick, nil)
+    audit_recipe_machines(pending_audit_surface)
+    log("BLUEPRINT_LAB_VALIDATION success")
+    validation_fail("completed")
+  end
 end)
 """
 

@@ -57,6 +57,7 @@ def main() -> int:
     validation_lua = render_control_lua(encoded)
     for expected in [
         "stack.import_stack(blueprint_string)",
+        "force_unlocks=all_recipes,all_technologies",
         "game.forces.player.create_space_platform",
         "surface.set_tiles(platform_tiles",
         "stack.build_blueprint",
@@ -65,6 +66,9 @@ def main() -> int:
         "manual_underground_types=",
         "manual_modules_inserted=",
         "created.set_recipe(entity.recipe, entity.recipe_quality)",
+        "runtime_audit_wait_ticks=",
+        "recipe_machine_audit",
+        "recipe_machine_runtime",
         "script.on_event(defines.events.on_tick",
     ]:
         if expected not in validation_lua:

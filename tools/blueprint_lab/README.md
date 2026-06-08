@@ -263,7 +263,13 @@ generated platform blueprint reaches that fallback: `import_stack=0`,
 `built_entities=0`, `manual_entities=436`, `manual_failures=0`,
 `manual_recipe_set=5`, `manual_recipe_failures=0`,
 `manual_underground_types=25`, `manual_underground_type_failures=0`,
-`manual_modules_inserted=30`, and `manual_module_failures=0`.
+`manual_modules_inserted=30`, and `manual_module_failures=0`. After unlocking
+all recipes and technologies and waiting 120 ticks, the same run reports five
+`metallic-asteroid-crushing` machines with positive crafting speed, module
+items installed, and electric network connection. Their current status is
+`item_ingredient_shortage`, so the next validation boundary is external
+asteroid-chunk input flow rather than placement, recipe unlock, module, or
+power availability.
 
 ## Commands
 
