@@ -13,7 +13,7 @@ from tools.blueprint_lab.decompose import decompose_blueprint
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
-from tools.blueprint_lab.prototypes import load_data_raw
+from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from_args
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
@@ -127,6 +127,10 @@ def main() -> int:
   "quality": {
     "normal": {"level": 0},
     "legendary": {"level": 5}
+  },
+  "transport-belt": {
+    "transport-belt": {"speed": 0.03125},
+    "turbo-transport-belt": {"speed": 0.125}
   }
 }
 """,
@@ -135,6 +139,15 @@ def main() -> int:
     knowledge = load_data_raw(data_raw_path)
     if knowledge.quality_effect_multiplier("legendary") != 2.5:
         print(f"FAIL: expected legendary quality to scale positive module effects by 2.5: {knowledge.qualities}")
+        return 1
+    target_rate, target_rate_basis = target_rate_basis_from_args(
+        knowledge,
+        target_rate_per_minute=None,
+        target_belt="turbo-transport-belt",
+        target_belt_count=2,
+    )
+    if target_rate != 7200 or target_rate_basis["items_per_second_per_belt"] != 60:
+        print(f"FAIL: expected full-belt target to derive from data.raw belt speed: {target_rate_basis}")
         return 1
     mapped = map_template(recipe_templates[0], knowledge)
     if not mapped.recipe_mappings or mapped.recipe_mappings[0].status != "resolved":
@@ -295,8 +308,12 @@ def main() -> int:
         dag_mappings,
         target_item="iron-gear-wheel",
         target_rate_per_minute=150,
+        target_rate_basis={"kind": "explicit-rate", "rate_per_minute": 150},
         max_depth=4,
     )
+    if dag["target_rate_basis"] != {"kind": "explicit-rate", "rate_per_minute": 150}:
+        print(f"FAIL: expected DAG to retain target rate basis: {dag}")
+        return 1
     if dag["node_count"] != 2:
         print(f"FAIL: expected gear and plate nodes in DAG: {dag}")
         return 1
@@ -447,6 +464,68 @@ def main() -> int:
         return 1
     if decode_blueprint_string(encode_blueprint_string(detoured)) != detoured:
         print("FAIL: detoured blueprint did not round-trip through Factorio string encoding")
+        return 1
+
+    replicated_layout = {
+        "target_item": "iron-ore",
+        "target_rate_per_minute": 3600,
+        "spacing": 4,
+        "estimated_width": 17,
+        "estimated_height": 10,
+        "boundary_inputs": [],
+        "boundary_outputs": [{"item": "iron-ore", "rate_per_minute": 3600, "side": "right"}],
+        "nodes": [
+            {
+                "item": "iron-ore",
+                "recipe": "fixture-crushing",
+                "fingerprint": "replicated-port-template",
+                "instances": 2,
+                "source_width": 4,
+                "source_height": 3,
+                "source_entity_count": 1,
+                "source_tile_count": 0,
+                "columns": 2,
+                "rows": 1,
+                "planned_width": 12,
+                "planned_height": 3,
+                "x": 4,
+                "y": 4,
+                "ports": [{"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 1, "y": 1}],
+                "port_counts": [("right:output", 1)],
+                "source": "fixture",
+                "path": "/replicated",
+            }
+        ],
+    }
+    replicated_mappings = [
+        {
+            "fingerprint": "replicated-port-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 1, "y": 1, "direction": 2, "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    replicated, replicated_summary = materialize_layout_with_summary(
+        replicated_layout,
+        replicated_mappings,
+        label="fixture-replicated",
+        connect_boundaries=True,
+    )
+    replicated_route = replicated_summary["routes"][0]
+    if replicated_route["status"] != "connected" or replicated_route["port"]["node_instance"] != 1:
+        print(f"FAIL: expected output route to use the rightmost replicated template port: {replicated_summary}")
+        return 1
+    if replicated_summary["collisions"]:
+        print(f"FAIL: expected replicated-port routing to avoid collisions: {replicated_summary}")
+        return 1
+    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 5:
+        print(f"FAIL: expected replicated-port route to add turbo belts from the selected instance: {replicated}")
+        return 1
+    if decode_blueprint_string(encode_blueprint_string(replicated)) != replicated:
+        print("FAIL: replicated-port blueprint did not round-trip through Factorio string encoding")
         return 1
 
     print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, materializes a blueprint skeleton, and generates a seed blueprint.")

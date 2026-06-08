@@ -64,12 +64,28 @@ class BeaconPrototype:
 
 
 @dataclass(frozen=True)
+class BeltPrototype:
+    name: str
+    type: str
+    speed: float
+
+    @property
+    def items_per_second(self) -> float:
+        return self.speed * 480
+
+    @property
+    def items_per_minute(self) -> float:
+        return self.items_per_second * 60
+
+
+@dataclass(frozen=True)
 class PrototypeKnowledge:
     recipes: dict[str, Recipe]
     crafting_entities: dict[str, CraftingEntity]
     modules: dict[str, ModulePrototype]
     qualities: dict[str, QualityPrototype]
     beacons: dict[str, BeaconPrototype]
+    belts: dict[str, BeltPrototype]
 
     def recipe(self, name: str) -> Recipe | None:
         return self.recipes.get(name)
@@ -90,6 +106,9 @@ class PrototypeKnowledge:
 
     def beacon(self, name: str) -> BeaconPrototype | None:
         return self.beacons.get(name)
+
+    def belt(self, name: str) -> BeltPrototype | None:
+        return self.belts.get(name)
 
 
 def value_amount(value: Any, default: float = 1.0) -> float:
@@ -221,6 +240,17 @@ def normalize_beacon(name: str, proto: dict[str, Any]) -> BeaconPrototype:
     )
 
 
+def normalize_belt(name: str, entity_type: str, proto: dict[str, Any]) -> BeltPrototype | None:
+    speed = proto.get("speed")
+    if not isinstance(speed, (int, float)) or speed <= 0:
+        return None
+    return BeltPrototype(
+        name=name,
+        type=entity_type,
+        speed=float(speed),
+    )
+
+
 def load_data_raw(path: Path) -> PrototypeKnowledge:
     raw = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw, dict):
@@ -265,17 +295,71 @@ def load_data_raw(path: Path) -> PrototypeKnowledge:
         if isinstance(proto, dict)
     }
 
+    belts: dict[str, BeltPrototype] = {}
+    for entity_type in ("transport-belt", "underground-belt", "splitter"):
+        table = raw.get(entity_type) or {}
+        if not isinstance(table, dict):
+            continue
+        for name, proto in table.items():
+            if not isinstance(proto, dict):
+                continue
+            belt = normalize_belt(name, entity_type, proto)
+            if belt is not None:
+                belts[name] = belt
+
     return PrototypeKnowledge(
         recipes=recipes,
         crafting_entities=crafting_entities,
         modules=modules,
         qualities=qualities,
         beacons=beacons,
+        belts=belts,
     )
 
 
 def empty_knowledge() -> PrototypeKnowledge:
-    return PrototypeKnowledge(recipes={}, crafting_entities={}, modules={}, qualities={}, beacons={})
+    return PrototypeKnowledge(recipes={}, crafting_entities={}, modules={}, qualities={}, beacons={}, belts={})
+
+
+def target_rate_basis_from_args(
+    knowledge: PrototypeKnowledge,
+    *,
+    target_rate_per_minute: float | None,
+    target_belt: str | None = None,
+    target_belt_count: int = 1,
+) -> tuple[float, dict[str, Any]]:
+    if target_rate_per_minute is not None and target_belt:
+        raise ValueError("Use either --target-rate-per-minute or --target-belt, not both")
+    if target_rate_per_minute is not None:
+        if target_rate_per_minute <= 0:
+            raise ValueError("--target-rate-per-minute must be positive")
+        return target_rate_per_minute, {
+            "kind": "explicit-rate",
+            "rate_per_minute": target_rate_per_minute,
+        }
+    if not target_belt:
+        raise ValueError("Provide --target-rate-per-minute or --target-belt")
+    if target_belt_count < 1:
+        raise ValueError("--target-belt-count must be at least 1")
+
+    belt = knowledge.belt(target_belt)
+    if belt is None:
+        known = ", ".join(sorted(knowledge.belts)) or "none"
+        raise ValueError(f"Unknown belt prototype {target_belt!r}; known belts: {known}")
+
+    per_belt_per_minute = belt.items_per_minute
+    target_rate = per_belt_per_minute * target_belt_count
+    return target_rate, {
+        "kind": "full-belt",
+        "belt_name": belt.name,
+        "belt_type": belt.type,
+        "belt_count": target_belt_count,
+        "belt_speed": belt.speed,
+        "items_per_second_per_belt": belt.items_per_second,
+        "items_per_minute_per_belt": per_belt_per_minute,
+        "rate_per_minute": target_rate,
+        "formula": "belt.speed * 480 * 60 * belt_count",
+    }
 
 
 def render_recipe(recipe: Recipe) -> str:
@@ -300,11 +384,13 @@ def main(argv: list[str] | None = None) -> int:
         "module_count": len(knowledge.modules),
         "quality_count": len(knowledge.qualities),
         "beacon_count": len(knowledge.beacons),
+        "belt_count": len(knowledge.belts),
         "sample_recipes": [asdict(recipe) for recipe in list(knowledge.recipes.values())[:20]],
         "sample_crafting_entities": [asdict(entity) for entity in list(knowledge.crafting_entities.values())[:20]],
         "sample_modules": [asdict(module) for module in list(knowledge.modules.values())[:20]],
         "sample_qualities": [asdict(quality) for quality in list(knowledge.qualities.values())[:20]],
         "sample_beacons": [asdict(beacon) for beacon in list(knowledge.beacons.values())[:20]],
+        "sample_belts": [asdict(belt) for belt in list(knowledge.belts.values())[:20]],
     }
     if args.json_output:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)

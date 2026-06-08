@@ -16,7 +16,7 @@ from .production_dag import (
     default_boundary_items,
     template_options_from_mappings,
 )
-from .prototypes import load_data_raw
+from .prototypes import load_data_raw, target_rate_basis_from_args
 from .template_knowledge import map_template_library
 
 
@@ -177,30 +177,46 @@ def add_boundary_connectors(
 
     def candidate_ports(side: str, roles: set[str]) -> list[dict[str, Any]]:
         ports: list[dict[str, Any]] = []
+        spacing = float(layout_plan.get("spacing") or 0)
         for node in layout_plan.get("nodes") or []:
+            instances = int(node.get("instances") or 1)
+            columns = max(1, int(node.get("columns") or 1))
+            source_width = float(node.get("source_width") or 0)
+            source_height = float(node.get("source_height") or 0)
             for port in node.get("ports") or []:
                 if port.get("side") != side or port.get("role") not in roles:
                     continue
-                ports.append(
-                    {
-                        "node_item": node.get("item"),
-                        "node_recipe": node.get("recipe"),
-                        "side": port.get("side"),
-                        "role": port.get("role"),
-                        "entity_name": port.get("entity_name"),
-                        "x": round(float(node["x"]) + float(port.get("x") or 0), 3),
-                        "y": round(float(node["y"]) + float(port.get("y") or 0), 3),
-                    }
-                )
+                for instance in range(instances):
+                    col = instance % columns
+                    row = instance // columns
+                    origin_x = float(node["x"]) + col * (source_width + spacing)
+                    origin_y = float(node["y"]) + row * (source_height + spacing)
+                    ports.append(
+                        {
+                            "node_item": node.get("item"),
+                            "node_recipe": node.get("recipe"),
+                            "node_instance": instance,
+                            "node_column": col,
+                            "node_row": row,
+                            "side": port.get("side"),
+                            "role": port.get("role"),
+                            "entity_name": port.get("entity_name"),
+                            "x": round(origin_x + float(port.get("x") or 0), 3),
+                            "y": round(origin_y + float(port.get("y") or 0), 3),
+                        }
+                    )
         return ports
 
-    def ports_by_distance(ports: list[dict[str, Any]], y: float) -> list[dict[str, Any]]:
+    def ports_by_distance(ports: list[dict[str, Any]], y: float, side: str) -> list[dict[str, Any]]:
+        if side == "right":
+            return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), -float(port["x"])))
         return sorted(ports, key=lambda port: (abs(float(port["y"]) - y), float(port["x"])))
 
     for boundary in layout_plan.get("boundary_inputs") or []:
         ports = ports_by_distance(
             candidate_ports("left", {"input", "edge-bus", "boundary"}),
             default_y,
+            "left",
         )
         if not ports:
             left_end = int(max(0, float(root["x"]) - 1))
@@ -255,6 +271,7 @@ def add_boundary_connectors(
         ports = ports_by_distance(
             candidate_ports("right", {"output", "edge-bus", "boundary"}),
             default_y,
+            "right",
         )
         if not ports:
             right_start = int(float(root["x"]) + float(root["planned_width"]) + 1)
@@ -394,6 +411,7 @@ def build_materialized_blueprint(
     *,
     target_item: str,
     target_rate_per_minute: float,
+    target_rate_basis: dict[str, Any] | None = None,
     target_recipe: str | None = None,
     max_depth: int = 4,
     boundary_items: set[str] | None = None,
@@ -407,6 +425,7 @@ def build_materialized_blueprint(
         mappings,
         target_item=target_item,
         target_rate_per_minute=target_rate_per_minute,
+        target_rate_basis=target_rate_basis,
         target_recipe=target_recipe,
         max_depth=max_depth,
         boundary_items=boundary_items,
@@ -445,6 +464,10 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
         "label": blueprint.get("label"),
         "target_item": layout["target_item"],
         "target_rate_per_minute": layout["target_rate_per_minute"],
+        "target_rate_basis": layout.get("target_rate_basis") or {
+            "kind": "explicit-rate",
+            "rate_per_minute": layout["target_rate_per_minute"],
+        },
         "entity_count": metrics.entity_count,
         "tile_count": metrics.tile_count,
         "width": metrics.width,
@@ -466,12 +489,14 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
 
 
 def render_markdown_report(summary: dict[str, Any]) -> str:
+    target_rate_basis = summary.get("target_rate_basis") or {}
     lines = [
         "# Blueprint Materialization Report",
         "",
         f"- Label: {summary['label']}",
         f"- Target item: {summary['target_item']}",
         f"- Target rate: {summary['target_rate_per_minute']:g}/min",
+        f"- Target rate basis: {render_target_rate_basis(target_rate_basis)}",
         f"- Entities: {summary['entity_count']}",
         f"- Tiles: {summary['tile_count']}",
         f"- Connector belts: {summary['connector_summary']['connectors_added']}",
@@ -535,12 +560,23 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_target_rate_basis(target_rate_basis: dict[str, Any]) -> str:
+    if target_rate_basis.get("kind") == "full-belt":
+        return (
+            f"{target_rate_basis['belt_count']}x {target_rate_basis['belt_name']} full belt "
+            f"({target_rate_basis['items_per_second_per_belt']:g}/s each)"
+        )
+    return "explicit rate"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Materialize a learned-template layout plan into a blueprint skeleton.")
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--data-raw-json", type=Path, required=True)
     parser.add_argument("--target-item", required=True)
-    parser.add_argument("--target-rate-per-minute", type=float, required=True)
+    parser.add_argument("--target-rate-per-minute", type=float)
+    parser.add_argument("--target-belt")
+    parser.add_argument("--target-belt-count", type=int, default=1)
     parser.add_argument("--target-recipe")
     parser.add_argument("--external-item", action="append", default=[])
     parser.add_argument("--no-default-boundary-items", action="store_true")
@@ -562,6 +598,15 @@ def main(argv: list[str] | None = None) -> int:
         files.extend(iter_blueprint_text_files(path))
 
     knowledge = load_data_raw(args.data_raw_json)
+    try:
+        target_rate_per_minute, target_rate_basis = target_rate_basis_from_args(
+            knowledge,
+            target_rate_per_minute=args.target_rate_per_minute,
+            target_belt=args.target_belt,
+            target_belt_count=args.target_belt_count,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     template_summary = map_template_library(files, knowledge=knowledge, top=args.top, cell_size=args.cell_size)
     boundary_items = set(args.external_item)
     if not args.no_default_boundary_items:
@@ -569,7 +614,8 @@ def main(argv: list[str] | None = None) -> int:
     production_plan = build_production_plan(
         template_summary["mappings"],
         target_item=args.target_item,
-        target_rate_per_minute=args.target_rate_per_minute,
+        target_rate_per_minute=target_rate_per_minute,
+        target_rate_basis=target_rate_basis,
         target_recipe=args.target_recipe,
         max_depth=args.max_depth,
         boundary_items=boundary_items,

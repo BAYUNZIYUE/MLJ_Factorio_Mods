@@ -14,6 +14,7 @@ from .production_dag import (
     template_options_from_mappings,
 )
 from .prototypes import load_data_raw
+from .prototypes import target_rate_basis_from_args
 from .template_knowledge import map_template_library
 
 
@@ -138,6 +139,10 @@ def build_layout_plan(
     return {
         "target_item": production_plan["target_item"],
         "target_rate_per_minute": production_plan["target_rate_per_minute"],
+        "target_rate_basis": production_plan.get("target_rate_basis") or {
+            "kind": "explicit-rate",
+            "rate_per_minute": production_plan["target_rate_per_minute"],
+        },
         "max_columns": max_columns,
         "spacing": spacing,
         "lane_width": lane_width,
@@ -172,11 +177,13 @@ def build_layout_plan(
 
 
 def render_markdown_report(summary: dict[str, Any]) -> str:
+    target_rate_basis = summary.get("target_rate_basis") or {}
     lines = [
         "# Blueprint Layout Plan Report",
         "",
         f"- Target item: {summary['target_item']}",
         f"- Target rate: {summary['target_rate_per_minute']:g}/min",
+        f"- Target rate basis: {render_target_rate_basis(target_rate_basis)}",
         f"- Estimated rectangle: {summary['estimated_width']:g} x {summary['estimated_height']:g}",
         f"- Estimated area: {summary['estimated_area']:g}",
         f"- Layout nodes: {summary['layout_node_count']}",
@@ -225,12 +232,23 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_target_rate_basis(target_rate_basis: dict[str, Any]) -> str:
+    if target_rate_basis.get("kind") == "full-belt":
+        return (
+            f"{target_rate_basis['belt_count']}x {target_rate_basis['belt_name']} full belt "
+            f"({target_rate_basis['items_per_second_per_belt']:g}/s each)"
+        )
+    return "explicit rate"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Turn a production DAG seed into a rectangular layout plan.")
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--data-raw-json", type=Path, required=True)
     parser.add_argument("--target-item", required=True)
-    parser.add_argument("--target-rate-per-minute", type=float, required=True)
+    parser.add_argument("--target-rate-per-minute", type=float)
+    parser.add_argument("--target-belt")
+    parser.add_argument("--target-belt-count", type=int, default=1)
     parser.add_argument("--target-recipe")
     parser.add_argument("--external-item", action="append", default=[])
     parser.add_argument("--no-default-boundary-items", action="store_true")
@@ -249,6 +267,15 @@ def main(argv: list[str] | None = None) -> int:
         files.extend(iter_blueprint_text_files(path))
 
     knowledge = load_data_raw(args.data_raw_json)
+    try:
+        target_rate_per_minute, target_rate_basis = target_rate_basis_from_args(
+            knowledge,
+            target_rate_per_minute=args.target_rate_per_minute,
+            target_belt=args.target_belt,
+            target_belt_count=args.target_belt_count,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     template_summary = map_template_library(files, knowledge=knowledge, top=args.top, cell_size=args.cell_size)
     boundary_items = set(args.external_item)
     if not args.no_default_boundary_items:
@@ -256,7 +283,8 @@ def main(argv: list[str] | None = None) -> int:
     production_plan = build_production_plan(
         template_summary["mappings"],
         target_item=args.target_item,
-        target_rate_per_minute=args.target_rate_per_minute,
+        target_rate_per_minute=target_rate_per_minute,
+        target_rate_basis=target_rate_basis,
         target_recipe=args.target_recipe,
         max_depth=args.max_depth,
         boundary_items=boundary_items,

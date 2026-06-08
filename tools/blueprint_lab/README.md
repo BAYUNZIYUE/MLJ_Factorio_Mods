@@ -14,6 +14,7 @@ tree.
 - Decompose learned black-box candidates into boundary ports, coarse grid signatures, and repeated module candidates.
 - Extract normalized entity subgraph templates from repeated grid signatures.
 - Import data.raw JSON and map recipe-bearing templates to recipe inputs, outputs, machine names, base machine speeds, conservative per-template-instance throughput, modules, and requests.
+- Derive full-belt target rates from data.raw belt prototypes, so a generator run can request `1x turbo-transport-belt` instead of hand-writing `3600/min`.
 - Plan a production DAG seed from learned production templates: target item rate, whole-template instance counts, upstream template needs, and external black-box inputs.
 - Turn a production DAG seed into a rectangular layout plan with repeated template grids, estimated module dimensions, and left/right black-box boundaries.
 - Materialize a layout plan into an importable blueprint skeleton by copying learned normalized template entities and tiles into the planned rectangle.
@@ -88,6 +89,14 @@ the source entity, and conservative same-template beacon effects. Positive
 module effects are scaled by module quality. Cross-template beacon effects are
 still not applied. Observed `occurrence_count` is kept separate so later DAG
 planning can decide how many template instances to place.
+
+Full-belt targets are also data.raw driven. The knowledge layer imports
+transport belt, underground belt, and splitter `speed` prototypes and calculates
+the unstacked belt rate as `speed * 480` items per second. With the current
+Space Age data.raw, that gives normal / fast / express / turbo rates of 15, 30,
+45, and 60 items per second, or 900, 1800, 2700, and 3600 items per minute.
+This is why the full-belt CLI accepts `--target-belt turbo-transport-belt`
+instead of relying on a hard-coded item rate.
 
 The production DAG seed uses those per-template rates to choose copyable
 production units, round them up to whole instances, and recursively expose
@@ -178,16 +187,22 @@ Plan a production DAG seed from learned templates:
 python3 -m tools.blueprint_lab.production_dag /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-production-dag-summary.json --markdown-output .codex/tests/blueprint-production-dag-report.md
 ```
 
+Use a full-belt target instead of a hand-written rate:
+
+```bash
+python3 -m tools.blueprint_lab.production_dag /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-belt turbo-transport-belt --target-belt-count 1 --top 8 --cell-size 16
+```
+
 Plan a rectangular layout from learned templates:
 
 ```bash
-python3 -m tools.blueprint_lab.layout_plan /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-layout-plan-summary.json --markdown-output .codex/tests/blueprint-layout-plan-report.md
+python3 -m tools.blueprint_lab.layout_plan /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-belt turbo-transport-belt --top 8 --cell-size 16 --json-output .codex/tests/blueprint-layout-plan-summary.json --markdown-output .codex/tests/blueprint-layout-plan-report.md
 ```
 
 Materialize a blueprint skeleton from learned templates:
 
 ```bash
-python3 -m tools.blueprint_lab.materialize /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-rate-per-minute 600 --top 8 --cell-size 16 --connect-boundaries --output .codex/tests/blueprint-connected-iron-ore.txt --json-output .codex/tests/blueprint-connected-iron-ore-summary.json --markdown-output .codex/tests/blueprint-connected-iron-ore-report.md
+python3 -m tools.blueprint_lab.materialize /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /path/to/data-raw.json --target-item iron-ore --target-belt turbo-transport-belt --top 8 --cell-size 16 --connect-boundaries --output .codex/tests/blueprint-connected-iron-ore.txt --json-output .codex/tests/blueprint-connected-iron-ore-summary.json --markdown-output .codex/tests/blueprint-connected-iron-ore-report.md
 ```
 
 Generate the current seed blueprint:
@@ -207,3 +222,4 @@ python3 tests/verify_blueprint_lab.py
 - Blueprint string format: `https://wiki.factorio.com/Blueprint_string_format`
 - Runtime blueprint stack APIs: `https://lua-api.factorio.com/latest/classes/LuaItemStack.html`
 - Prototype docs and machine-readable prototype format: `https://lua-api.factorio.com/latest/index-prototype.html`
+- Transport belt connectable prototype speed: `https://lua-api.factorio.com/latest/prototypes/TransportBeltConnectablePrototype.html`
