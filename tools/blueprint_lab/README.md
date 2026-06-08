@@ -252,6 +252,18 @@ generated target box. It is still useful because it exposes when a learned
 template copies extra recipe machines that are not attached to the selected
 target bus.
 
+Runtime validation now adds an output-unloading bottleneck audit. It inspects
+recipe-machine output inventories, output inserters that pick up from those
+machines, the inserters' held stacks, and the transport lines where those
+inserters drop items. This closes the gap between the offline Machine I/O audit
+and real throughput: the offline audit can say "there is an output inserter",
+while the runtime marker can show whether that inserter actually keeps up. In
+the current `iron-ore 2x turbo-transport-belt` recycle-merge sample, the runtime
+marker reports five effective output inserters and
+`machine_output_items=iron-ore:177`. That explains the low throughput-window
+result: the current generated box is output-unloading limited before it is
+right-boundary-belt limited.
+
 The runtime validation command is a heavier final gate, not part of the normal
 unit regression guard. It writes a temporary scenario under the Factorio user
 data directory, imports one blueprint string with `LuaItemStack.import_stack`,

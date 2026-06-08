@@ -93,6 +93,10 @@ local function entity_status_name(status)
   return tostring(status)
 end
 
+local collect_recipe_input_items
+local collect_recipe_product_items
+local sorted_keys
+
 local function audit_recipe_machines(surface)
   local recipe_machine_count = 0
   local recipe_counts = {{}}
@@ -163,7 +167,197 @@ local function audit_recipe_machine_output_items(surface)
   log("BLUEPRINT_LAB_VALIDATION recipe_machine_output_items items=" .. sorted_count_string(output_counts))
 end
 
-local function collect_recipe_input_items(surface)
+local function recipe_machine_key(entity)
+  if entity == nil then
+    return nil
+  end
+  return entity.unit_number or tostring(entity.position.x) .. ":" .. tostring(entity.position.y)
+end
+
+local function recipe_machines_by_key(surface)
+  local recipe_machines = {{}}
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_recipe, recipe = pcall(function()
+      return entity.get_recipe()
+    end)
+    if ok_recipe and recipe ~= nil then
+      recipe_machines[recipe_machine_key(entity)] = entity
+    end
+  end
+  return recipe_machines
+end
+
+local function recipe_machine_at_position(surface, recipe_machines, position)
+  if position == nil then
+    return nil
+  end
+  local entities = surface.find_entities_filtered{{
+    force = "player",
+    area = {{
+      {{position.x - 0.1, position.y - 0.1}},
+      {{position.x + 0.1, position.y + 0.1}},
+    }},
+  }}
+  for _, entity in pairs(entities) do
+    if recipe_machines[recipe_machine_key(entity)] ~= nil then
+      return entity
+    end
+  end
+  return nil
+end
+
+local function transport_line_entity_at_position(surface, position)
+  if position == nil then
+    return nil
+  end
+  local entities = surface.find_entities_filtered{{
+    force = "player",
+    area = {{
+      {{position.x - 0.1, position.y - 0.1}},
+      {{position.x + 0.1, position.y + 0.1}},
+    }},
+  }}
+  for _, entity in pairs(entities) do
+    local ok_line_count, max_line_index = pcall(function()
+      return entity.get_max_transport_line_index()
+    end)
+    if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+      return entity
+    end
+  end
+  return nil
+end
+
+local function audit_output_unloading(surface)
+  local recipe_machines = recipe_machines_by_key(surface)
+  local input_items = collect_recipe_input_items(surface)
+  local product_items = collect_recipe_product_items(surface)
+  local machine_count = 0
+  local machine_output_items = {{}}
+  local machine_samples = {{}}
+  for _, machine in pairs(recipe_machines) do
+    machine_count = machine_count + 1
+    local output_inventory = machine.get_output_inventory()
+    if output_inventory ~= nil then
+      local sample_parts = {{}}
+      for _, item_name in pairs(sorted_keys(product_items)) do
+        local count = output_inventory.get_item_count(item_name)
+        if count ~= nil and count > 0 then
+          add_amount(machine_output_items, item_name, count)
+          sample_parts[#sample_parts + 1] = item_name .. ":" .. tostring(count)
+        end
+      end
+      if #machine_samples < 8 and #sample_parts > 0 then
+        machine_samples[#machine_samples + 1] = tostring(machine.name) .. "@x" .. tostring(machine.position.x) .. "y" .. tostring(machine.position.y) .. "=" .. table.concat(sample_parts, ",")
+      end
+    end
+  end
+
+  local output_inserter_count = 0
+  local direct_pickup_count = 0
+  local geometry_pickup_count = 0
+  local direct_drop_count = 0
+  local geometry_drop_count = 0
+  local drop_belt_keys = {{}}
+  local drop_belt_count = 0
+  local drop_line_count = 0
+  local held_items = {{}}
+  local drop_line_product_items = {{}}
+  local drop_line_input_items = {{}}
+  local inserter_samples = {{}}
+  for _, inserter in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    if inserter.type ~= "inserter" then
+      goto continue_output_inserter
+    end
+    local ok_pickup_target, pickup_target = pcall(function()
+      return inserter.pickup_target
+    end)
+    if not ok_pickup_target then
+      pickup_target = nil
+    end
+    local used_geometry_pickup = false
+    if pickup_target == nil then
+      used_geometry_pickup = true
+      pickup_target = recipe_machine_at_position(surface, recipe_machines, inserter.pickup_position)
+    end
+    if pickup_target == nil or recipe_machines[recipe_machine_key(pickup_target)] == nil then
+      goto continue_output_inserter
+    end
+    output_inserter_count = output_inserter_count + 1
+    if used_geometry_pickup then
+      geometry_pickup_count = geometry_pickup_count + 1
+    else
+      direct_pickup_count = direct_pickup_count + 1
+    end
+
+    local ok_held_stack, held_stack = pcall(function()
+      return inserter.held_stack
+    end)
+    if ok_held_stack and held_stack ~= nil and held_stack.valid_for_read then
+      add_amount(held_items, held_stack.name, held_stack.count)
+    end
+
+    local ok_drop_target, drop_target = pcall(function()
+      return inserter.drop_target
+    end)
+    if not ok_drop_target then
+      drop_target = nil
+    end
+    local used_geometry_drop = false
+    if drop_target == nil then
+      used_geometry_drop = true
+      drop_target = transport_line_entity_at_position(surface, inserter.drop_position)
+    end
+    if drop_target ~= nil then
+      local ok_line_count, max_line_index = pcall(function()
+        return drop_target.get_max_transport_line_index()
+      end)
+      if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+        if used_geometry_drop then
+          geometry_drop_count = geometry_drop_count + 1
+        else
+          direct_drop_count = direct_drop_count + 1
+        end
+        local belt_key = drop_target.unit_number or tostring(drop_target.position.x) .. ":" .. tostring(drop_target.position.y)
+        if not drop_belt_keys[belt_key] then
+          drop_belt_keys[belt_key] = true
+          drop_belt_count = drop_belt_count + 1
+        end
+        for line_index = 1, max_line_index do
+          local line = drop_target.get_transport_line(line_index)
+          if line ~= nil then
+            drop_line_count = drop_line_count + 1
+            for item_name, _ in pairs(product_items) do
+              local ok_count, item_count = pcall(function()
+                return line.get_item_count(item_name)
+              end)
+              if ok_count and item_count ~= nil and item_count > 0 then
+                add_amount(drop_line_product_items, item_name, item_count)
+              end
+            end
+            for item_name, _ in pairs(input_items) do
+              local ok_count, item_count = pcall(function()
+                return line.get_item_count(item_name)
+              end)
+              if ok_count and item_count ~= nil and item_count > 0 then
+                add_amount(drop_line_input_items, item_name, item_count)
+              end
+            end
+          end
+        end
+        if #inserter_samples < 8 then
+          inserter_samples[#inserter_samples + 1] = tostring(inserter.name) .. "@x" .. tostring(inserter.position.x) .. "y" .. tostring(inserter.position.y) .. "->" .. tostring(drop_target.name) .. "@x" .. tostring(drop_target.position.x) .. "y" .. tostring(drop_target.position.y)
+        end
+      end
+    end
+    ::continue_output_inserter::
+  end
+
+  log("BLUEPRINT_LAB_VALIDATION output_unload_audit machines=" .. tostring(machine_count) .. " machine_output_items=" .. sorted_count_string(machine_output_items) .. " output_inserters=" .. tostring(output_inserter_count) .. " pickup_targets=" .. tostring(direct_pickup_count) .. " geometry_pickups=" .. tostring(geometry_pickup_count) .. " drop_targets=" .. tostring(direct_drop_count) .. " geometry_drops=" .. tostring(geometry_drop_count) .. " drop_belts=" .. tostring(drop_belt_count) .. " drop_lines=" .. tostring(drop_line_count) .. " held_items=" .. sorted_count_string(held_items) .. " drop_line_product_items=" .. sorted_count_string(drop_line_product_items) .. " drop_line_input_items=" .. sorted_count_string(drop_line_input_items))
+  log("BLUEPRINT_LAB_VALIDATION output_unload_samples machines=" .. table.concat(machine_samples, "|") .. " inserters=" .. table.concat(inserter_samples, "|"))
+end
+
+collect_recipe_input_items = function(surface)
   local input_items = {{}}
   for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
     local ok_recipe, recipe = pcall(function()
@@ -180,7 +374,7 @@ local function collect_recipe_input_items(surface)
   return input_items
 end
 
-local function collect_recipe_product_items(surface)
+collect_recipe_product_items = function(surface)
   local product_items = {{}}
   for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
     local ok_recipe, recipe = pcall(function()
@@ -197,7 +391,7 @@ local function collect_recipe_product_items(surface)
   return product_items
 end
 
-local function sorted_keys(values)
+sorted_keys = function(values)
   local keys = {{}}
   for key, _ in pairs(values) do
     keys[#keys + 1] = key
@@ -1087,6 +1281,7 @@ script.on_event(defines.events.on_tick, function(event)
     end
     audit_recipe_machines(pending_audit_surface)
     audit_recipe_machine_output_items(pending_audit_surface)
+    audit_output_unloading(pending_audit_surface)
     audit_transport_items(pending_audit_surface)
     audit_transport_item_extents(pending_audit_surface)
     audit_right_boundary_transport_items(pending_audit_surface)
