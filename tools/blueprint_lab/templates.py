@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ class NormalizedEntity:
     requests: list[str]
     has_control_behavior: bool
     has_connections: bool
+    item_stacks: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,13 @@ def item_names(entity: dict[str, Any]) -> list[str]:
         if isinstance(item_id, dict) and item_id.get("name"):
             names.append(str(item_id["name"]))
     return sorted(set(names))
+
+
+def item_stacks(entity: dict[str, Any]) -> list[dict[str, Any]]:
+    stacks = entity.get("items")
+    if not isinstance(stacks, list):
+        return []
+    return copy.deepcopy(stacks)
 
 
 def request_names(entity: dict[str, Any]) -> list[str]:
@@ -146,6 +155,7 @@ def normalize_entities(entities: list[dict[str, Any]], origin: tuple[float, floa
                 requests=request_names(entity),
                 has_control_behavior="control_behavior" in entity,
                 has_connections="connections" in entity,
+                item_stacks=item_stacks(entity),
             )
         )
     return sorted(normalized, key=lambda item: (item.family, item.name, item.x, item.y, item.direction or -1))

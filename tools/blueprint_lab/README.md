@@ -109,14 +109,15 @@ manageable.
 
 The materializer is the first step that writes a generated blueprint string from
 learned corpus templates. It copies normalized entities and tiles into the
-planned rectangle, preserves recipe/direction/quality fields that were learned
-from the source blueprint, reassigns entity numbers, and de-duplicates identical
-tile placements. With `--connect-boundaries`, it also adds conservative
-transport-belt stubs in the reserved left/right lanes and reports exact
-entity-position collisions. It intentionally does not generate full internal
-belt routing, pipes, power, module item stacks, or collision repairs yet; those
-must be separate passes so they can be validated instead of hidden in the first
-generated skeleton.
+planned rectangle, preserves recipe/direction/quality fields and raw entity
+`items` stacks that were learned from the source blueprint, reassigns entity
+numbers, and de-duplicates identical tile placements. With
+`--connect-boundaries`, it also adds conservative transport-belt stubs in the
+reserved left/right lanes and reports exact entity-position collisions. It
+intentionally does not generate full internal belt routing, pipes, power,
+missing modules, module/beacon throughput effects, or collision repairs yet;
+those must be separate passes so they can be validated instead of hidden in the
+first generated skeleton.
 
 Connector routing reports each boundary as `connected`, `stub-only`, or
 `blocked`. A connected route found a compatible learned edge port and added a

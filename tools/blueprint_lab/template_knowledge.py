@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +48,7 @@ class TemplateEntityHint:
     recipe: str | None
     recipe_quality: str | None
     quality: str | None
+    items: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,7 @@ def template_layout_hint(template: TemplateCandidate) -> TemplateLayoutHint:
                 recipe=entity.recipe,
                 recipe_quality=entity.recipe_quality,
                 quality=entity.quality,
+                items=entity.item_stacks,
             )
             for entity in entities
         ],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from collections import Counter
 from pathlib import Path
@@ -41,6 +42,8 @@ def materialized_entity(raw: dict[str, Any], entity_number: int, *, x: float, y:
         entity["recipe_quality"] = raw["recipe_quality"]
     if raw.get("quality"):
         entity["quality"] = raw["quality"]
+    if raw.get("items"):
+        entity["items"] = copy.deepcopy(raw["items"])
     return entity
 
 
@@ -431,7 +434,7 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
         "lessons": [
             "Materialization copies learned local template geometry into the planned rectangle instead of inventing machines from scratch.",
             "Boundary connectors are generated only in reserved lanes and checked for exact entity-position collisions.",
-            "The generated blueprint is still not production-ready: pipe routing, power, module item stacks, full belt routing, and in-game validation remain separate steps.",
+            "The generated blueprint is still not production-ready: pipe routing, power, full belt routing, module/beacon effect modeling, and in-game validation remain separate steps.",
         ],
     }
 

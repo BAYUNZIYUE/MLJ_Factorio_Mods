@@ -145,6 +145,9 @@ def main() -> int:
     if mapped.recipe_mappings[0].base_products_per_minute != [("iron-gear-wheel", 150.0)]:
         print(f"FAIL: expected base output rate to normalize: {mapped.recipe_mappings[0]}")
         return 1
+    if not mapped.layout.entities[0].items or mapped.layout.entities[0].items[0]["id"]["name"] != "speed-module-3":
+        print(f"FAIL: expected template layout to preserve raw module item stacks: {mapped.layout.entities[0]}")
+        return 1
 
     dag_mappings = [
         {
@@ -169,6 +172,7 @@ def main() -> int:
                         "recipe": "iron-gear-wheel",
                         "recipe_quality": None,
                         "quality": None,
+                        "items": [{"id": {"name": "speed-module-3"}, "items": {"in_inventory": [{"inventory": 4, "stack": 0}]}}],
                     }
                 ],
                 "tiles": [],
@@ -318,6 +322,9 @@ def main() -> int:
         return 1
     if materialized_blueprint["entities"][0].get("recipe") != "iron-gear-wheel":
         print(f"FAIL: expected materialized blueprint to preserve recipe: {materialized}")
+        return 1
+    if materialized_blueprint["entities"][0].get("items", [{}])[0].get("id", {}).get("name") != "speed-module-3":
+        print(f"FAIL: expected materialized blueprint to preserve module item stacks: {materialized}")
         return 1
     if decode_blueprint_string(encode_blueprint_string(materialized)) != materialized:
         print("FAIL: materialized blueprint did not round-trip through Factorio string encoding")
