@@ -19,8 +19,9 @@ def lua_long_string(value: str) -> str:
     return f"[[{value}]]"
 
 
-def render_control_lua(blueprint_string: str) -> str:
+def render_control_lua(blueprint_string: str, *, input_probe: str = "both") -> str:
     return f"""local blueprint_string = {lua_long_string(blueprint_string)}
+local input_probe_mode = {lua_long_string(input_probe)}
 
 local function validation_fail(message)
   log("BLUEPRINT_LAB_VALIDATION fail " .. tostring(message))
@@ -642,8 +643,12 @@ local function run_validation()
 
   local surface_entities = surface.find_entities_filtered{{force = game.forces.player}}
   log("BLUEPRINT_LAB_VALIDATION surface_entities=" .. tostring(#surface_entities))
-  inject_input_items_to_left_belts(surface)
-  inject_input_items_to_machine_pickup_belts(surface)
+  if input_probe_mode == "left" or input_probe_mode == "both" then
+    inject_input_items_to_left_belts(surface)
+  end
+  if input_probe_mode == "pickup" or input_probe_mode == "both" then
+    inject_input_items_to_machine_pickup_belts(surface)
+  end
   pending_audit_surface = surface
   pending_audit_tick = game.tick + runtime_audit_wait_ticks
   log("BLUEPRINT_LAB_VALIDATION runtime_audit_wait_ticks=" .. tostring(runtime_audit_wait_ticks))
@@ -671,6 +676,7 @@ def write_validation_scenario(
     user_data_dir: Path,
     scenario_name: str,
     blueprint_string: str,
+    input_probe: str = "both",
 ) -> Path:
     scenario_dir = user_data_dir / "scenarios" / scenario_name
     scenario_dir.mkdir(parents=True, exist_ok=True)
@@ -688,7 +694,7 @@ def write_validation_scenario(
         ),
         encoding="utf-8",
     )
-    (scenario_dir / "control.lua").write_text(render_control_lua(blueprint_string), encoding="utf-8")
+    (scenario_dir / "control.lua").write_text(render_control_lua(blueprint_string, input_probe=input_probe), encoding="utf-8")
     return scenario_dir
 
 
@@ -771,6 +777,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--console-log", type=Path, default=Path(".codex/tests/blueprint-lab-factorio-validation.log"))
     parser.add_argument("--until-tick", type=int, default=2)
     parser.add_argument("--timeout-seconds", type=float, default=45)
+    parser.add_argument("--input-probe", choices=["left", "pickup", "both"], default="both")
     args = parser.parse_args(argv)
 
     blueprint_string = args.blueprint.read_text(encoding="utf-8").strip()
@@ -778,6 +785,7 @@ def main(argv: list[str] | None = None) -> int:
         user_data_dir=args.user_data_dir,
         scenario_name=args.scenario_name,
         blueprint_string=blueprint_string,
+        input_probe=args.input_probe,
     )
 
     args.console_log.parent.mkdir(parents=True, exist_ok=True)

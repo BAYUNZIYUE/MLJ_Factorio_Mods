@@ -69,6 +69,9 @@ def main() -> int:
         "runtime_audit_wait_ticks=",
         "recipe_machine_audit",
         "recipe_machine_runtime",
+        "input_probe_mode",
+        'input_probe_mode == "left"',
+        'input_probe_mode == "pickup"',
         "input_injection items=",
         "line.force_insert_at",
         "machine_pickup_injection",
@@ -222,6 +225,82 @@ def main() -> int:
         }
     ]:
         print(f"FAIL: expected inserter endpoint audit to prove one machine input and output: {io_audit}")
+        return 1
+    pickup_port_layout = {
+        "target_item": "iron-gear-wheel",
+        "target_rate_per_minute": 150,
+        "spacing": 1,
+        "estimated_width": 13,
+        "estimated_height": 10,
+        "boundary_inputs": [{"item": "iron-plate", "rate_per_minute": 300, "side": "left", "reason": "boundary-input"}],
+        "boundary_outputs": [],
+        "nodes": [
+            {
+                "item": "iron-gear-wheel",
+                "recipe": "iron-gear-wheel",
+                "fingerprint": "pickup-port-template",
+                "instances": 2,
+                "source_width": 3,
+                "source_height": 3,
+                "source_entity_count": 3,
+                "source_tile_count": 0,
+                "columns": 2,
+                "rows": 1,
+                "planned_width": 7,
+                "planned_height": 3,
+                "planned_net_output_per_minute": 150,
+                "x": 4,
+                "y": 4,
+                "ports": [],
+                "port_counts": [],
+                "source": "fixture",
+                "path": "/pickup-port",
+            }
+        ],
+    }
+    pickup_port_mappings = [
+        {
+            "fingerprint": "pickup-port-template",
+            "layout": {
+                "entities": [
+                    {"name": "transport-belt", "x": 0, "y": 0, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "fast-inserter", "x": 0, "y": 1, "direction": 0, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "assembling-machine-3", "x": 0, "y": 2, "direction": None, "recipe": "iron-gear-wheel", "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, pickup_port_summary = materialize_layout_with_summary(
+        pickup_port_layout,
+        pickup_port_mappings,
+        label="fixture-pickup-port",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    pickup_routes = pickup_port_summary["routes"]
+    if (
+        len(pickup_routes) != 2
+        or any(route["status"] != "connected" for route in pickup_routes)
+        or any(route["port"]["role"] != "machine-input" for route in pickup_routes)
+        or any(route["port"]["source"] != "machine-io" for route in pickup_routes)
+    ):
+        print(f"FAIL: expected input boundary route to use a machine I/O pickup belt port: {pickup_port_summary}")
+        return 1
+    if (
+        pickup_port_summary["connectors_added"] != 8
+        or pickup_port_summary["input_fanouts_added"] != 0
+        or pickup_port_summary["input_fanouts"]
+    ):
+        print(f"FAIL: expected machine-input routing to connect each copied pickup lane directly without fanout: {pickup_port_summary}")
+        return 1
+    pickup_coverage = {item["boundary"]: item for item in pickup_port_summary["boundary_coverage"]}
+    if pickup_coverage["input:iron-plate"]["status"] != "covered" or pickup_coverage["input:iron-plate"]["covered_instances"] != [0, 1]:
+        print(f"FAIL: expected machine-input route to cover both copied machine instances: {pickup_port_summary}")
+        return 1
+    pickup_flow_counts = Counter(item["status"] for item in pickup_port_summary["belt_flow_audit"])
+    if pickup_flow_counts != {"pass": 2}:
+        print(f"FAIL: expected machine-input boundary routes to pass belt flow audit: {pickup_port_summary}")
         return 1
     pruned_entities = prune_template_entities_for_recipe(
         [

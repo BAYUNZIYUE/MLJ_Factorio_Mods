@@ -10,7 +10,7 @@ from typing import Any
 
 from .analysis import blueprint_metrics, iter_blueprint_text_files
 from .codec import make_blueprint_wrapper, save_blueprint_file
-from .directions import DIR_EAST
+from .directions import DIR_EAST, DIR_NORTH, DIR_SOUTH
 from .generate import icon
 from .layout_plan import build_layout_plan, mapping_by_fingerprint
 from .production_dag import (
@@ -140,9 +140,93 @@ def endpoint_targets(
                 "name": name,
                 "role": role,
                 "recipe": entity.get("recipe"),
+                "entity_type": entity.get("type") or entity.get("entity_type"),
+                "direction": entity.get("direction"),
+                "x": entity_position(entity)[0],
+                "y": entity_position(entity)[1],
             }
         )
     return targets
+
+
+def machine_io_port_hints(
+    template_entities: list[dict[str, Any]],
+    *,
+    target_recipe: str | None,
+    knowledge: PrototypeKnowledge | None,
+) -> list[dict[str, Any]]:
+    if knowledge is None or not target_recipe:
+        return []
+    local_entities = [dict(entity, entity_number=index + 1) for index, entity in enumerate(template_entities)]
+    target_machine_numbers = {
+        int(entity["entity_number"])
+        for entity in local_entities
+        if entity.get("recipe") == target_recipe and knowledge.entity(str(entity.get("name") or "")) is not None
+    }
+    if not target_machine_numbers:
+        return []
+
+    ports_by_key: dict[tuple[str, str, int, float, float], dict[str, Any]] = {}
+    for entity in local_entities:
+        name = str(entity.get("name") or "")
+        inserter = knowledge.inserter(name)
+        if inserter is None:
+            continue
+        number = int(entity.get("entity_number") or 0)
+        origin_x, origin_y = entity_position(entity)
+        pickup_dx, pickup_dy = rotate_vector(inserter.pickup_position, entity.get("direction"))
+        insert_dx, insert_dy = rotate_vector(inserter.insert_position, entity.get("direction"))
+        pickup_targets = endpoint_targets(
+            (round(origin_x + pickup_dx, 3), round(origin_y + pickup_dy, 3)),
+            local_entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        insert_targets = endpoint_targets(
+            (round(origin_x + insert_dx, 3), round(origin_y + insert_dy, 3)),
+            local_entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        insert_machines = [target for target in insert_targets if target["role"] == "machine" and target["entity_number"] in target_machine_numbers]
+        pickup_machines = [target for target in pickup_targets if target["role"] == "machine" and target["entity_number"] in target_machine_numbers]
+        pickup_belts = [target for target in pickup_targets if target["role"] == "belt"]
+        insert_belts = [target for target in insert_targets if target["role"] == "belt"]
+        for belt in pickup_belts:
+            if not insert_machines:
+                continue
+            belt_direction = belt.get("direction")
+            key = ("left", str(belt["name"]), int(belt_direction) if belt_direction is not None else -1, round(float(belt["x"]), 3), round(float(belt["y"]), 3))
+            ports_by_key[key] = {
+                "side": "left",
+                "role": "machine-input",
+                "entity_name": belt["name"],
+                "entity_type": belt.get("entity_type"),
+                "direction": belt.get("direction"),
+                "x": round(float(belt["x"]), 3),
+                "y": round(float(belt["y"]), 3),
+                "source": "machine-io",
+                "inserter_entity_number": number,
+                "machine_entity_numbers": sorted(target["entity_number"] for target in insert_machines),
+            }
+        for belt in insert_belts:
+            if not pickup_machines:
+                continue
+            belt_direction = belt.get("direction")
+            key = ("right", str(belt["name"]), int(belt_direction) if belt_direction is not None else -1, round(float(belt["x"]), 3), round(float(belt["y"]), 3))
+            ports_by_key[key] = {
+                "side": "right",
+                "role": "machine-output",
+                "entity_name": belt["name"],
+                "entity_type": belt.get("entity_type"),
+                "direction": belt.get("direction"),
+                "x": round(float(belt["x"]), 3),
+                "y": round(float(belt["y"]), 3),
+                "source": "machine-io",
+                "inserter_entity_number": number,
+                "machine_entity_numbers": sorted(target["entity_number"] for target in pickup_machines),
+            }
+    return sorted(ports_by_key.values(), key=lambda port: (port["side"], port["y"], port["x"], port["entity_name"]))
 
 
 def audit_machine_io(wrapper: dict[str, Any], knowledge: PrototypeKnowledge | None) -> list[dict[str, Any]]:
@@ -433,7 +517,11 @@ def add_boundary_connectors(
             occupied_entities[key] = belt
         return len(connectors) - before, route_collisions
 
-    def add_positions_reusing_existing_belts(positions: list[RoutePosition]) -> tuple[int, list[dict[str, Any]], int]:
+    def add_positions_reusing_existing_belts(
+        positions: list[RoutePosition],
+        *,
+        record_collisions: bool = True,
+    ) -> tuple[int, list[dict[str, Any]], int]:
         positions = visible_route_positions(positions)
         route_collisions: list[dict[str, Any]] = []
         seen: set[tuple[float, float]] = set()
@@ -455,7 +543,8 @@ def add_boundary_connectors(
             collision = {"x": key[0], "y": key[1], "reason": reason}
             route_collisions.append(collision)
         if route_collisions:
-            collisions.extend(route_collisions)
+            if record_collisions:
+                collisions.extend(route_collisions)
             return 0, route_collisions, existing_belts_used
 
         before = len(connectors)
@@ -481,6 +570,15 @@ def add_boundary_connectors(
         while x <= end_x:
             positions.append((round(x, 3), y, reason, DIR_EAST, belt_name))
             x += 1.0
+        return positions
+
+    def vertical_positions(x: float, start_y: float, end_y: float, reason: str, direction: int, belt_name: str) -> list[RoutePosition]:
+        positions: list[RoutePosition] = []
+        step = 1.0 if start_y <= end_y else -1.0
+        y = start_y
+        while (step > 0 and y <= end_y) or (step < 0 and y >= end_y):
+            positions.append((round(x, 3), round(y, 3), reason, direction, belt_name))
+            y += step
         return positions
 
     def visible_route_positions(positions: list[RoutePosition]) -> list[RoutePosition]:
@@ -536,12 +634,12 @@ def add_boundary_connectors(
 
     def add_first_clear_route(
         candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]],
-    ) -> tuple[int, list[dict[str, Any]], dict[str, Any] | None, str | None, list[dict[str, Any]]]:
+    ) -> tuple[int, list[dict[str, Any]], dict[str, Any] | None, str | None, list[dict[str, Any]], list[RoutePosition]]:
         blocked_attempts: list[dict[str, Any]] = []
         for port, route_kind, positions in candidates:
-            belts_added, route_collisions = add_positions(positions, record_collisions=False)
+            belts_added, route_collisions, _existing_belts_used = add_positions_reusing_existing_belts(positions, record_collisions=False)
             if not route_collisions:
-                return belts_added, route_collisions, port, route_kind, blocked_attempts
+                return belts_added, route_collisions, port, route_kind, blocked_attempts, positions
             blocked_attempts.append(
                 {
                     "port": port,
@@ -550,10 +648,10 @@ def add_boundary_connectors(
                 }
             )
         if not blocked_attempts:
-            return 0, [], None, None, blocked_attempts
+            return 0, [], None, None, blocked_attempts, []
         last = blocked_attempts[-1]
         collisions.extend(last["collisions"])
-        return 0, list(last["collisions"]), dict(last["port"]), str(last["route_kind"]), blocked_attempts
+        return 0, list(last["collisions"]), dict(last["port"]), str(last["route_kind"]), blocked_attempts, []
 
     def ports_for_instance(node: dict[str, Any], instance: int, side: str, roles: set[str]) -> list[dict[str, Any]]:
         ports: list[dict[str, Any]] = []
@@ -580,6 +678,10 @@ def add_boundary_connectors(
                     "role": port.get("role"),
                     "entity_name": port.get("entity_name"),
                     "entity_type": port.get("entity_type"),
+                    "direction": port.get("direction"),
+                    "source": port.get("source"),
+                    "inserter_entity_number": port.get("inserter_entity_number"),
+                    "machine_entity_numbers": port.get("machine_entity_numbers"),
                     "x": round(origin_x + float(port.get("x") or 0), 3),
                     "y": round(origin_y + float(port.get("y") or 0), 3),
                 }
@@ -610,7 +712,7 @@ def add_boundary_connectors(
         ]
 
     def ports_by_distance(ports: list[dict[str, Any]], y: float, side: str) -> list[dict[str, Any]]:
-        role_priority = {"input": 0, "output": 0, "edge-bus": 1, "boundary": 2}
+        role_priority = {"machine-input": 0, "machine-output": 0, "input": 1, "output": 1, "edge-bus": 2, "boundary": 3}
         def bridge_lane_score(port: dict[str, Any]) -> int:
             fingerprint = str(port.get("node_fingerprint") or "")
             port_y = round(float(port.get("y") or 0.0), 3)
@@ -632,15 +734,16 @@ def add_boundary_connectors(
                 return 2
             return 3
 
-        if side == "right":
+        if side == "left":
             return sorted(
                 ports,
                 key=lambda port: (
+                    0 if str(port.get("role")) == "machine-input" else 1,
                     -bridge_lane_score(port),
                     belt_surface_priority(port),
                     role_priority.get(str(port.get("role")), 9),
                     abs(float(port["y"]) - y),
-                    -float(port["x"]),
+                    float(port["x"]),
                 ),
             )
         return sorted(
@@ -650,7 +753,7 @@ def add_boundary_connectors(
                 belt_surface_priority(port),
                 role_priority.get(str(port.get("role")), 9),
                 abs(float(port["y"]) - y),
-                float(port["x"]),
+                -float(port["x"]),
             ),
         )
 
@@ -848,7 +951,7 @@ def add_boundary_connectors(
         boundary_label: str,
         candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]],
     ) -> dict[str, Any]:
-        belts_added, route_collisions, port, route_kind, blocked_attempts = add_first_clear_route(candidates)
+        belts_added, route_collisions, port, route_kind, blocked_attempts, route_positions = add_first_clear_route(candidates)
         status = "connected" if port is not None and not route_collisions else "blocked"
         route = {
             "boundary": boundary_label,
@@ -859,6 +962,8 @@ def add_boundary_connectors(
             "route_kind": route_kind,
             "blocked_attempts": blocked_attempts,
         }
+        if route_positions and route_kind and route_kind.startswith("machine-input-side-load"):
+            route["route_positions"] = route_positions
         routes.append(route)
         return route
 
@@ -876,6 +981,31 @@ def add_boundary_connectors(
             if side == "left":
                 start_x = 0.5
                 end_x = float(port["x"]) - 0.5
+                if port.get("role") == "machine-input" and port.get("direction") in {DIR_NORTH, DIR_SOUTH}:
+                    offsets = range(1, 7)
+                    for offset in offsets:
+                        feeder_y = float(port["y"]) - offset if port.get("direction") == DIR_SOUTH else float(port["y"]) + offset
+                        horizontal_end_x = float(port["x"]) - 1.0
+                        if start_x > horizontal_end_x:
+                            continue
+                        positions = horizontal_positions(
+                            start_x,
+                            horizontal_end_x,
+                            feeder_y,
+                            f"{boundary_label}:machine-input-side-load",
+                            belt_name,
+                        )
+                        positions.extend(
+                            vertical_positions(
+                                float(port["x"]),
+                                feeder_y,
+                                float(port["y"]),
+                                f"{boundary_label}:machine-input-side-load",
+                                int(port["direction"]),
+                                belt_name,
+                            )
+                        )
+                        candidates.append((port, f"machine-input-side-load-{offset}", positions))
             else:
                 start_x = float(port["x"]) + 1.0
                 end_x = float(layout_plan["estimated_width"]) - 0.5
@@ -900,6 +1030,20 @@ def add_boundary_connectors(
         row_groups: list[list[dict[str, Any]]],
     ) -> None:
         candidates_by_fingerprint: dict[str, list[tuple[dict[str, Any], str, list[RoutePosition]]]] = {}
+        if side == "left":
+            machine_input_candidates_by_instance: dict[tuple[str, int], list[tuple[dict[str, Any], str, list[RoutePosition]]]] = {}
+            for row_ports in row_groups:
+                for candidate in boundary_route_candidates(row_ports, side=side, boundary_label=boundary_label):
+                    port = candidate[0]
+                    if port.get("role") != "machine-input":
+                        continue
+                    key = (str(port.get("node_fingerprint") or ""), int(port.get("node_instance") or 0))
+                    machine_input_candidates_by_instance.setdefault(key, []).append(candidate)
+            if machine_input_candidates_by_instance:
+                for key in sorted(machine_input_candidates_by_instance, key=lambda item: (item[0], item[1])):
+                    add_boundary_route_from_candidates(boundary_label, machine_input_candidates_by_instance[key])
+                return
+
         for row_ports in row_groups:
             candidates = boundary_route_candidates(row_ports, side=side, boundary_label=boundary_label)
             if not candidates:
@@ -930,7 +1074,7 @@ def add_boundary_connectors(
 
     for boundary in layout_plan.get("boundary_inputs") or []:
         boundary_label = f"input:{boundary['item']}"
-        row_groups = port_groups_by_row(candidate_ports("left", {"input", "edge-bus", "boundary"}))
+        row_groups = port_groups_by_row(candidate_ports("left", {"machine-input", "input", "edge-bus", "boundary"}))
         if not row_groups:
             left_end = int(max(0, float(root["x"]) - 1))
             positions = [
@@ -1007,6 +1151,8 @@ def add_boundary_connectors(
             if not boundary.startswith("input:"):
                 continue
             port = route.get("port") or {}
+            if port.get("role") == "machine-input":
+                continue
             node = node_index.get(str(port.get("node_fingerprint") or ""))
             if not node:
                 continue
@@ -1019,7 +1165,7 @@ def add_boundary_connectors(
                 if next_instance // columns != current_instance // columns:
                     break
                 next_ports = port_by_y(
-                    ports_for_instance(node, next_instance, "left", {"input", "edge-bus", "boundary"}),
+                    ports_for_instance(node, next_instance, "left", {"machine-input", "input", "edge-bus", "boundary"}),
                     prefer="leftmost",
                 )
                 next_port = next_ports.get(route_y)
@@ -1354,6 +1500,61 @@ def add_boundary_connectors(
             result["to_instance"] = to_instance
         return result
 
+    def audit_position_belt_flow(
+        *,
+        segment_type: str,
+        route: dict[str, Any],
+        positions: list[RoutePosition],
+    ) -> dict[str, Any]:
+        unresolved: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        for x, belt_y, _reason, direction, belt_name in positions:
+            key = (round(float(x), 3), round(float(belt_y), 3))
+            entity = occupied_entities.get(key)
+            if entity is None:
+                failures.append({"x": key[0], "y": key[1], "reason": "missing-belt"})
+                continue
+            entity_name = str(entity.get("name") or "")
+            if not is_belt_like_entity_name(entity_name):
+                failures.append({"x": key[0], "y": key[1], "entity_name": entity_name, "reason": "non-belt-entity"})
+                continue
+            if canonical_transport_belt_name(entity_name) != belt_name:
+                failures.append({"x": key[0], "y": key[1], "entity_name": entity_name, "reason": "belt-tier-mismatch"})
+                continue
+            if entity.get("direction") != direction:
+                failures.append(
+                    {
+                        "x": key[0],
+                        "y": key[1],
+                        "entity_name": entity_name,
+                        "direction": entity.get("direction"),
+                        "expected_direction": direction,
+                        "reason": "wrong-flow-direction",
+                    }
+                )
+                continue
+            if entity_name.endswith("splitter"):
+                unresolved.append({"x": key[0], "y": key[1], "entity_name": entity_name, "reason": "splitter-semantics"})
+        status = "failed" if failures else "unresolved" if unresolved else "pass"
+        port = route.get("port") or {}
+        first = positions[0] if positions else (0.0, 0.0, "", DIR_EAST, "transport-belt")
+        last = positions[-1] if positions else first
+        return {
+            "segment_type": segment_type,
+            "status": status,
+            "boundary": route.get("boundary"),
+            "node_fingerprint": str(port.get("node_fingerprint") or ""),
+            "from_instance": int(port.get("node_instance") or 0),
+            "belt_name": connector_belt_name_for_port(port),
+            "route_kind": route.get("route_kind"),
+            "start_x": round(float(first[0]), 3),
+            "end_x": round(float(last[0]), 3),
+            "y": round(float(port.get("y") or first[1]), 3),
+            "positions_checked": len(positions),
+            "unresolved": unresolved,
+            "failures": failures,
+        }
+
     def belt_flow_audit() -> list[dict[str, Any]]:
         audit: list[dict[str, Any]] = []
         for route in routes:
@@ -1362,6 +1563,15 @@ def add_boundary_connectors(
             port = route["port"]
             boundary = str(route.get("boundary") or "")
             belt_name = connector_belt_name_for_port(port)
+            if route.get("route_positions"):
+                audit.append(
+                    audit_position_belt_flow(
+                        segment_type="boundary-route",
+                        route=route,
+                        positions=[tuple(position) for position in route["route_positions"]],
+                    )
+                )
+                continue
             if boundary.startswith("input:"):
                 start_x = 0.5
                 end_x = float(port["x"])
@@ -1540,10 +1750,11 @@ def materialize_layout_with_summary(
     knowledge: PrototypeKnowledge | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     mapping_index = mapping_by_fingerprint(mappings)
+    working_layout = copy.deepcopy(layout_plan)
     entities: list[dict[str, Any]] = []
     tiles: list[dict[str, Any]] = []
     tile_positions: set[tuple[str, float, float]] = set()
-    for node in layout_plan["nodes"]:
+    for node in working_layout["nodes"]:
         mapping = mapping_index.get(str(node["fingerprint"])) or {}
         layout = mapping.get("layout") or {}
         template_entities = layout.get("entities") or []
@@ -1553,6 +1764,34 @@ def materialize_layout_with_summary(
             knowledge=knowledge,
             layout_ports=layout.get("ports") or [],
         )
+        machine_ports = machine_io_port_hints(
+            template_entities,
+            target_recipe=str(node.get("recipe") or ""),
+            knowledge=knowledge,
+        )
+        if machine_ports:
+            existing_port_keys = {
+                (
+                    str(port.get("side") or ""),
+                    str(port.get("role") or ""),
+                    str(port.get("entity_name") or ""),
+                    round(float(port.get("x") or 0.0), 3),
+                    round(float(port.get("y") or 0.0), 3),
+                )
+                for port in node.get("ports") or []
+            }
+            for port in machine_ports:
+                key = (
+                    str(port.get("side") or ""),
+                    str(port.get("role") or ""),
+                    str(port.get("entity_name") or ""),
+                    round(float(port.get("x") or 0.0), 3),
+                    round(float(port.get("y") or 0.0), 3),
+                )
+                if key in existing_port_keys:
+                    continue
+                node.setdefault("ports", []).append(port)
+                existing_port_keys.add(key)
         template_tiles = layout.get("tiles") or []
         if not template_entities and not template_tiles:
             continue
@@ -1599,15 +1838,15 @@ def materialize_layout_with_summary(
         occupied = set(occupied_entities)
         connector_result = add_boundary_connectors(
             entities,
-            layout_plan,
+            working_layout,
             occupied=occupied,
             occupied_entities=occupied_entities,
             knowledge=knowledge,
         )
 
-    target_item = str(layout_plan["target_item"])
+    target_item = str(working_layout["target_item"])
     wrapper = make_blueprint_wrapper(
-        label or f"blueprint-lab-{target_item}-{layout_plan['target_rate_per_minute']:g}-per-min",
+        label or f"blueprint-lab-{target_item}-{working_layout['target_rate_per_minute']:g}-per-min",
         entities,
         tiles=tiles,
         icons=[icon(target_item)],

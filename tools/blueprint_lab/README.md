@@ -291,6 +291,21 @@ fed at the real pickup lane. The next generator problem is to make the external
 boundary route and input fanout connect to those proven pickup lanes instead of
 only to a learned left-edge bus.
 
+The materializer now promotes those machine input pickup belts into routeable
+`machine-input` ports. For vertical pickup lanes, it can generate a side-load
+route from the left boundary into the pickup belt lane instead of pretending
+that a horizontal edge bus reaches the machine. The current `iron-ore` 2x turbo
+full-belt sample generates five `machine-input-side-load` input routes, one for
+each copied crusher cell. A left-only runtime probe against that generated
+blueprint imported 420 entities, placed them through the direct-placement
+fallback, inserted `metallic-asteroid-chunk` only on left-edge transport lines,
+and then reported all five crushers at `full_output` with
+`products_finished=10` and `output_items=195`. That proves the generated
+external input boundary can now feed the real crusher pickup lanes. It still
+does not prove output flow: the same probe did not see `iron-ore` on transport
+lines, so the next validation boundary is machine output unloading and output
+boundary flow.
+
 ## Commands
 
 Analyze a blueprint directory:
