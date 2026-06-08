@@ -71,6 +71,10 @@ def main() -> int:
         "recipe_machine_runtime",
         "input_injection items=",
         "line.force_insert_at",
+        "machine_pickup_injection",
+        "inserter.pickup_target",
+        "inserter.drop_target",
+        "pickup_target.get_item_insert_specification",
         "transport_item_audit",
         "script.on_event(defines.events.on_tick",
     ]:

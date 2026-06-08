@@ -244,6 +244,159 @@ local function inject_input_items_to_left_belts(surface)
   log("BLUEPRINT_LAB_VALIDATION input_injection items=" .. table.concat(item_names, ",") .. " belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count_total) .. " inserted=" .. tostring(inserted_count) .. " failures=" .. tostring(insertion_failures))
 end
 
+local function inject_input_items_to_machine_pickup_belts(surface)
+  local input_items = collect_recipe_input_items(surface)
+  local item_names = sorted_keys(input_items)
+  if #item_names == 0 then
+    log("BLUEPRINT_LAB_VALIDATION machine_pickup_injection items= inserters=0 belts=0 lines=0 inserted=0 failures=0")
+    return
+  end
+
+  local recipe_machines = {{}}
+  for _, entity in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    local ok_recipe, recipe = pcall(function()
+      return entity.get_recipe()
+    end)
+    if ok_recipe and recipe ~= nil then
+      recipe_machines[entity.unit_number or tostring(entity.position.x) .. ":" .. tostring(entity.position.y)] = entity
+    end
+  end
+
+  local function recipe_machine_at_position(position)
+    if position == nil then
+      return nil
+    end
+    local entities = surface.find_entities_filtered{{
+      force = "player",
+      area = {{
+        {{position.x - 0.1, position.y - 0.1}},
+        {{position.x + 0.1, position.y + 0.1}},
+      }},
+    }}
+    for _, entity in pairs(entities) do
+      local machine_key = entity.unit_number or tostring(entity.position.x) .. ":" .. tostring(entity.position.y)
+      if recipe_machines[machine_key] ~= nil then
+        return entity
+      end
+    end
+    return nil
+  end
+
+  local function transport_line_entity_at_position(position)
+    if position == nil then
+      return nil
+    end
+    local entities = surface.find_entities_filtered{{
+      force = "player",
+      area = {{
+        {{position.x - 0.1, position.y - 0.1}},
+        {{position.x + 0.1, position.y + 0.1}},
+      }},
+    }}
+    for _, entity in pairs(entities) do
+      local ok_line_count, max_line_index = pcall(function()
+        return entity.get_max_transport_line_index()
+      end)
+      if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+        return entity
+      end
+    end
+    return nil
+  end
+
+  local inserter_count = 0
+  local total_inserters = 0
+  local drop_target_count = 0
+  local geometry_drop_count = 0
+  local pickup_target_count = 0
+  local geometry_pickup_count = 0
+  local belt_keys = {{}}
+  local belt_count = 0
+  local line_count = 0
+  local inserted_count = 0
+  local insertion_failures = 0
+  for _, inserter in pairs(surface.find_entities_filtered{{force = "player"}}) do
+    if inserter.type == "inserter" then
+      total_inserters = total_inserters + 1
+    else
+      goto continue_inserter
+    end
+    local ok_drop_target, drop_target = pcall(function()
+      return inserter.drop_target
+    end)
+    if not ok_drop_target then
+      drop_target = nil
+    end
+    local used_geometry_drop = false
+    if drop_target == nil then
+      used_geometry_drop = true
+      drop_target = recipe_machine_at_position(inserter.drop_position)
+    end
+    if drop_target ~= nil then
+      local machine_key = drop_target.unit_number or tostring(drop_target.position.x) .. ":" .. tostring(drop_target.position.y)
+      if recipe_machines[machine_key] ~= nil then
+        if used_geometry_drop then
+          geometry_drop_count = geometry_drop_count + 1
+        else
+          drop_target_count = drop_target_count + 1
+        end
+        local ok_pickup_target, pickup_target = pcall(function()
+          return inserter.pickup_target
+        end)
+        if not ok_pickup_target then
+          pickup_target = nil
+        end
+        local used_geometry_pickup = false
+        if pickup_target == nil then
+          used_geometry_pickup = true
+          pickup_target = transport_line_entity_at_position(inserter.pickup_position)
+        end
+        if pickup_target ~= nil then
+          local ok_line_count, max_line_index = pcall(function()
+            return pickup_target.get_max_transport_line_index()
+          end)
+          if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+            inserter_count = inserter_count + 1
+            if used_geometry_pickup then
+              geometry_pickup_count = geometry_pickup_count + 1
+            else
+              pickup_target_count = pickup_target_count + 1
+            end
+            local belt_key = pickup_target.unit_number or tostring(pickup_target.position.x) .. ":" .. tostring(pickup_target.position.y)
+            if not belt_keys[belt_key] then
+              belt_keys[belt_key] = true
+              belt_count = belt_count + 1
+            end
+            local ok_spec, spec_line_index, spec_position = pcall(function()
+              return pickup_target.get_item_insert_specification(inserter.pickup_position)
+            end)
+            if ok_spec and spec_line_index ~= nil and spec_line_index > 0 then
+              local line = pickup_target.get_transport_line(spec_line_index)
+              if line ~= nil then
+                line_count = line_count + 1
+                for _, item_name in pairs(item_names) do
+                  local ok_insert = pcall(function()
+                    line.force_insert_at(spec_position or 0, {{name = item_name, count = 1}}, 1)
+                  end)
+                  if ok_insert then
+                    inserted_count = inserted_count + 1
+                  else
+                    insertion_failures = insertion_failures + 1
+                  end
+                end
+              end
+            else
+              insertion_failures = insertion_failures + 1
+            end
+          end
+        end
+      end
+    end
+    ::continue_inserter::
+  end
+  log("BLUEPRINT_LAB_VALIDATION machine_pickup_injection items=" .. table.concat(item_names, ",") .. " total_inserters=" .. tostring(total_inserters) .. " inserters=" .. tostring(inserter_count) .. " drop_targets=" .. tostring(drop_target_count) .. " geometry_drops=" .. tostring(geometry_drop_count) .. " pickup_targets=" .. tostring(pickup_target_count) .. " geometry_pickups=" .. tostring(geometry_pickup_count) .. " belts=" .. tostring(belt_count) .. " lines=" .. tostring(line_count) .. " inserted=" .. tostring(inserted_count) .. " failures=" .. tostring(insertion_failures))
+end
+
 local validation_started = false
 local pending_audit_surface = nil
 local pending_audit_tick = nil
@@ -490,6 +643,7 @@ local function run_validation()
   local surface_entities = surface.find_entities_filtered{{force = game.forces.player}}
   log("BLUEPRINT_LAB_VALIDATION surface_entities=" .. tostring(#surface_entities))
   inject_input_items_to_left_belts(surface)
+  inject_input_items_to_machine_pickup_belts(surface)
   pending_audit_surface = surface
   pending_audit_tick = game.tick + runtime_audit_wait_ticks
   log("BLUEPRINT_LAB_VALIDATION runtime_audit_wait_ticks=" .. tostring(runtime_audit_wait_ticks))

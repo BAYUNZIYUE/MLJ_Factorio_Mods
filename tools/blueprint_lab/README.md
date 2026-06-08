@@ -279,12 +279,17 @@ all transport lines. This is deliberately a diagnostic probe rather than a
 success criterion. In the current platform sample, inserting
 `metallic-asteroid-chunk` onto left-edge belts leaves the crushers in
 `item_ingredient_shortage` and the transport audit sees chunks but no
-`iron-ore`. The latest runtime probe injected `metallic-asteroid-chunk` across
-20 belts and 40 transport lines with 200 successful insertion attempts; the
-later audit still reported `products_finished=0` and saw 400 chunks on
-transport lines. That proves the next generator problem is not just external
-boundary capacity; the generated boundary route must connect to the belt lane
-that a crusher input inserter actually picks from.
+`iron-ore`: the boundary-looking input lanes are not the machine pickup lanes.
+The validator therefore also tries a stricter probe: for each recipe machine,
+it finds inserters that drop into that machine, locates the belt entity under
+the inserter pickup position, and force-inserts the recipe input there. The
+latest runtime probe found 5 such input inserters and 5 pickup belts; after 5
+pickup-lane insertions, the audit reported `products_finished=7`,
+`output_items=100`, and transport-line items `iron-ore:35` plus
+`metallic-asteroid-chunk:400`. That proves the copied crusher cell can run when
+fed at the real pickup lane. The next generator problem is to make the external
+boundary route and input fanout connect to those proven pickup lanes instead of
+only to a learned left-edge bus.
 
 ## Commands
 
