@@ -255,6 +255,7 @@ def prune_template_entities_for_recipe(
     *,
     target_recipe: str | None,
     knowledge: PrototypeKnowledge | None,
+    layout_ports: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     if knowledge is None or not target_recipe:
         return template_entities
@@ -268,7 +269,18 @@ def prune_template_entities_for_recipe(
     if not target_machine_numbers:
         return template_entities
 
+    belt_entities: dict[int, dict[str, Any]] = {
+        int(entity["entity_number"]): entity
+        for entity in local_entities
+        if is_belt_like_entity_name(str(entity.get("name") or ""))
+    }
+    belt_positions: dict[tuple[float, float], list[int]] = {}
+    for number, entity in belt_entities.items():
+        x, y = entity_position(entity)
+        belt_positions.setdefault((round(x, 3), round(y, 3)), []).append(number)
+
     selected_inserters: set[int] = set()
+    selected_belts: set[int] = set()
     for entity in local_entities:
         name = str(entity.get("name") or "")
         inserter = knowledge.inserter(name)
@@ -296,6 +308,31 @@ def prune_template_entities_for_recipe(
         insert_belt = any(target["role"] == "belt" for target in insert_targets)
         if (pickup_belt and insert_target_machine) or (pickup_target_machine and insert_belt):
             selected_inserters.add(number)
+            selected_belts.update(target["entity_number"] for target in pickup_targets if target["role"] == "belt")
+            selected_belts.update(target["entity_number"] for target in insert_targets if target["role"] == "belt")
+
+    for port in layout_ports or []:
+        if not is_belt_like_entity_name(str(port.get("entity_name") or "")):
+            continue
+        port_key = (round(float(port.get("x") or 0.0), 3), round(float(port.get("y") or 0.0), 3))
+        port_belt_name = canonical_transport_belt_name(str(port.get("entity_name") or ""))
+        port_entity_type = port.get("entity_type")
+        for number in belt_positions.get(port_key, []):
+            entity = belt_entities[number]
+            if canonical_transport_belt_name(str(entity.get("name") or "")) != port_belt_name:
+                continue
+            if port_entity_type and (entity.get("type") or entity.get("entity_type")) != port_entity_type:
+                continue
+            selected_belts.add(number)
+
+    preserved_belt_lanes = {
+        (
+            round(entity_position(entity)[1], 3),
+            canonical_transport_belt_name(str(entity.get("name") or "")),
+        )
+        for number, entity in belt_entities.items()
+        if number in selected_belts
+    }
 
     pruned: list[dict[str, Any]] = []
     for entity in local_entities:
@@ -307,6 +344,11 @@ def prune_template_entities_for_recipe(
             continue
         if knowledge.inserter(name) is not None:
             if number in selected_inserters:
+                pruned.append({key: value for key, value in entity.items() if key != "entity_number"})
+            continue
+        if is_belt_like_entity_name(name):
+            lane = (round(entity_position(entity)[1], 3), canonical_transport_belt_name(name))
+            if number in selected_belts or lane in preserved_belt_lanes:
                 pruned.append({key: value for key, value in entity.items() if key != "entity_number"})
             continue
         pruned.append({key: value for key, value in entity.items() if key != "entity_number"})
@@ -1190,6 +1232,7 @@ def materialize_layout_with_summary(
             template_entities,
             target_recipe=str(node.get("recipe") or ""),
             knowledge=knowledge,
+            layout_ports=layout.get("ports") or [],
         )
         template_tiles = layout.get("tiles") or []
         if not template_entities and not template_tiles:

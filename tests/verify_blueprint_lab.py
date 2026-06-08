@@ -190,6 +190,7 @@ def main() -> int:
             {"name": "assembling-machine-3", "x": 2, "y": 2, "recipe": "iron-gear-wheel"},
             {"name": "fast-inserter", "x": 2, "y": 3, "direction": 0},
             {"name": "transport-belt", "x": 2, "y": 4, "direction": DIR_EAST},
+            {"name": "transport-belt", "x": 12, "y": 8, "direction": DIR_EAST},
             {"name": "fast-inserter", "x": 8, "y": 1, "direction": 0},
             {"name": "assembling-machine-3", "x": 8, "y": 2, "recipe": "gear-reprocessing"},
             {"name": "beacon", "x": 4, "y": 2},
@@ -201,6 +202,31 @@ def main() -> int:
     pruned_recipes = Counter(entity.get("recipe") for entity in pruned_entities if entity.get("recipe"))
     if pruned_recipes != {"iron-gear-wheel": 1} or pruned_counts["fast-inserter"] != 2 or pruned_counts["transport-belt"] != 2 or pruned_counts["beacon"] != 1:
         print(f"FAIL: expected target-recipe pruning to keep target machine, target inserters, belts, and support entities: {pruned_entities}")
+        return 1
+    port_lane_pruned = prune_template_entities_for_recipe(
+        [
+            {"name": "transport-belt", "x": 2, "y": 0, "direction": DIR_EAST},
+            {"name": "fast-inserter", "x": 2, "y": 1, "direction": 0},
+            {"name": "assembling-machine-3", "x": 2, "y": 2, "recipe": "iron-gear-wheel"},
+            {"name": "fast-inserter", "x": 2, "y": 3, "direction": 0},
+            {"name": "transport-belt", "x": 2, "y": 4, "direction": DIR_EAST},
+            {"name": "turbo-transport-belt", "x": 0, "y": 5, "direction": DIR_EAST},
+            {"name": "turbo-underground-belt", "x": 2, "y": 5, "direction": DIR_EAST, "entity_type": "output"},
+            {"name": "turbo-transport-belt", "x": 4, "y": 5, "direction": DIR_EAST},
+            {"name": "turbo-transport-belt", "x": 0, "y": 7, "direction": DIR_EAST},
+        ],
+        target_recipe="iron-gear-wheel",
+        knowledge=knowledge,
+        layout_ports=[
+            {"side": "left", "role": "edge-bus", "entity_name": "turbo-transport-belt", "x": 0, "y": 5},
+        ],
+    )
+    port_lane_counts = Counter(entity["name"] for entity in port_lane_pruned)
+    if port_lane_counts["turbo-transport-belt"] != 2 or port_lane_counts["turbo-underground-belt"] != 1:
+        print(f"FAIL: expected target-recipe pruning to keep the learned boundary port belt lane: {port_lane_pruned}")
+        return 1
+    if any(entity["name"] == "turbo-transport-belt" and entity.get("y") == 7 for entity in port_lane_pruned):
+        print(f"FAIL: expected target-recipe pruning to remove unrelated belt lanes: {port_lane_pruned}")
         return 1
     target_rate, target_rate_basis = target_rate_basis_from_args(
         knowledge,

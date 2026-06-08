@@ -133,10 +133,11 @@ entity `type` fields such as underground-belt input/output ends, reassigns
 entity numbers, and de-duplicates identical tile placements. When data.raw
 knowledge is available, it prunes each copied production cell to the layout
 node's target recipe: target recipe machines, belt-connected target inserters,
-belt-like bus entities, beacons/support entities, and tiles are kept, while
-other recipe machines and their unrelated inserters are dropped. This keeps the
-generated box closer to the selected target instead of copying every recipe that
-happened to share the learned grid cell. With
+the target inserter belt endpoints, learned boundary-port belt lanes,
+beacons/support entities, and tiles are kept, while other recipe machines,
+unrelated inserters, and unrelated belt-like lanes are dropped. This keeps the
+generated box closer to the selected target instead of copying every recipe and
+every bus lane that happened to share the learned grid cell. With
 `--connect-boundaries`, it also adds conservative transport-belt stubs in the
 reserved left/right lanes and reports exact entity-position collisions. It
 also bridges same-row adjacent repeated template instances when their learned
