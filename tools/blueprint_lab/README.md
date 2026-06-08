@@ -162,9 +162,19 @@ cover the requested target rate". Input fanouts extend that same reachability
 graph for copied modules on the same row. They add belts only on empty positions
 and can treat existing same-tier transport belts, underground belts, or
 splitters as already-built bus segments; non-belt collisions still block the
-fanout. This is a structural coverage audit, not a full belt simulation: it
-still does not understand lane filters, splitter balancing, stacked belts,
-underground-belt pairing semantics, or inserter timing.
+fanout.
+
+The belt flow audit is a stricter pass over those connected segments. It
+rebuilds each horizontal boundary route, inter-instance bridge, and input
+fanout from the entities that will actually be exported, then checks that every
+occupied position is a same-tier belt-like entity pointing east. A segment is
+`pass` when all checked entities are simple direction-compatible belt flow. It
+is `failed` when a belt is missing, the tier differs, a non-belt entity occupies
+the path, or the direction is wrong. It is `unresolved` when the path contains
+entities whose game semantics need a dedicated parser, such as underground belts
+or splitters. This is still not a full belt simulation: it does not understand
+lane filters, splitter balancing, stacked belts, underground-belt pairing
+semantics, or inserter timing.
 
 ## Commands
 

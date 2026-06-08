@@ -113,6 +113,7 @@ def add_boundary_connectors(
             "bridges": bridges,
             "input_fanouts": input_fanouts,
             "boundary_coverage": [],
+            "belt_flow_audit": [],
         }
 
     root = layout_plan["nodes"][0]
@@ -602,6 +603,142 @@ def add_boundary_connectors(
             edges.append((int(fanout["from_instance"]), int(fanout["to_instance"])))
         return edges
 
+    def horizontal_span_positions(start_x: float, end_x: float, y: float) -> list[tuple[float, float]]:
+        positions: list[tuple[float, float]] = []
+        x = min(start_x, end_x)
+        last_x = max(start_x, end_x)
+        while x <= last_x:
+            positions.append((round(x, 3), round(y, 3)))
+            x += 1.0
+        return positions
+
+    def audit_horizontal_belt_flow(
+        *,
+        segment_type: str,
+        boundary: str | None = None,
+        node_fingerprint: str | None = None,
+        from_instance: int | None = None,
+        to_instance: int | None = None,
+        start_x: float,
+        end_x: float,
+        y: float,
+        belt_name: str,
+    ) -> dict[str, Any]:
+        unresolved: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        positions = horizontal_span_positions(start_x, end_x, y)
+        for x, belt_y in positions:
+            entity = occupied_entities.get((x, belt_y))
+            if entity is None:
+                failures.append({"x": x, "y": belt_y, "reason": "missing-belt"})
+                continue
+            entity_name = str(entity.get("name") or "")
+            if not is_belt_like_entity_name(entity_name):
+                failures.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "non-belt-entity"})
+                continue
+            if canonical_transport_belt_name(entity_name) != belt_name:
+                failures.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "belt-tier-mismatch"})
+                continue
+            if entity_name.endswith("underground-belt") or entity_name.endswith("splitter"):
+                unresolved.append({"x": x, "y": belt_y, "entity_name": entity_name, "reason": "complex-belt-semantics"})
+            direction = entity.get("direction")
+            if direction != DIR_EAST:
+                failures.append(
+                    {
+                        "x": x,
+                        "y": belt_y,
+                        "entity_name": entity_name,
+                        "direction": direction,
+                        "reason": "wrong-flow-direction",
+                    }
+                )
+        status = "failed" if failures else "unresolved" if unresolved else "pass"
+        result: dict[str, Any] = {
+            "segment_type": segment_type,
+            "status": status,
+            "belt_name": belt_name,
+            "start_x": round(start_x, 3),
+            "end_x": round(end_x, 3),
+            "y": round(y, 3),
+            "positions_checked": len(positions),
+            "unresolved": unresolved,
+            "failures": failures,
+        }
+        if boundary is not None:
+            result["boundary"] = boundary
+        if node_fingerprint is not None:
+            result["node_fingerprint"] = node_fingerprint
+        if from_instance is not None:
+            result["from_instance"] = from_instance
+        if to_instance is not None:
+            result["to_instance"] = to_instance
+        return result
+
+    def belt_flow_audit() -> list[dict[str, Any]]:
+        audit: list[dict[str, Any]] = []
+        for route in routes:
+            if route.get("status") != "connected" or not route.get("port"):
+                continue
+            port = route["port"]
+            boundary = str(route.get("boundary") or "")
+            belt_name = connector_belt_name_for_port(port)
+            if boundary.startswith("input:"):
+                start_x = 0.5
+                end_x = float(port["x"])
+            elif boundary.startswith("output:"):
+                start_x = float(port["x"])
+                end_x = float(layout_plan["estimated_width"]) - 0.5
+            else:
+                continue
+            audit.append(
+                audit_horizontal_belt_flow(
+                    segment_type="boundary-route",
+                    boundary=boundary,
+                    node_fingerprint=str(port.get("node_fingerprint") or ""),
+                    from_instance=int(port.get("node_instance") or 0),
+                    start_x=start_x,
+                    end_x=end_x,
+                    y=float(port["y"]),
+                    belt_name=belt_name,
+                )
+            )
+        for bridge in bridges:
+            if bridge.get("status") != "connected" or not bridge.get("from_port") or not bridge.get("to_port"):
+                continue
+            from_port = bridge["from_port"]
+            to_port = bridge["to_port"]
+            audit.append(
+                audit_horizontal_belt_flow(
+                    segment_type="inter-instance-bridge",
+                    node_fingerprint=str(bridge.get("node_fingerprint") or ""),
+                    from_instance=int(bridge["from_instance"]),
+                    to_instance=int(bridge["to_instance"]),
+                    start_x=float(from_port["x"]),
+                    end_x=float(to_port["x"]),
+                    y=float(bridge.get("bridge_y") or from_port["y"]),
+                    belt_name=connector_belt_name_for_port(from_port),
+                )
+            )
+        for fanout in input_fanouts:
+            if fanout.get("status") != "connected" or not fanout.get("from_port") or not fanout.get("to_port"):
+                continue
+            from_port = fanout["from_port"]
+            to_port = fanout["to_port"]
+            audit.append(
+                audit_horizontal_belt_flow(
+                    segment_type="input-fanout",
+                    boundary=str(fanout.get("boundary") or ""),
+                    node_fingerprint=str(fanout.get("node_fingerprint") or ""),
+                    from_instance=int(fanout["from_instance"]),
+                    to_instance=int(fanout["to_instance"]),
+                    start_x=float(from_port["x"]),
+                    end_x=float(to_port["x"]),
+                    y=float(fanout.get("fanout_y") or from_port["y"]),
+                    belt_name=connector_belt_name_for_port(from_port),
+                )
+            )
+        return audit
+
     def reachable_instances(start: int, edges: list[tuple[int, int]], *, direction: str) -> list[int]:
         adjacency: dict[int, set[int]] = {}
         for from_instance, to_instance in edges:
@@ -679,6 +816,7 @@ def add_boundary_connectors(
         return coverage
 
     coverage = boundary_coverage()
+    flow_audit = belt_flow_audit()
     entities.extend(connectors)
     return {
         "connectors_added": len(connectors),
@@ -689,6 +827,7 @@ def add_boundary_connectors(
         "bridges": bridges,
         "input_fanouts": input_fanouts,
         "boundary_coverage": coverage,
+        "belt_flow_audit": flow_audit,
     }
 
 
@@ -745,6 +884,7 @@ def materialize_layout_with_summary(
         "bridges": [],
         "input_fanouts": [],
         "boundary_coverage": [],
+        "belt_flow_audit": [],
     }
     if connect_boundaries:
         occupied_entities = {entity_position_key(entity): entity for entity in entities}
@@ -832,6 +972,7 @@ def render_summary(wrapper: dict[str, Any], layout: dict[str, Any], connector_su
         "bridges": [],
         "input_fanouts": [],
         "boundary_coverage": [],
+        "belt_flow_audit": [],
     }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
     layout_nodes = [
@@ -893,6 +1034,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Input fanout belts: {summary['connector_summary'].get('input_fanouts_added', 0)}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
+        f"- Belt flow status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('belt_flow_audit') or []))}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
         f"- Layout estimate: {summary['layout_estimated_width']:g} x {summary['layout_estimated_height']:g}",
         f"- Density: {summary['density']:g}",
@@ -992,6 +1134,24 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 line += f" meets_required={item['meets_required_rate']}"
             if item.get("reason"):
                 line += f" reason={item['reason']}"
+            lines.append(line)
+    if summary["connector_summary"].get("belt_flow_audit"):
+        lines.extend(["", "## Belt Flow Audit", ""])
+        for item in summary["connector_summary"]["belt_flow_audit"]:
+            label = item.get("boundary") or item.get("node_fingerprint") or "segment"
+            line = (
+                f"- {item['segment_type']} {label}: status={item['status']} "
+                f"belt={item['belt_name']} y={item['y']} x={item['start_x']}..{item['end_x']} "
+                f"positions={item['positions_checked']}"
+            )
+            if item.get("from_instance") is not None:
+                line += f" from={item['from_instance']}"
+            if item.get("to_instance") is not None:
+                line += f" to={item['to_instance']}"
+            if item.get("failures"):
+                line += f" failures={len(item['failures'])}"
+            if item.get("unresolved"):
+                line += f" unresolved={len(item['unresolved'])}"
             lines.append(line)
     if summary["connector_summary"]["collisions"]:
         lines.extend(["", "## Connector Collisions", ""])

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from collections import Counter
 from pathlib import Path
 import sys
 
@@ -10,7 +11,7 @@ if str(ROOT) not in sys.path:
 from tools.blueprint_lab.analysis import blueprint_metrics, summarize_library
 from tools.blueprint_lab.codec import decode_blueprint_string, encode_blueprint_string, walk_nodes
 from tools.blueprint_lab.decompose import decompose_blueprint
-from tools.blueprint_lab.directions import DIR_EAST
+from tools.blueprint_lab.directions import DIR_EAST, DIR_WEST
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
@@ -397,6 +398,10 @@ def main() -> int:
     if connector_coverage["output:iron-gear-wheel"]["status"] != "uncovered":
         print(f"FAIL: expected output route without a learned port to stay uncovered: {connector_summary}")
         return 1
+    flow_counts = Counter(item["status"] for item in connector_summary["belt_flow_audit"])
+    if flow_counts != {"pass": 1, "failed": 7}:
+        print(f"FAIL: expected fixture fanouts to expose non-belt endpoints in belt flow audit: {connector_summary}")
+        return 1
     if len(connected["blueprint"]["entities"]) != 58:
         print(f"FAIL: expected connected blueprint to add connector belts: {connected}")
         return 1
@@ -524,6 +529,8 @@ def main() -> int:
             "fingerprint": "replicated-port-template",
             "layout": {
                 "entities": [
+                    {"name": "turbo-transport-belt", "x": 0, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 0, "y": 2, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
                     {"name": "turbo-transport-belt", "x": 1, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
                 ],
                 "tiles": [],
@@ -560,11 +567,40 @@ def main() -> int:
     if replicated_coverage["input:metallic-asteroid-chunk"]["status"] != "covered" or replicated_coverage["input:metallic-asteroid-chunk"]["covered_instances"] != [0, 1]:
         print(f"FAIL: expected input fanout to cover both replicated input ports: {replicated_summary}")
         return 1
-    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 22:
+    replicated_flow_counts = Counter(item["status"] for item in replicated_summary["belt_flow_audit"])
+    if replicated_flow_counts != {"pass": 4}:
+        print(f"FAIL: expected replicated route, bridge, and fanout to pass belt flow audit: {replicated_summary}")
+        return 1
+    if sum(1 for entity in replicated["blueprint"]["entities"] if entity["name"] == "turbo-transport-belt") != 26:
         print(f"FAIL: expected replicated-port route and bridge to add turbo belts: {replicated}")
         return 1
     if decode_blueprint_string(encode_blueprint_string(replicated)) != replicated:
         print("FAIL: replicated-port blueprint did not round-trip through Factorio string encoding")
+        return 1
+
+    semantic_fail_mappings = [
+        {
+            "fingerprint": "replicated-port-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 0, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 0, "y": 2, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 1, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 2, "y": 2, "direction": DIR_WEST, "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, semantic_fail_summary = materialize_layout_with_summary(
+        replicated_layout,
+        semantic_fail_mappings,
+        label="fixture-semantic-fail",
+        connect_boundaries=True,
+    )
+    failed_flow = [item for item in semantic_fail_summary["belt_flow_audit"] if item["status"] == "failed"]
+    if not failed_flow or not any(failure.get("reason") == "wrong-flow-direction" for item in failed_flow for failure in item["failures"]):
+        print(f"FAIL: expected belt flow audit to fail when an existing fanout belt points west: {semantic_fail_summary}")
         return 1
 
     print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, templates, maps knowledge, estimates base throughput, plans a production DAG and layout, materializes a blueprint skeleton, and generates a seed blueprint.")
