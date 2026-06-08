@@ -62,6 +62,9 @@ def main() -> int:
         "stack.build_blueprint",
         "manual_fallback=start",
         "surface.create_entity",
+        "manual_underground_types=",
+        "manual_modules_inserted=",
+        "created.set_recipe(entity.recipe, entity.recipe_quality)",
         "script.on_event(defines.events.on_tick",
     ]:
         if expected not in validation_lua:

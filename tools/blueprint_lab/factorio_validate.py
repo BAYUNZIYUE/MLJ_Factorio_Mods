@@ -159,6 +159,11 @@ local function run_validation()
     local manual_count = 0
     local manual_failures = 0
     local recipe_failures = 0
+    local recipe_set_count = 0
+    local underground_type_count = 0
+    local underground_type_failures = 0
+    local module_inserted_count = 0
+    local module_insert_failures = 0
     for _, entity in pairs(blueprint_entities) do
       local entity_direction = entity.direction or defines.direction.north
       local ok_create, created = pcall(function()
@@ -169,6 +174,7 @@ local function run_validation()
             y = entity.position.y + build_position.y,
           }},
           direction = entity_direction,
+          type = entity.type,
           quality = entity.quality,
           force = "player",
           raise_built = false,
@@ -181,21 +187,73 @@ local function run_validation()
         end
       else
         manual_count = manual_count + 1
+        if entity.type ~= nil then
+          local ok_belt_type, belt_type_result = pcall(function()
+            return created.belt_to_ground_type
+          end)
+          if ok_belt_type and belt_type_result == entity.type then
+            underground_type_count = underground_type_count + 1
+          else
+            underground_type_failures = underground_type_failures + 1
+            if underground_type_failures <= 8 then
+              log("BLUEPRINT_LAB_VALIDATION manual_underground_type_failed " .. entity.name .. "=" .. tostring(belt_type_result) .. " expected=" .. tostring(entity.type))
+            end
+          end
+        end
         if entity.recipe ~= nil then
           local ok_recipe, recipe_result = pcall(function()
-            created.set_recipe(entity.recipe)
+            created.set_recipe(entity.recipe, entity.recipe_quality)
           end)
           if not ok_recipe then
             recipe_failures = recipe_failures + 1
             if recipe_failures <= 8 then
               log("BLUEPRINT_LAB_VALIDATION manual_recipe_failed " .. entity.name .. "=" .. tostring(recipe_result))
             end
+          else
+            recipe_set_count = recipe_set_count + 1
+          end
+        end
+        if entity.items ~= nil then
+          local module_inventory = created.get_module_inventory()
+          if module_inventory ~= nil then
+            for _, item_stack in pairs(entity.items) do
+              local item_id = item_stack.id or {{}}
+              local requested_count = 0
+              local item_payload = item_stack.items or {{}}
+              for _, inventory_stack in pairs(item_payload.in_inventory or {{}}) do
+                requested_count = requested_count + 1
+              end
+              if requested_count > 0 and item_id.name ~= nil then
+                local ok_insert, inserted_count = pcall(function()
+                  return module_inventory.insert{{
+                    name = item_id.name,
+                    quality = item_id.quality,
+                    count = requested_count,
+                  }}
+                end)
+                if ok_insert then
+                  module_inserted_count = module_inserted_count + inserted_count
+                  if inserted_count ~= requested_count then
+                    module_insert_failures = module_insert_failures + 1
+                    if module_insert_failures <= 8 then
+                      log("BLUEPRINT_LAB_VALIDATION manual_module_partial " .. entity.name .. "=" .. tostring(inserted_count) .. "/" .. tostring(requested_count))
+                    end
+                  end
+                else
+                  module_insert_failures = module_insert_failures + 1
+                  if module_insert_failures <= 8 then
+                    log("BLUEPRINT_LAB_VALIDATION manual_module_failed " .. entity.name .. "=" .. tostring(inserted_count))
+                  end
+                end
+              end
+            end
           end
         end
       end
     end
-    log("BLUEPRINT_LAB_VALIDATION manual_entities=" .. tostring(manual_count) .. " manual_failures=" .. tostring(manual_failures) .. " manual_recipe_failures=" .. tostring(recipe_failures))
-    if manual_failures > 0 then
+    log("BLUEPRINT_LAB_VALIDATION manual_entities=" .. tostring(manual_count) .. " manual_failures=" .. tostring(manual_failures) .. " manual_recipe_set=" .. tostring(recipe_set_count) .. " manual_recipe_failures=" .. tostring(recipe_failures))
+    log("BLUEPRINT_LAB_VALIDATION manual_underground_types=" .. tostring(underground_type_count) .. " manual_underground_type_failures=" .. tostring(underground_type_failures) .. " manual_modules_inserted=" .. tostring(module_inserted_count) .. " manual_module_failures=" .. tostring(module_insert_failures))
+    if manual_failures > 0 or recipe_failures > 0 or underground_type_failures > 0 or module_insert_failures > 0 then
       validation_fail("manual fallback failed to place all entities")
     end
   end
