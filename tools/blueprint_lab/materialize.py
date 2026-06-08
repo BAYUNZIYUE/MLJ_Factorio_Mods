@@ -542,10 +542,15 @@ def add_boundary_connectors(
                 continue
             existing_name = str(existing.get("name") or "")
             if is_belt_like_entity_name(existing_name) and canonical_transport_belt_name(existing_name) == belt_name:
+                existing_is_connector = any(existing is connector for connector in connectors)
                 if (
                     reason.endswith("machine-output-side-load")
                     or reason.endswith("machine-input-right-feed")
                 ) and existing.get("direction") != direction:
+                    if existing_is_connector:
+                        collision = {"x": key[0], "y": key[1], "reason": f"{reason}:connector-direction-conflict"}
+                        route_collisions.append(collision)
+                        continue
                     existing["direction"] = direction
                 existing_belts_used += 1
                 continue
@@ -1005,10 +1010,12 @@ def add_boundary_connectors(
                 end_x = float(port["x"]) - 0.5
                 if port.get("role") == "machine-input" and port.get("direction") in {DIR_NORTH, DIR_SOUTH}:
                     if port.get("direction") == DIR_SOUTH:
-                        feed_y = float(port["y"]) + 1.0
-                        feed_x = float(port["x"]) + 1.0
-                        horizontal_end_x = float(port["x"])
-                        if start_x <= horizontal_end_x:
+                        for offset in range(1, 13):
+                            feed_y = float(port["y"]) + offset
+                            feed_x = float(port["x"]) + 1.0
+                            horizontal_end_x = float(port["x"])
+                            if start_x > horizontal_end_x:
+                                continue
                             positions = horizontal_positions(
                                 start_x,
                                 horizontal_end_x,
@@ -1016,10 +1023,11 @@ def add_boundary_connectors(
                                 f"{boundary_label}:machine-input-right-feed",
                                 belt_name,
                             )
-                            positions.append(
-                                (
-                                    round(feed_x, 3),
-                                    round(feed_y, 3),
+                            positions.extend(
+                                vertical_positions(
+                                    feed_x,
+                                    feed_y,
+                                    float(port["y"]) + 1.0,
                                     f"{boundary_label}:machine-input-right-feed",
                                     DIR_NORTH,
                                     belt_name,
@@ -1034,8 +1042,8 @@ def add_boundary_connectors(
                                     belt_name,
                                 )
                             )
-                            candidates.append((port, "machine-input-right-feed-1", positions))
-                    offsets = range(1, 7)
+                            candidates.append((port, f"machine-input-right-feed-{offset}", positions))
+                    offsets = range(1, 13)
                     for offset in offsets:
                         feeder_y = float(port["y"]) - offset if port.get("direction") == DIR_SOUTH else float(port["y"]) + offset
                         horizontal_end_x = float(port["x"]) - 1.0
