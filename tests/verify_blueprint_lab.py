@@ -725,6 +725,24 @@ def main() -> int:
     if decode_blueprint_string(encode_blueprint_string(replicated)) != replicated:
         print("FAIL: replicated-port blueprint did not round-trip through Factorio string encoding")
         return 1
+    capacity_limited_layout = deepcopy(replicated_layout)
+    capacity_limited_layout["target_rate_per_minute"] = 7200
+    capacity_limited_layout["boundary_outputs"] = [{"item": "iron-ore", "rate_per_minute": 7200, "side": "right"}]
+    capacity_limited_layout["nodes"][0]["planned_net_output_per_minute"] = 7200
+    _, capacity_limited_summary = materialize_layout_with_summary(
+        capacity_limited_layout,
+        replicated_mappings,
+        label="fixture-capacity-limited",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    capacity_audit = {item["boundary"]: item for item in capacity_limited_summary["boundary_capacity_audit"]}
+    if capacity_audit["output:iron-ore"]["status"] != "insufficient" or capacity_audit["output:iron-ore"]["capacity_per_minute"] != 3600:
+        print(f"FAIL: expected boundary capacity audit to reject 2x full-belt demand on one turbo belt route: {capacity_limited_summary}")
+        return 1
+    if capacity_audit["input:metallic-asteroid-chunk"]["status"] != "sufficient":
+        print(f"FAIL: expected input boundary capacity audit to pass when one turbo belt covers the input rate: {capacity_limited_summary}")
+        return 1
 
     semantic_fail_mappings = [
         {

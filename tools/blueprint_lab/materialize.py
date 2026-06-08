@@ -371,6 +371,7 @@ def add_boundary_connectors(
     *,
     occupied: set[tuple[float, float]],
     occupied_entities: dict[tuple[float, float], dict[str, Any]],
+    knowledge: PrototypeKnowledge | None = None,
 ) -> dict[str, Any]:
     connectors: list[dict[str, Any]] = []
     collisions: list[dict[str, Any]] = []
@@ -387,6 +388,7 @@ def add_boundary_connectors(
             "bridges": bridges,
             "input_fanouts": input_fanouts,
             "boundary_coverage": [],
+            "boundary_capacity_audit": [],
             "belt_flow_audit": [],
         }
 
@@ -927,6 +929,65 @@ def add_boundary_connectors(
                     return float(rate) if isinstance(rate, (int, float)) else None
         return None
 
+    def boundary_capacity_audit() -> list[dict[str, Any]]:
+        if knowledge is None:
+            return []
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        for route in routes:
+            if route.get("status") != "connected" or not route.get("port"):
+                continue
+            boundary = str(route.get("boundary") or "")
+            port = route["port"]
+            fingerprint = str(port.get("node_fingerprint") or "")
+            belt_name = connector_belt_name_for_port(port)
+            belt = knowledge.belt(belt_name)
+            key = (boundary, fingerprint)
+            item = grouped.setdefault(
+                key,
+                {
+                    "boundary": boundary,
+                    "node_fingerprint": fingerprint,
+                    "status": "unknown",
+                    "route_count": 0,
+                    "belt_capacities": [],
+                    "capacity_per_minute": 0.0,
+                },
+            )
+            item["route_count"] += 1
+            if belt is None:
+                item["belt_capacities"].append(
+                    {
+                        "belt_name": belt_name,
+                        "capacity_per_minute": None,
+                        "reason": "unknown-belt-prototype",
+                    }
+                )
+                continue
+            capacity = float(belt.items_per_minute)
+            item["capacity_per_minute"] += capacity
+            item["belt_capacities"].append(
+                {
+                    "belt_name": belt_name,
+                    "capacity_per_minute": capacity,
+                }
+            )
+            required_rate = route_boundary_rate(route)
+            if required_rate is not None:
+                item["required_rate_per_minute"] = required_rate
+
+        audits = list(grouped.values())
+        for item in audits:
+            if any(capacity.get("capacity_per_minute") is None for capacity in item["belt_capacities"]):
+                item["status"] = "unknown"
+                continue
+            required_rate = item.get("required_rate_per_minute")
+            if required_rate is None:
+                item["status"] = "unknown"
+                continue
+            item["meets_required_rate"] = float(item["capacity_per_minute"]) >= float(required_rate)
+            item["status"] = "sufficient" if item["meets_required_rate"] else "insufficient"
+        return audits
+
     def bridge_edges_for_node(fingerprint: str, y: float) -> list[tuple[int, int]]:
         edges: list[tuple[int, int]] = []
         for bridge in bridges:
@@ -1198,6 +1259,7 @@ def add_boundary_connectors(
 
     coverage = boundary_coverage()
     flow_audit = belt_flow_audit()
+    capacity_audit = boundary_capacity_audit()
     entities.extend(connectors)
     return {
         "connectors_added": len(connectors),
@@ -1208,6 +1270,7 @@ def add_boundary_connectors(
         "bridges": bridges,
         "input_fanouts": input_fanouts,
         "boundary_coverage": coverage,
+        "boundary_capacity_audit": capacity_audit,
         "belt_flow_audit": flow_audit,
     }
 
@@ -1272,6 +1335,7 @@ def materialize_layout_with_summary(
         "bridges": [],
         "input_fanouts": [],
         "boundary_coverage": [],
+        "boundary_capacity_audit": [],
         "belt_flow_audit": [],
     }
     if connect_boundaries:
@@ -1282,6 +1346,7 @@ def materialize_layout_with_summary(
             layout_plan,
             occupied=occupied,
             occupied_entities=occupied_entities,
+            knowledge=knowledge,
         )
 
     target_item = str(layout_plan["target_item"])
@@ -1369,6 +1434,7 @@ def render_summary(
         "bridges": [],
         "input_fanouts": [],
         "boundary_coverage": [],
+        "boundary_capacity_audit": [],
         "belt_flow_audit": [],
     }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
@@ -1434,6 +1500,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Belt flow status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('belt_flow_audit') or []))}",
+        f"- Boundary capacity status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('boundary_capacity_audit') or []))}",
         f"- Machine I/O status counts: {dict(Counter(item.get('status', 'unknown') for item in summary.get('machine_io_audit') or []))}",
         f"- Blueprint bounds: {summary['width']:g} x {summary['height']:g}",
         f"- Layout estimate: {summary['layout_estimated_width']:g} x {summary['layout_estimated_height']:g}",
@@ -1534,6 +1601,24 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 line += f" meets_required={item['meets_required_rate']}"
             if item.get("reason"):
                 line += f" reason={item['reason']}"
+            lines.append(line)
+    if summary["connector_summary"].get("boundary_capacity_audit"):
+        lines.extend(["", "## Boundary Capacity Audit", ""])
+        for item in summary["connector_summary"]["boundary_capacity_audit"]:
+            line = (
+                f"- {item['boundary']}: status={item['status']} "
+                f"routes={item.get('route_count', 0)} capacity={item.get('capacity_per_minute', 0):g}/min"
+            )
+            if item.get("required_rate_per_minute") is not None:
+                line += f" required={item['required_rate_per_minute']:g}/min"
+            if item.get("meets_required_rate") is not None:
+                line += f" meets_required={item['meets_required_rate']}"
+            if item.get("belt_capacities"):
+                belts = ", ".join(
+                    f"{belt['belt_name']}:{belt.get('capacity_per_minute') if belt.get('capacity_per_minute') is not None else 'unknown'}"
+                    for belt in item["belt_capacities"]
+                )
+                line += f" belts={belts}"
             lines.append(line)
     if summary["connector_summary"].get("belt_flow_audit"):
         lines.extend(["", "## Belt Flow Audit", ""])

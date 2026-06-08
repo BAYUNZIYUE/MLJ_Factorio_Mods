@@ -19,6 +19,7 @@ tree.
 - Turn a production DAG seed into a rectangular layout plan with repeated template grids, estimated module dimensions, and left/right black-box boundaries.
 - Materialize a layout plan into an importable blueprint skeleton by copying learned normalized template entities and tiles into the planned rectangle.
 - Connect same-row copied input ports with a conservative fanout pass that can reuse existing same-tier belt, underground-belt, and splitter entities as bus evidence instead of overwriting them.
+- Audit connected boundary belt capacity against data.raw belt speed, so generated reports can catch cases where machine coverage is high enough but the final boundary has too few belt lanes.
 - Audit production-machine inserter endpoints against data.raw entity boxes, so generated reports can distinguish target machines with belt-fed input/output from copied but disconnected machines.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
@@ -183,6 +184,15 @@ requested target rate". Input fanouts extend that same reachability graph for
 copied modules on the same row. They add belts only on empty positions and can
 treat existing same-tier transport belts, underground belts, or splitters as
 already-built bus segments; non-belt collisions still block the fanout.
+
+Boundary capacity audit is separate from boundary coverage. Coverage proves
+that connected routes and repeated-instance buses reach the copied machines that
+can produce the requested rate. Capacity audit sums the data.raw belt throughput
+of the connected boundary routes themselves and compares it with the boundary
+input or output rate. This matters for multi-belt targets: a generated box may
+have enough machines and internal buses for `2x turbo-transport-belt`, but one
+connected turbo output lane still only has 3600 items/minute of boundary
+capacity.
 
 The belt flow audit is a stricter pass over those connected segments. It
 rebuilds each horizontal boundary route, inter-instance bridge, and input
