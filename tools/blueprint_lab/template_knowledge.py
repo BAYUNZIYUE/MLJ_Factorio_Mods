@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import iter_blueprint_text_files
+from .directions import belt_boundary_role
 from .prototypes import PrototypeKnowledge, empty_knowledge, load_data_raw
 from .templates import TemplateCandidate, extract_template_library
 
@@ -293,25 +294,7 @@ def template_side(x: float, y: float, min_x: float, max_x: float, min_y: float, 
 
 
 def template_port_role(side: str, direction: int | None) -> str:
-    if direction is None:
-        return "boundary"
-    if side == "left" and direction == 2:
-        return "input"
-    if side == "left" and direction == 6:
-        return "output"
-    if side == "right" and direction == 6:
-        return "input"
-    if side == "right" and direction == 2:
-        return "output"
-    if side == "top" and direction == 4:
-        return "input"
-    if side == "top" and direction == 0:
-        return "output"
-    if side == "bottom" and direction == 0:
-        return "input"
-    if side == "bottom" and direction == 4:
-        return "output"
-    return "edge-bus"
+    return belt_boundary_role(side, direction)
 
 
 def template_layout_hint(template: TemplateCandidate) -> TemplateLayoutHint:

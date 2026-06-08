@@ -5,12 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .codec import encode_blueprint_string, make_blueprint_wrapper, save_blueprint_file
-
-
-DIR_NORTH = 0
-DIR_EAST = 2
-DIR_SOUTH = 4
-DIR_WEST = 6
+from .directions import DIR_EAST, DIR_SOUTH, DIR_WEST
 
 
 class EntityBuilder:
@@ -98,4 +93,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

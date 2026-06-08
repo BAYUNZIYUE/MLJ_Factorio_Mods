@@ -10,15 +10,8 @@ from typing import Any
 
 from .analysis import BELT_LIKE, blueprint_metrics, iter_blueprint_text_files
 from .codec import load_blueprint_file, walk_nodes
+from .directions import belt_boundary_role, direction_name
 from .learn import learn_library
-
-
-DIRECTION_NAMES = {
-    0: "north",
-    2: "east",
-    4: "south",
-    6: "west",
-}
 
 
 @dataclass(frozen=True)
@@ -129,25 +122,7 @@ def boundary_side(x: float, y: float, min_x: float, max_x: float, min_y: float, 
 
 
 def belt_role(side: str, direction: int | None) -> str:
-    if direction is None:
-        return "boundary"
-    if side == "left" and direction == 2:
-        return "input"
-    if side == "left" and direction == 6:
-        return "output"
-    if side == "right" and direction == 6:
-        return "input"
-    if side == "right" and direction == 2:
-        return "output"
-    if side == "top" and direction == 4:
-        return "input"
-    if side == "top" and direction == 0:
-        return "output"
-    if side == "bottom" and direction == 0:
-        return "input"
-    if side == "bottom" and direction == 4:
-        return "output"
-    return "edge-bus"
+    return belt_boundary_role(side, direction)
 
 
 def boundary_ports(blueprint: dict[str, Any], margin: float = 1.0) -> list[BoundaryPort]:
@@ -179,7 +154,7 @@ def boundary_ports(blueprint: dict[str, Any], margin: float = 1.0) -> list[Bound
                 side=side,
                 role=role,
                 entity_name=name,
-                direction=DIRECTION_NAMES.get(direction, str(direction) if direction is not None else "none"),
+                direction=direction_name(direction if isinstance(direction, int) else None),
                 x=x,
                 y=y,
             )
@@ -420,4 +395,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

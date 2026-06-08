@@ -145,23 +145,26 @@ entity-position collision was detected. The router evaluates all compatible
 ports on the requested side before declaring a route blocked; failed direct
 candidates are retained in `blocked_attempts` so the report can explain why a
 later port was chosen. Connector belts inherit the selected port belt tier when
-the port is a transport belt, underground belt, or splitter. Inter-instance
-bridges are reported separately from boundary routes so a generated full-belt
-box can show whether repeated module edge buses were connected before the final
-boundary output was attached. Boundary coverage then audits the route plus
-bridges as a graph: output coverage walks backward from the selected output
-port through connected instance bridges, while input coverage walks forward
-from the selected input port. Coverage is lane-aware: only bridges on the same
-y coordinate as the selected boundary port are used for reachability. This lets
-the report distinguish "the boundary belt touches one copied module" from "the
-boundary belt reaches every copied module needed to cover the requested target
-rate". Input fanouts extend that same reachability graph for copied modules on
-the same row. They add belts only on empty positions and can treat existing
-same-tier transport belts, underground belts, or splitters as already-built bus
-segments; non-belt collisions still block the fanout. This is a structural
-coverage audit, not a full belt simulation: it still does not understand lane
-filters, splitter balancing, stacked belts, underground-belt pairing semantics,
-or inserter timing.
+the port is a transport belt, underground belt, or splitter. Blueprint Lab uses
+Factorio 2.x direction values, where cardinal belts use north `0`, east `4`,
+south `8`, and west `12`. Learned port roles are direction-aware: for example,
+a left-edge east-facing belt is an input, while a left-edge west-facing belt is
+an output. Inter-instance bridges are reported separately from boundary routes
+so a generated full-belt box can show whether repeated module edge buses were
+connected before the final boundary output was attached. Boundary coverage then
+audits the route plus bridges as a graph: output coverage walks backward from
+the selected output port through connected instance bridges, while input
+coverage walks forward from the selected input port. Coverage is lane-aware:
+only bridges on the same y coordinate as the selected boundary port are used for
+reachability. This lets the report distinguish "the boundary belt touches one
+copied module" from "the boundary belt reaches every copied module needed to
+cover the requested target rate". Input fanouts extend that same reachability
+graph for copied modules on the same row. They add belts only on empty positions
+and can treat existing same-tier transport belts, underground belts, or
+splitters as already-built bus segments; non-belt collisions still block the
+fanout. This is a structural coverage audit, not a full belt simulation: it
+still does not understand lane filters, splitter balancing, stacked belts,
+underground-belt pairing semantics, or inserter timing.
 
 ## Commands
 
@@ -242,5 +245,6 @@ python3 tests/verify_blueprint_lab.py
 
 - Blueprint string format: `https://wiki.factorio.com/Blueprint_string_format`
 - Runtime blueprint stack APIs: `https://lua-api.factorio.com/latest/classes/LuaItemStack.html`
+- Direction type: `https://lua-api.factorio.com/latest/types/Direction.html`
 - Prototype docs and machine-readable prototype format: `https://lua-api.factorio.com/latest/index-prototype.html`
 - Transport belt connectable prototype speed: `https://lua-api.factorio.com/latest/prototypes/TransportBeltConnectablePrototype.html`

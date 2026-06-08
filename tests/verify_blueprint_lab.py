@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
 from tools.blueprint_lab.analysis import blueprint_metrics, summarize_library
 from tools.blueprint_lab.codec import decode_blueprint_string, encode_blueprint_string, walk_nodes
 from tools.blueprint_lab.decompose import decompose_blueprint
+from tools.blueprint_lab.directions import DIR_EAST
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
@@ -399,6 +400,9 @@ def main() -> int:
     if len(connected["blueprint"]["entities"]) != 58:
         print(f"FAIL: expected connected blueprint to add connector belts: {connected}")
         return 1
+    if any(entity["name"] == "transport-belt" and entity.get("direction") != DIR_EAST for entity in connected["blueprint"]["entities"]):
+        print(f"FAIL: expected generated connector belts to use Factorio 2.x east direction {DIR_EAST}: {connected}")
+        return 1
     if "blueprint_lab_connector_summary" in connected["blueprint"]:
         print(f"FAIL: connector summary must not be written into importable blueprint JSON: {connected}")
         return 1
@@ -445,9 +449,9 @@ def main() -> int:
             "fingerprint": "detour-template",
             "layout": {
                 "entities": [
-                    {"name": "transport-belt", "x": 1, "y": 1, "direction": 2, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "transport-belt", "x": 1, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
                     {"name": "stone-furnace", "x": 2, "y": 1, "direction": None, "recipe": None, "recipe_quality": None, "quality": None},
-                    {"name": "fast-transport-belt", "x": 1, "y": 2, "direction": 2, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "fast-transport-belt", "x": 1, "y": 2, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
                 ],
                 "tiles": [],
             },
@@ -520,7 +524,7 @@ def main() -> int:
             "fingerprint": "replicated-port-template",
             "layout": {
                 "entities": [
-                    {"name": "turbo-transport-belt", "x": 1, "y": 1, "direction": 2, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 1, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
                 ],
                 "tiles": [],
             },

@@ -9,6 +9,7 @@ from typing import Any
 
 from .analysis import blueprint_metrics, iter_blueprint_text_files
 from .codec import make_blueprint_wrapper, save_blueprint_file
+from .directions import DIR_EAST
 from .generate import icon
 from .layout_plan import build_layout_plan, mapping_by_fingerprint
 from .production_dag import (
@@ -18,9 +19,6 @@ from .production_dag import (
 )
 from .prototypes import load_data_raw, target_rate_basis_from_args
 from .template_knowledge import map_template_library
-
-
-DIR_EAST = 2
 
 
 RoutePosition = tuple[float, float, str, int, str]
