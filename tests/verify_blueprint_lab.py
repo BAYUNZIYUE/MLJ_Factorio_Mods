@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
 
 from tools.blueprint_lab.analysis import blueprint_metrics, summarize_library
 from tools.blueprint_lab.codec import decode_blueprint_string, encode_blueprint_string, walk_nodes
+from tools.blueprint_lab.decompose import decompose_blueprint
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 
@@ -52,7 +53,16 @@ def main() -> int:
         print(f"FAIL: expected generated seed to be a black-box candidate: {learned}")
         return 1
 
-    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, and generates a seed blueprint.")
+    decomposition = decompose_blueprint("generated", "/", blueprints[0].payload, category="smelting", cell_size=4)
+    port_roles = {port.role for port in decomposition.boundary_ports}
+    if "edge-bus" not in port_roles:
+        print(f"FAIL: expected generated seed to expose edge buses: {decomposition}")
+        return 1
+    if not decomposition.repeated_modules:
+        print(f"FAIL: expected generated seed to expose repeated module signatures: {decomposition}")
+        return 1
+
+    print("PASS: blueprint_lab encodes, decodes, analyzes, learns, decomposes, and generates a seed blueprint.")
     return 0
 
 

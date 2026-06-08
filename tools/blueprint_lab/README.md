@@ -11,6 +11,7 @@ tree.
 - Measure blueprint boundaries, entity counts, tile counts, density, dominant entities, and simple edge I/O hints.
 - Scan a local blueprint corpus and produce JSON or Markdown reports.
 - Classify blueprint families and choose representative examples for later template extraction.
+- Decompose learned black-box candidates into boundary ports, coarse grid signatures, and repeated module candidates.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 
 The current generator is a seed for later optimization. It is not yet a full
@@ -57,6 +58,13 @@ The first family-learning run found these high-signal candidate types:
 - Mall and logistics boxes: useful for input-boundary and requester patterns, but they trade compactness for coverage.
 - Balancers and rail modules: valuable as standalone template families, but they should not be mixed into production-box scoring without separate constraints.
 
+The first decomposition pass adds a second evidence layer for black-box
+candidates:
+
+- Boundary ports show where belts, fluid endpoints, rail-like entities, and logistics storage touch the rectangle.
+- Grid signatures group nearby entity families into coarse cells so repeated cells can be inspected as possible modules.
+- Decomposition lessons are intentionally conservative. A repeated cell is not automatically a recipe module; it is a candidate for later extraction and in-game validation.
+
 ## Commands
 
 Analyze a blueprint directory:
@@ -69,6 +77,12 @@ Learn blueprint families and representative examples:
 
 ```bash
 python3 -m tools.blueprint_lab.learn /mnt/d/Desktop/游戏/异星工厂/蓝图 --json-output .codex/tests/blueprint-learning-summary.json --markdown-output .codex/tests/blueprint-learning-report.md
+```
+
+Decompose learned black-box candidates:
+
+```bash
+python3 -m tools.blueprint_lab.decompose /mnt/d/Desktop/游戏/异星工厂/蓝图 --top 8 --cell-size 16 --json-output .codex/tests/blueprint-decomposition-summary.json --markdown-output .codex/tests/blueprint-decomposition-report.md
 ```
 
 Generate the current seed blueprint:
