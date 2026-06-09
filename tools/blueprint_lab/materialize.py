@@ -112,6 +112,65 @@ def entity_position(entity: dict[str, Any]) -> tuple[float, float]:
     return (float(entity.get("x", 0.0)), float(entity.get("y", 0.0)))
 
 
+def entity_collision_box(entity: dict[str, Any], knowledge: PrototypeKnowledge) -> tuple[float, float, float, float] | None:
+    box = knowledge.entity_box(str(entity.get("name") or ""))
+    if box is None:
+        return None
+    entity_x, entity_y = entity_position(entity)
+    (min_x, min_y), (max_x, max_y) = box.collision_box or box.selection_box
+    return (
+        round(entity_x + min_x, 3),
+        round(entity_y + min_y, 3),
+        round(entity_x + max_x, 3),
+        round(entity_y + max_y, 3),
+    )
+
+
+def boxes_overlap(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    *,
+    tolerance: float = 0.001,
+) -> bool:
+    left_min_x, left_min_y, left_max_x, left_max_y = left
+    right_min_x, right_min_y, right_max_x, right_max_y = right
+    return not (
+        left_max_x <= right_min_x + tolerance
+        or right_max_x <= left_min_x + tolerance
+        or left_max_y <= right_min_y + tolerance
+        or right_max_y <= left_min_y + tolerance
+    )
+
+
+def placement_collisions(
+    candidate: dict[str, Any],
+    entities: list[dict[str, Any]],
+    knowledge: PrototypeKnowledge,
+) -> list[dict[str, Any]]:
+    candidate_box = entity_collision_box(candidate, knowledge)
+    if candidate_box is None:
+        return []
+    collisions: list[dict[str, Any]] = []
+    candidate_x, candidate_y = entity_position(candidate)
+    for entity in entities:
+        entity_box = entity_collision_box(entity, knowledge)
+        if entity_box is None:
+            continue
+        if not boxes_overlap(candidate_box, entity_box):
+            continue
+        collisions.append(
+            {
+                "entity_number": int(entity.get("entity_number") or 0),
+                "entity_name": str(entity.get("name") or ""),
+                "x": round(candidate_x, 3),
+                "y": round(candidate_y, 3),
+                "collision_x": round(entity_position(entity)[0], 3),
+                "collision_y": round(entity_position(entity)[1], 3),
+            }
+        )
+    return collisions
+
+
 def point_in_entity_box(
     point: tuple[float, float],
     entity: dict[str, Any],
@@ -362,6 +421,219 @@ def audit_machine_io(wrapper: dict[str, Any], knowledge: PrototypeKnowledge | No
             }
         )
     return audit
+
+
+def nearest_half_tile(value: float) -> float:
+    return round(round(value * 2.0) / 2.0, 3)
+
+
+def audit_machine_output_expansion(
+    wrapper: dict[str, Any],
+    knowledge: PrototypeKnowledge | None,
+    *,
+    inserter_name: str = "stack-inserter",
+) -> list[dict[str, Any]]:
+    if knowledge is None or knowledge.inserter(inserter_name) is None:
+        return []
+    entities = list((wrapper.get("blueprint") or {}).get("entities") or [])
+    if not entities:
+        return []
+
+    machine_entities = [
+        entity
+        for entity in entities
+        if entity.get("recipe") and knowledge.entity(str(entity.get("name") or "")) is not None
+    ]
+    if not machine_entities:
+        return []
+
+    existing_output_by_machine: dict[int, set[int]] = {int(entity.get("entity_number") or 0): set() for entity in machine_entities}
+    machine_numbers = set(existing_output_by_machine)
+    for entity in entities:
+        inserter = knowledge.inserter(str(entity.get("name") or ""))
+        if inserter is None:
+            continue
+        number = int(entity.get("entity_number") or 0)
+        origin_x, origin_y = entity_position(entity)
+        pickup_dx, pickup_dy = rotate_vector(inserter.pickup_position, entity.get("direction"))
+        insert_dx, insert_dy = rotate_vector(inserter.insert_position, entity.get("direction"))
+        pickup_targets = endpoint_targets(
+            (round(origin_x + pickup_dx, 3), round(origin_y + pickup_dy, 3)),
+            entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        insert_targets = endpoint_targets(
+            (round(origin_x + insert_dx, 3), round(origin_y + insert_dy, 3)),
+            entities,
+            source_entity_number=number,
+            knowledge=knowledge,
+        )
+        pickup_machines = [target for target in pickup_targets if target["role"] == "machine" and target["entity_number"] in machine_numbers]
+        insert_belts = [target for target in insert_targets if target["role"] == "belt"]
+        if not insert_belts:
+            continue
+        for machine in pickup_machines:
+            existing_output_by_machine[int(machine["entity_number"])].add(number)
+
+    inserter = knowledge.inserter(inserter_name)
+    assert inserter is not None
+    candidate_offsets = [offset / 2.0 for offset in range(-6, 7)]
+    grouped: dict[str, dict[str, Any]] = {}
+    for machine in machine_entities:
+        machine_number = int(machine.get("entity_number") or 0)
+        machine_x, machine_y = entity_position(machine)
+        recipe = str(machine.get("recipe") or "")
+        existing_outputs = existing_output_by_machine.get(machine_number, set())
+        candidates: list[dict[str, Any]] = []
+        blocked: list[dict[str, Any]] = []
+        invalid_endpoint_count = 0
+        for direction in (DIR_NORTH, DIR_EAST, DIR_SOUTH, DIR_WEST):
+            pickup_dx, pickup_dy = rotate_vector(inserter.pickup_position, direction)
+            insert_dx, insert_dy = rotate_vector(inserter.insert_position, direction)
+            for offset_x in candidate_offsets:
+                for offset_y in candidate_offsets:
+                    candidate_x = round(machine_x + offset_x, 3)
+                    candidate_y = round(machine_y + offset_y, 3)
+                    candidate_inserter = {
+                        "entity_number": -1,
+                        "name": inserter_name,
+                        "position": {"x": candidate_x, "y": candidate_y},
+                        "direction": direction,
+                    }
+                    inserter_collisions = placement_collisions(candidate_inserter, entities, knowledge)
+                    pickup_point = (round(candidate_x + pickup_dx, 3), round(candidate_y + pickup_dy, 3))
+                    insert_point = (round(candidate_x + insert_dx, 3), round(candidate_y + insert_dy, 3))
+                    pickup_targets = endpoint_targets(
+                        pickup_point,
+                        entities,
+                        source_entity_number=-1,
+                        knowledge=knowledge,
+                    )
+                    pickup_machines = [
+                        target
+                        for target in pickup_targets
+                        if target["role"] == "machine" and target["entity_number"] == machine_number
+                    ]
+                    if not pickup_machines:
+                        invalid_endpoint_count += 1
+                        continue
+                    insert_targets = endpoint_targets(
+                        insert_point,
+                        entities,
+                        source_entity_number=-1,
+                        knowledge=knowledge,
+                    )
+                    insert_belts = [target for target in insert_targets if target["role"] == "belt"]
+                    if insert_belts:
+                        if (
+                            round(float(insert_belts[0]["y"]), 3) > round(machine_y, 3)
+                            or round(float(insert_belts[0]["x"]), 3) < round(machine_x, 3)
+                        ):
+                            invalid_endpoint_count += 1
+                            continue
+                        if inserter_collisions:
+                            blocked.append(
+                                {
+                                    "machine_entity_number": machine_number,
+                                    "candidate_x": candidate_x,
+                                    "candidate_y": candidate_y,
+                                    "direction": direction,
+                                    "drop": "existing-belt",
+                                    "collisions": inserter_collisions[:3],
+                                }
+                            )
+                            continue
+                        candidates.append(
+                            {
+                                "machine_entity_number": machine_number,
+                                "candidate_x": candidate_x,
+                                "candidate_y": candidate_y,
+                                "direction": direction,
+                                "drop": "existing-belt",
+                                "drop_x": round(float(insert_belts[0]["x"]), 3),
+                                "drop_y": round(float(insert_belts[0]["y"]), 3),
+                                "drop_belt_name": insert_belts[0]["name"],
+                            }
+                        )
+                        continue
+
+                    belt_x = nearest_half_tile(insert_point[0])
+                    belt_y = nearest_half_tile(insert_point[1])
+                    if belt_y > round(machine_y, 3) or belt_x < round(machine_x, 3):
+                        invalid_endpoint_count += 1
+                        continue
+                    belt_name = "transport-belt"
+                    existing_belt_names = [
+                        str(entity.get("name") or "")
+                        for entity in entities
+                        if is_belt_like_entity_name(str(entity.get("name") or ""))
+                    ]
+                    if "turbo-transport-belt" in existing_belt_names:
+                        belt_name = "turbo-transport-belt"
+                    proposed_belt = connector_belt(-2, belt_x, belt_y, direction=DIR_EAST, name=belt_name)
+                    if not point_in_entity_box(insert_point, proposed_belt, knowledge):
+                        invalid_endpoint_count += 1
+                        continue
+                    belt_collisions = placement_collisions(proposed_belt, entities, knowledge)
+                    if inserter_collisions or belt_collisions:
+                        blocked.append(
+                            {
+                                "machine_entity_number": machine_number,
+                                "candidate_x": candidate_x,
+                                "candidate_y": candidate_y,
+                                "direction": direction,
+                                "drop": "new-belt",
+                                "drop_x": belt_x,
+                                "drop_y": belt_y,
+                                "collisions": (inserter_collisions + belt_collisions)[:3],
+                            }
+                        )
+                        continue
+                    candidates.append(
+                        {
+                            "machine_entity_number": machine_number,
+                            "candidate_x": candidate_x,
+                            "candidate_y": candidate_y,
+                            "direction": direction,
+                            "drop": "new-belt",
+                            "drop_x": belt_x,
+                            "drop_y": belt_y,
+                            "drop_belt_name": belt_name,
+                        }
+                    )
+
+        recipe_item = grouped.setdefault(
+            recipe,
+            {
+                "recipe": recipe,
+                "machine_count": 0,
+                "machines_with_existing_output": 0,
+                "existing_output_inserter_count": 0,
+                "expandable_machine_count": 0,
+                "candidate_count": 0,
+                "blocked_candidate_count": 0,
+                "invalid_endpoint_count": 0,
+                "samples": [],
+                "blocked_samples": [],
+            },
+        )
+        recipe_item["machine_count"] += 1
+        recipe_item["machines_with_existing_output"] += 1 if existing_outputs else 0
+        recipe_item["existing_output_inserter_count"] += len(existing_outputs)
+        recipe_item["candidate_count"] += len(candidates)
+        recipe_item["blocked_candidate_count"] += len(blocked)
+        recipe_item["invalid_endpoint_count"] += invalid_endpoint_count
+        if candidates:
+            recipe_item["expandable_machine_count"] += 1
+            recipe_item["samples"].extend(candidates[: max(0, 8 - len(recipe_item["samples"]))])
+        if blocked:
+            recipe_item["blocked_samples"].extend(blocked[: max(0, 8 - len(recipe_item["blocked_samples"]))])
+
+    audits = list(grouped.values())
+    for item in audits:
+        item["status"] = "expandable" if item["expandable_machine_count"] else "blocked"
+    return sorted(audits, key=lambda item: item["recipe"])
 
 
 def prune_template_entities_for_recipe(
@@ -3133,6 +3405,7 @@ def render_summary(
         "output_byproduct_audit": [],
         "belt_flow_audit": [],
         "output_inserter_upgrades": [],
+        "machine_output_expansion_audit": [],
     }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
     layout_nodes = [
@@ -3176,6 +3449,7 @@ def render_summary(
         "connector_summary": summary,
         "route_status_counts": dict(route_status_counts),
         "machine_io_audit": audit_machine_io(wrapper, knowledge),
+        "machine_output_expansion_audit": audit_machine_output_expansion(wrapper, knowledge),
         "lessons": [
             "Materialization copies learned local template geometry into the planned rectangle instead of inventing machines from scratch.",
             "Boundary connectors are generated only in reserved lanes and checked for exact entity-position collisions.",
@@ -3426,6 +3700,31 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"template_count={item.get('template_count')} instances={item.get('instances')} "
                 f"materialized={item.get('materialized_count')}"
             )
+    if summary.get("machine_output_expansion_audit"):
+        lines.extend(["", "## Machine Output Expansion Audit", ""])
+        for item in summary["machine_output_expansion_audit"]:
+            line = (
+                f"- {item.get('recipe')}: status={item.get('status')} "
+                f"machines={item.get('machine_count')} existing_outputs={item.get('existing_output_inserter_count')} "
+                f"expandable={item.get('expandable_machine_count')} candidates={item.get('candidate_count')} "
+                f"blocked={item.get('blocked_candidate_count')} invalid_endpoints={item.get('invalid_endpoint_count')}"
+            )
+            samples = item.get("samples") or []
+            if samples:
+                sample = samples[0]
+                line += (
+                    f" sample=({sample.get('candidate_x')},{sample.get('candidate_y')})"
+                    f"->{sample.get('drop')}@({sample.get('drop_x')},{sample.get('drop_y')})"
+                )
+            blocked_samples = item.get("blocked_samples") or []
+            if not samples and blocked_samples:
+                sample = blocked_samples[0]
+                line += (
+                    f" blocked_sample=({sample.get('candidate_x')},{sample.get('candidate_y')})"
+                    f"->{sample.get('drop')}@({sample.get('drop_x')},{sample.get('drop_y')})"
+                    f" collisions={len(sample.get('collisions') or [])}"
+                )
+            lines.append(line)
     if summary.get("machine_io_audit"):
         lines.extend(["", "## Machine I/O Audit", ""])
         for item in summary["machine_io_audit"]:

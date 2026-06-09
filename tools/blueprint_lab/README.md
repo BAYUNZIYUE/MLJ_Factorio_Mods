@@ -301,6 +301,18 @@ five crushers at `full_output`. That explains the low throughput-window result:
 the current generated box is still output-unloading and lane-distribution
 limited before it is right-boundary-belt limited.
 
+The materialization report also includes a machine-output expansion audit. This
+is a preflight step for the next generator pass: it enumerates extra
+`stack-inserter` positions around recipe machines, checks inserter and proposed
+drop-belt collision boxes from data.raw, and rejects candidates that would drop
+below the machine centerline or to the left of the machine in the current
+left-input/right-output box. The audit is intentionally report-only; it does not
+yet add those inserters to the blueprint. In the current `iron-ore 2x
+turbo-transport-belt` sample, all five crushers have safe output-expansion
+candidates (`60` total candidates after directional filtering), so the next
+generation step can promote audited candidates into real extra output unloaders
+instead of guessing placements that Factorio later rejects.
+
 The runtime validation command is a heavier final gate, not part of the normal
 unit regression guard. It writes a temporary scenario under the Factorio user
 data directory, imports one blueprint string with `LuaItemStack.import_stack`,

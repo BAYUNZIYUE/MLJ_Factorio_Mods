@@ -20,7 +20,7 @@ from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import audit_machine_io, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe, select_best_materialized_layout
+from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe, select_best_materialized_layout
 from tools.blueprint_lab.factorio_validate import (
     effective_runtime_audit_wait_ticks,
     render_control_lua,
@@ -439,6 +439,16 @@ def main() -> int:
     output_flow_counts = Counter(item["status"] for item in output_port_summary["belt_flow_audit"])
     if output_flow_counts != {"pass": 1}:
         print(f"FAIL: expected machine-output side-load route to pass belt flow audit: {output_port_summary}")
+        return 1
+    output_expansion = audit_machine_output_expansion(output_port_wrapper, knowledge)
+    expansion_by_recipe = {item["recipe"]: item for item in output_expansion}
+    if (
+        "iron-gear-wheel" not in expansion_by_recipe
+        or expansion_by_recipe["iron-gear-wheel"]["status"] != "expandable"
+        or expansion_by_recipe["iron-gear-wheel"]["candidate_count"] <= 0
+        or expansion_by_recipe["iron-gear-wheel"]["expandable_machine_count"] != 1
+    ):
+        print(f"FAIL: expected machine output expansion audit to find safe candidate inserter/drop-belt positions: {output_expansion}")
         return 1
     pruned_entities = prune_template_entities_for_recipe(
         [
