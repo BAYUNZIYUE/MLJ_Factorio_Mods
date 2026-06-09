@@ -515,8 +515,9 @@ def machine_output_expansion_candidates(
             knowledge=knowledge,
         )
         pickup_machines = [target for target in pickup_targets if target["role"] == "machine" and target["entity_number"] in machine_numbers]
+        pickup_belts = [target for target in pickup_targets if target["role"] == "belt"]
         insert_belts = [target for target in insert_targets if target["role"] == "belt"]
-        if not insert_belts:
+        if not insert_belts or pickup_belts:
             continue
         for machine in pickup_machines:
             existing_output_by_machine[int(machine["entity_number"])].add(number)
@@ -560,7 +561,8 @@ def machine_output_expansion_candidates(
                         for target in pickup_targets
                         if target["role"] == "machine" and target["entity_number"] == machine_number
                     ]
-                    if not pickup_machines:
+                    pickup_belts = [target for target in pickup_targets if target["role"] == "belt"]
+                    if not pickup_machines or pickup_belts:
                         invalid_endpoint_count += 1
                         continue
                     insert_targets = endpoint_targets(
@@ -1037,6 +1039,41 @@ def add_boundary_connectors(
     root = layout_plan["nodes"][0]
     default_y = round(float(root["y"]) + float(root["source_height"]) / 2, 3)
 
+    def machine_output_pickup_blockers() -> set[tuple[float, float]]:
+        if knowledge is None:
+            return set()
+        blockers: set[tuple[float, float]] = set()
+        for entity in entities:
+            name = str(entity.get("name") or "")
+            inserter = knowledge.inserter(name)
+            if inserter is None:
+                continue
+            number = int(entity.get("entity_number") or 0)
+            origin_x, origin_y = entity_position(entity)
+            pickup_dx, pickup_dy = rotate_vector(inserter.pickup_position, entity.get("direction"))
+            insert_dx, insert_dy = rotate_vector(inserter.insert_position, entity.get("direction"))
+            pickup_point = (round(origin_x + pickup_dx, 3), round(origin_y + pickup_dy, 3))
+            insert_point = (round(origin_x + insert_dx, 3), round(origin_y + insert_dy, 3))
+            pickup_targets = endpoint_targets(
+                pickup_point,
+                entities,
+                source_entity_number=number,
+                knowledge=knowledge,
+            )
+            insert_targets = endpoint_targets(
+                insert_point,
+                entities,
+                source_entity_number=number,
+                knowledge=knowledge,
+            )
+            pickup_machines = [target for target in pickup_targets if target["role"] == "machine"]
+            insert_belts = [target for target in insert_targets if target["role"] == "belt"]
+            if pickup_machines and insert_belts:
+                blockers.add(pickup_point)
+        return blockers
+
+    output_pickup_blockers = machine_output_pickup_blockers()
+
     def add_positions(
         positions: list[RoutePosition],
         *,
@@ -1047,6 +1084,12 @@ def add_boundary_connectors(
         seen: set[tuple[float, float]] = set()
         for x, belt_y, reason, direction, belt_name in positions:
             key = (round(x, 3), round(belt_y, 3))
+            is_fanin_source_route = reason.startswith("fanin-source:")
+            is_fanin_route = reason.startswith("fanin:") or is_fanin_source_route
+            if is_fanin_route and key in output_pickup_blockers:
+                collision = {"x": key[0], "y": key[1], "reason": f"{reason}:machine-output-pickup-position"}
+                route_collisions.append(collision)
+                continue
             if key in seen:
                 collision = {"x": key[0], "y": key[1], "reason": f"{reason}:duplicate-route-position"}
                 route_collisions.append(collision)
@@ -1086,6 +1129,12 @@ def add_boundary_connectors(
         existing_belts_used = 0
         for x, belt_y, reason, direction, belt_name in positions:
             key = (round(x, 3), round(belt_y, 3))
+            is_fanin_source_route = reason.startswith("fanin-source:")
+            is_fanin_route = reason.startswith("fanin:") or is_fanin_source_route
+            if is_fanin_route and key in output_pickup_blockers:
+                collision = {"x": key[0], "y": key[1], "reason": f"{reason}:machine-output-pickup-position"}
+                route_collisions.append(collision)
+                continue
             if key in seen:
                 collision = {"x": key[0], "y": key[1], "reason": f"{reason}:duplicate-route-position"}
                 route_collisions.append(collision)
@@ -1097,8 +1146,6 @@ def add_boundary_connectors(
             existing_name = str(existing.get("name") or "")
             if is_belt_like_entity_name(existing_name) and canonical_transport_belt_name(existing_name) == belt_name:
                 existing_is_connector = any(existing is connector for connector in connectors)
-                is_fanin_source_route = reason.startswith("fanin-source:")
-                is_fanin_route = reason.startswith("fanin:") or is_fanin_source_route
                 is_machine_feed_route = (
                     reason.endswith("machine-output-side-load")
                     or reason.endswith("machine-input-right-feed")
@@ -2076,7 +2123,12 @@ def add_boundary_connectors(
                     blocked_direct = route_collisions
                     detour_attempts: list[dict[str, Any]] = []
                     merge_x = round(float(current_port["x"]), 3)
-                    entry_x = round(end_x - 1.0, 3)
+                    protected_xs = sorted(
+                        x
+                        for x, y in output_pickup_blockers
+                        if round(y, 3) == route_y and start_x <= x <= end_x
+                    )
+                    entry_x = round((protected_xs[0] - 1.0) if protected_xs else (end_x - 1.0), 3)
                     for detour_offset in (-1.0, 1.0, -2.0, 2.0):
                         detour_y = round(route_y + detour_offset, 3)
                         if start_x > entry_x:
@@ -3279,6 +3331,7 @@ def materialize_layout_with_summary(
     label: str | None = None,
     connect_boundaries: bool = False,
     knowledge: PrototypeKnowledge | None = None,
+    allow_new_drop_belts: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     mapping_index = mapping_by_fingerprint(mappings)
     working_layout = copy.deepcopy(layout_plan)
@@ -3410,6 +3463,7 @@ def materialize_layout_with_summary(
     connector_result["machine_output_expansions"] = materialize_machine_output_expansions(
         entities,
         knowledge,
+        allow_new_drop_belts=allow_new_drop_belts,
         target_item=str(working_layout.get("target_item") or ""),
     )
 
@@ -3434,6 +3488,7 @@ def materialize_layout(
     label: str | None = None,
     connect_boundaries: bool = False,
     knowledge: PrototypeKnowledge | None = None,
+    allow_new_drop_belts: bool = False,
 ) -> dict[str, Any]:
     wrapper, _ = materialize_layout_with_summary(
         layout_plan,
@@ -3441,6 +3496,7 @@ def materialize_layout(
         label=label,
         connect_boundaries=connect_boundaries,
         knowledge=knowledge,
+        allow_new_drop_belts=allow_new_drop_belts,
     )
     return wrapper
 
@@ -3535,6 +3591,7 @@ def select_best_materialized_layout(
     label: str | None = None,
     connect_boundaries: bool = False,
     knowledge: PrototypeKnowledge | None = None,
+    allow_new_drop_belts: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if not connect_boundaries or knowledge is None or len(layout_plan.get("nodes") or []) != 1:
         wrapper, connector_summary = materialize_layout_with_summary(
@@ -3543,6 +3600,7 @@ def select_best_materialized_layout(
             label=label,
             connect_boundaries=connect_boundaries,
             knowledge=knowledge,
+            allow_new_drop_belts=allow_new_drop_belts,
         )
         return wrapper, connector_summary, layout_plan
 
@@ -3560,6 +3618,7 @@ def select_best_materialized_layout(
             label=label,
             connect_boundaries=connect_boundaries,
             knowledge=knowledge,
+            allow_new_drop_belts=allow_new_drop_belts,
         )
         summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
         score = materialized_layout_score(summary)
@@ -4032,6 +4091,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lane-width", type=float, default=4.0)
     parser.add_argument("--label")
     parser.add_argument("--connect-boundaries", action="store_true")
+    parser.add_argument("--allow-new-drop-belts", action="store_true", help="Experimental: allow generated machine-output expansion inserters to create new drop belts. Default keeps only runtime-proven existing drop belts.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)
@@ -4077,6 +4137,7 @@ def main(argv: list[str] | None = None) -> int:
         label=args.label,
         connect_boundaries=args.connect_boundaries,
         knowledge=knowledge,
+        allow_new_drop_belts=args.allow_new_drop_belts,
     )
     save_blueprint_file(args.output, wrapper)
     summary = render_summary(wrapper, layout, connector_summary, knowledge=knowledge)

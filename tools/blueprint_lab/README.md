@@ -411,18 +411,21 @@ lesson to generated output expansion inserters. Extra output inserters are now
 filtered to the target product, and the runtime validator restores those filters
 in its direct-placement fallback with `LuaEntity::set_filter`.
 
-Runtime probes against the current 2x3 source-fan-in blueprint import 780
-entities through the direct-placement fallback, set six recipes, restore six
-splitter settings, restore fifteen inserter filters, and place all entities
-without manual failures. A 2400-tick probe with 300-tick sustained input
-intervals reports right-boundary windows around `4152/min`, `4704/min`,
-`5088/min`, `5220/min`, `5340/min`, and `5292/min`, with
-`right_boundary_cleanliness status=clean`. This improves over the previous
-2x3 source-fan-in result, but it is still below `2x turbo = 7200/min`. The
-runtime state shifted from all machines being output-blocked to
-`full_output:4,item_ingredient_shortage:2`, so the next generator problem is not
-just more existing-belt unloaders; it needs routed new drop lanes and stronger
-input/recycle feeding.
+Runtime probes against the 2x3 source-fan-in blueprint showed that a compact
+output merge can silently break inserters. The runtime validator now reports
+`invalid_output_inserters` when an inserter drops to a belt near a recipe
+machine but Factorio assigns its `pickup_target` to something other than that
+machine. One failed 2400-tick probe reported three such invalid inserters: the
+output fan-in belt had crossed existing machine-output pickup positions, so
+those inserters picked up from the belt instead of the crusher. The materializer
+now treats machine-output pickup positions as blocked for output fan-in routes
+and detours before the first protected pickup point. A fresh 2400-tick probe of
+the current 2x3 sample imports 786 entities through the direct-placement
+fallback, restores twenty-one inserter filters, reports
+`invalid_output_inserters=0`, sees twenty-three effective machine-to-belt output
+inserters, and records post-startup throughput windows around `8100/min` to
+`9192/min`. The summary is `7539/min`, above the `2x turbo = 7200/min` test-sink
+target, with no input items in the right-boundary throughput windows.
 
 A first routed-new-drop-lane experiment is intentionally not enabled by
 default. It generated 795 placeable entities, three new drop belts, and eighteen
@@ -449,8 +452,11 @@ not a complete proof of natural steady-state full-belt throughput.
 Earlier probes are still useful as regression markers. The generated output has
 moved from `0/min` on a broken exact 3x2 candidate, to about `4.0-4.5k/min`
 after source-port fan-in, to about `5.3k/min` after filtered multi-inserter
-unloading on existing drop belts. The requested contract is still `7200/min`,
-so the current result is progress evidence, not completion evidence.
+unloading on existing drop belts, and then to a `7539/min` 2400-tick summary
+after output fan-in routes learned to avoid machine-output pickup positions.
+The requested external contract is still not solved: the current passing sample
+uses three right-side output lanes, so it is over-provisioned relative to a
+strict `2x turbo-transport-belt` boundary.
 
 ## Commands
 

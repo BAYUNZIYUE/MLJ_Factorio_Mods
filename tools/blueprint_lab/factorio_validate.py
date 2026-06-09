@@ -206,6 +206,22 @@ local function recipe_machine_at_position(surface, recipe_machines, position)
   return nil
 end
 
+local function nearest_recipe_machine_to_position(recipe_machines, position)
+  if position == nil then
+    return nil, nil
+  end
+  local best_machine = nil
+  local best_distance = nil
+  for _, machine in pairs(recipe_machines) do
+    local distance = math.abs(machine.position.x - position.x) + math.abs(machine.position.y - position.y)
+    if best_distance == nil or distance < best_distance then
+      best_machine = machine
+      best_distance = distance
+    end
+  end
+  return best_machine, best_distance
+end
+
 local function transport_line_entity_at_position(surface, position)
   if position == nil then
     return nil
@@ -265,6 +281,8 @@ local function audit_output_unloading(surface)
   local drop_line_product_items = {{}}
   local drop_line_input_items = {{}}
   local inserter_samples = {{}}
+  local invalid_output_inserter_count = 0
+  local invalid_output_inserter_samples = {{}}
   for _, inserter in pairs(surface.find_entities_filtered{{force = "player"}}) do
     if inserter.type ~= "inserter" then
       goto continue_output_inserter
@@ -281,6 +299,38 @@ local function audit_output_unloading(surface)
       pickup_target = recipe_machine_at_position(surface, recipe_machines, inserter.pickup_position)
     end
     if pickup_target == nil or recipe_machines[recipe_machine_key(pickup_target)] == nil then
+      local ok_drop_target, rejected_drop_target = pcall(function()
+        return inserter.drop_target
+      end)
+      if not ok_drop_target then
+        rejected_drop_target = nil
+      end
+      if rejected_drop_target == nil then
+        rejected_drop_target = transport_line_entity_at_position(surface, inserter.drop_position)
+      end
+      local nearest_machine, nearest_distance = nearest_recipe_machine_to_position(recipe_machines, inserter.pickup_position)
+      if rejected_drop_target ~= nil and nearest_machine ~= nil and nearest_distance ~= nil and nearest_distance <= 3.0 then
+        local ok_line_count, max_line_index = pcall(function()
+          return rejected_drop_target.get_max_transport_line_index()
+        end)
+        if ok_line_count and max_line_index ~= nil and max_line_index > 0 then
+          invalid_output_inserter_count = invalid_output_inserter_count + 1
+          if #invalid_output_inserter_samples < 8 then
+            local pickup_target_name = "nil"
+            if pickup_target ~= nil and pickup_target.name ~= nil then
+              pickup_target_name = tostring(pickup_target.name)
+            end
+            invalid_output_inserter_samples[#invalid_output_inserter_samples + 1] =
+              tostring(inserter.name)
+              .. "@x" .. tostring(inserter.position.x) .. "y" .. tostring(inserter.position.y)
+              .. " pickup=x" .. tostring(inserter.pickup_position.x) .. "y" .. tostring(inserter.pickup_position.y)
+              .. " pickup_target=" .. pickup_target_name
+              .. " nearest=" .. tostring(nearest_machine.name) .. "@x" .. tostring(nearest_machine.position.x) .. "y" .. tostring(nearest_machine.position.y)
+              .. " distance=" .. tostring(nearest_distance)
+              .. " drop=" .. tostring(rejected_drop_target.name) .. "@x" .. tostring(rejected_drop_target.position.x) .. "y" .. tostring(rejected_drop_target.position.y)
+          end
+        end
+      end
       goto continue_output_inserter
     end
     output_inserter_count = output_inserter_count + 1
@@ -355,6 +405,7 @@ local function audit_output_unloading(surface)
 
   log("BLUEPRINT_LAB_VALIDATION output_unload_audit machines=" .. tostring(machine_count) .. " machine_output_items=" .. sorted_count_string(machine_output_items) .. " output_inserters=" .. tostring(output_inserter_count) .. " pickup_targets=" .. tostring(direct_pickup_count) .. " geometry_pickups=" .. tostring(geometry_pickup_count) .. " drop_targets=" .. tostring(direct_drop_count) .. " geometry_drops=" .. tostring(geometry_drop_count) .. " drop_belts=" .. tostring(drop_belt_count) .. " drop_lines=" .. tostring(drop_line_count) .. " held_items=" .. sorted_count_string(held_items) .. " drop_line_product_items=" .. sorted_count_string(drop_line_product_items) .. " drop_line_input_items=" .. sorted_count_string(drop_line_input_items))
   log("BLUEPRINT_LAB_VALIDATION output_unload_samples machines=" .. table.concat(machine_samples, "|") .. " inserters=" .. table.concat(inserter_samples, "|"))
+  log("BLUEPRINT_LAB_VALIDATION invalid_output_inserters=" .. tostring(invalid_output_inserter_count) .. " samples=" .. table.concat(invalid_output_inserter_samples, "|"))
 end
 
 collect_recipe_input_items = function(surface)

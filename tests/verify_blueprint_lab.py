@@ -89,6 +89,8 @@ def main() -> int:
         "recipe_machine_output_items",
         "output_unload_audit",
         "output_unload_samples",
+        "nearest_recipe_machine_to_position",
+        "invalid_output_inserters=",
         "machine_output_items=",
         "drop_line_product_items=",
         "input_probe_mode",
@@ -1326,6 +1328,73 @@ def main() -> int:
         or any(item["status"] == "overloaded" for item in selected_lane_loads)
     ):
         print(f"FAIL: expected post-materialize layout selection to reject overloaded exact grids before preferring a tighter over-provisioned grid: {selected_layout} {selected_summary}")
+        return 1
+
+    fanin_pickup_guard_layout = {
+        "target_item": "iron-gear-wheel",
+        "target_rate_per_minute": 300,
+        "target_rate_basis": {"kind": "explicit-rate", "rate_per_minute": 300},
+        "max_columns": 2,
+        "spacing": 2,
+        "lane_width": 4,
+        "estimated_width": 20,
+        "estimated_height": 14,
+        "boundary_inputs": [],
+        "boundary_outputs": [{"item": "iron-gear-wheel", "rate_per_minute": 300, "side": "right"}],
+        "nodes": [
+            {
+                "item": "iron-gear-wheel",
+                "recipe": "iron-gear-wheel",
+                "fingerprint": "fanin-pickup-guard-template",
+                "instances": 2,
+                "source_width": 6,
+                "source_height": 6,
+                "source_entity_count": 3,
+                "source_tile_count": 0,
+                "columns": 2,
+                "rows": 1,
+                "planned_width": 14,
+                "planned_height": 6,
+                "planned_net_output_per_minute": 300,
+                "x": 4,
+                "y": 4,
+                "ports": [
+                    {"side": "right", "role": "machine-output", "entity_name": "transport-belt", "x": 2, "y": 2, "direction": DIR_EAST, "source": "fixture"},
+                ],
+                "port_counts": [("right:machine-output", 1)],
+                "source": "fixture",
+                "path": "/fanin-pickup-guard",
+            }
+        ],
+    }
+    fanin_pickup_guard_mappings = [
+        {
+            "fingerprint": "fanin-pickup-guard-template",
+            "layout": {
+                "entities": [
+                    {"name": "assembling-machine-3", "x": 0, "y": 2, "direction": None, "recipe": "iron-gear-wheel", "recipe_quality": None, "quality": None},
+                    {"name": "fast-inserter", "x": 1, "y": 2, "direction": DIR_WEST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "transport-belt", "x": 2, "y": 2, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, fanin_pickup_guard_summary = materialize_layout_with_summary(
+        fanin_pickup_guard_layout,
+        fanin_pickup_guard_mappings,
+        label="fixture-fanin-pickup-guard",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    fanin_routes = fanin_pickup_guard_summary.get("output_fanins") or []
+    blocked_pickup = (12.0, 6.0)
+    if (
+        len(fanin_routes) != 1
+        or not str(fanin_routes[0].get("route_kind") or "").startswith("output-fanin-detour")
+        or any((float(position[0]), float(position[1])) == blocked_pickup for position in fanin_routes[0].get("route_positions") or [])
+    ):
+        print(f"FAIL: expected output fan-in to detour around machine-output pickup position {blocked_pickup}: {fanin_pickup_guard_summary}")
         return 1
 
     semantic_fail_mappings = [
