@@ -72,6 +72,13 @@ def output_preseparation_exposure(summary: dict[str, Any]) -> list[dict[str, Any
     return list(audit or [])
 
 
+def output_separations(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    separations = summary.get("output_separations")
+    if separations is None:
+        separations = (summary.get("connector_summary") or {}).get("output_separations")
+    return list(separations or [])
+
+
 def runtime_proof(summary: dict[str, Any], runtime_proof_path: Path | None) -> dict[str, Any] | None:
     if runtime_proof_path is not None:
         return load_json(runtime_proof_path)
@@ -99,12 +106,17 @@ def candidate_score(candidate: dict[str, Any]) -> list[float]:
     decay_penalty = 1.0 if target_rate > 0 and last_window_deficit > max(1.0, target_rate * DECAY_DEFICIT_RATIO) else 0.0
     mixed_overloaded_exposure = int(exposure_counts.get("mixed-overloaded-before-separation") or 0)
     target_overloaded_after_preseparation = int(exposure_counts.get("target-overloaded-after-pre-fanin-separation") or 0)
+    output_separation_handling_counts = candidate.get("output_separation_handling_counts") or {}
+    pre_fanin_finite_overflow = int(output_separation_handling_counts.get("pre-fanin-finite-overflow-buffer") or 0)
+    finite_overflow = int(output_separation_handling_counts.get("finite-overflow-buffer") or 0)
     return [
         float(RUNTIME_STATUS_RANK.get(runtime_status, 5)),
         decay_penalty,
         best_window_deficit,
         last_window_deficit,
         float(CAPACITY_STATUS_RANK.get(capacity.get("status"), 5)),
+        float(pre_fanin_finite_overflow),
+        float(finite_overflow),
         float(mixed_overloaded_exposure),
         float(target_overloaded_after_preseparation),
         float(CONTRACT_STATUS_RANK.get(contract.get("status"), 5)),
@@ -206,6 +218,7 @@ def summarize_candidate(
     capacity = output_capacity(summary) or {}
     lane_load = output_lane_load(summary)
     preseparation_exposure = output_preseparation_exposure(summary)
+    separations = output_separations(summary)
     width = float(summary.get("width") or 0.0)
     height = float(summary.get("height") or 0.0)
     candidate = {
@@ -231,6 +244,10 @@ def summarize_candidate(
             for status in sorted({str(item.get("status") or "unknown") for item in preseparation_exposure})
         },
         "output_preseparation_exposure_audit": preseparation_exposure,
+        "output_separation_handling_counts": {
+            handling: sum(1 for item in separations if item.get("current_handling") == handling)
+            for handling in sorted({str(item.get("current_handling") or "unknown") for item in separations})
+        },
         "runtime_proof": proof,
     }
     candidate["runtime_gap_analysis"] = runtime_gap_analysis(candidate)
@@ -281,6 +298,17 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     mixed_overloaded_exposure = exposure_counts.get("mixed-overloaded-before-separation", 0)
     target_overloaded_after_preseparation = exposure_counts.get("target-overloaded-after-pre-fanin-separation", 0)
     preseparated_exposure = exposure_counts.get("preseparated-before-fanin", 0)
+    output_separation_handling_counts = candidate.get("output_separation_handling_counts") or {}
+    pre_fanin_finite_overflow = output_separation_handling_counts.get("pre-fanin-finite-overflow-buffer", 0)
+    finite_overflow = output_separation_handling_counts.get("finite-overflow-buffer", 0)
+    if pre_fanin_finite_overflow:
+        lessons.append(
+            f"{pre_fanin_finite_overflow} pre-fanin byproduct separator(s) still use finite overflow buffers; recycle stability is unresolved"
+        )
+    if finite_overflow:
+        lessons.append(
+            f"{finite_overflow} output byproduct separator(s) still use finite overflow buffers"
+        )
     if mixed_overloaded_exposure:
         lessons.append(
             f"{mixed_overloaded_exposure} output route(s) are overloaded and merge multiple production instances before target/byproduct separation"

@@ -25,7 +25,7 @@ from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, materialize_machine_output_expansions, prune_template_entities_for_recipe, select_best_materialized_layout
+from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, materialize_machine_output_expansions, materialized_layout_score, prune_template_entities_for_recipe, select_best_materialized_layout
 from tools.blueprint_lab.factorio_validate import (
     effective_runtime_audit_wait_ticks,
     render_control_lua,
@@ -466,6 +466,7 @@ def main() -> int:
                 "route_status_counts": {"connected": 1},
                 "boundary_contract_audit": [{"boundary": "output:iron-gear-wheel", "status": "exact", "expected_belt_count": 1, "route_count": 1}],
                 "boundary_capacity_audit": [{"boundary": "output:iron-gear-wheel", "status": "sufficient", "proven_capacity_per_minute": 150, "required_rate_per_minute": 150}],
+                "output_separations": [{"current_handling": "pre-fanin-finite-overflow-buffer", "status": "connected"}],
             },
             ensure_ascii=False,
         ),
@@ -501,6 +502,8 @@ def main() -> int:
         or comparison["candidates"][1]["runtime_gap_analysis"]["category"] != "strict-near-miss"
         or comparison["candidates"][1]["runtime_gap_analysis"]["next_action"] != "tune-final-two-belt-compression-geometry"
         or "strict near-miss" not in "\n".join(comparison["candidates"][1]["lessons"])
+        or comparison["candidates"][1]["output_separation_handling_counts"].get("pre-fanin-finite-overflow-buffer") != 1
+        or "pre-fanin byproduct separator" not in "\n".join(comparison["candidates"][1]["lessons"])
     ):
         print(f"FAIL: expected stage4 comparison to prefer runtime-proven candidate over exact unresolved candidate: {comparison}")
         return 1
@@ -1570,6 +1573,7 @@ def main() -> int:
         or pre_fanin_separations[0]["status"] != "connected"
         or pre_fanin_separations[0]["current_handling"] != "pre-fanin-recycle-return-to-input-boundary"
         or pre_fanin_separations[0]["recycle_flow_audit"]["status"] != "pass"
+        or "blocked_recycle_attempt_count" not in pre_fanin_separations[0]
         or pre_fanin_separations[0]["from_instance"] != 0
         or pre_fanin_separations[0]["to_instance"] != 1
         or len(pre_fanin_exposure) != 1
@@ -1579,6 +1583,33 @@ def main() -> int:
         or pre_fanin_exposure[0]["recommendation"] != "pre-fanin-separation-removes-mixed-byproducts-but-still-needs-runtime-proof"
     ):
         print(f"FAIL: expected pre-fanin separation to mark fan-in sources as separated before mixed output merge: {byproduct_preseparated_summary}")
+        return 1
+    score_fixture = {
+        "width": 10,
+        "height": 10,
+        "entity_count": 1,
+        "connector_summary": {
+            "collisions": [],
+            "belt_flow_audit": [],
+            "boundary_capacity_audit": [],
+            "boundary_contract_audit": [],
+            "output_lane_load_audit": [],
+            "output_boundary_compressors": [],
+            "output_preseparation_exposure_audit": [],
+            "boundary_coverage": [],
+            "routes": [],
+            "connectors_added": 0,
+            "output_separations": [
+                {"status": "connected", "current_handling": "pre-fanin-recycle-return-to-input-boundary"},
+            ],
+        },
+    }
+    finite_score_fixture = deepcopy(score_fixture)
+    finite_score_fixture["connector_summary"]["output_separations"] = [
+        {"status": "connected", "current_handling": "pre-fanin-finite-overflow-buffer"},
+    ]
+    if materialized_layout_score(finite_score_fixture) <= materialized_layout_score(score_fixture):
+        print("FAIL: expected materialized layout score to penalize pre-fanin finite overflow buffers")
         return 1
     byproduct_overloaded_layout = deepcopy(byproduct_replicated_layout)
     byproduct_overloaded_layout["target_rate_per_minute"] = 7200

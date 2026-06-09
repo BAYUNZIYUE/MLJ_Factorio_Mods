@@ -2458,6 +2458,20 @@ def add_boundary_connectors(
                     candidates.append(positions)
             return candidates
 
+        def blocked_recycle_attempt(
+            route_kind: str,
+            collisions: list[dict[str, Any]],
+            merge_target: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            attempt: dict[str, Any] = {
+                "route_kind": route_kind,
+                "collision_count": len(collisions),
+                "collisions": collisions[:5],
+            }
+            if merge_target is not None:
+                attempt["recycle_merge_target"] = merge_target
+            return attempt
+
         def matching_audits_for_target(target_item: str) -> list[dict[str, Any]]:
             return [
                 item
@@ -2599,6 +2613,7 @@ def add_boundary_connectors(
                 recycle_exit: dict[str, Any] | None = None
                 recycle_flow_audit: dict[str, Any] | None = None
                 recycle_merge_target: dict[str, Any] | None = None
+                blocked_recycle_attempts: list[dict[str, Any]] = []
                 recyclable_byproducts = sorted(
                     {
                         str(byproduct)
@@ -2613,7 +2628,6 @@ def add_boundary_connectors(
                 )
                 input_sides = recyclable_input_sides(matching_audits)
                 if recommended_handling == "recycle-to-input-boundary" and "left" in input_sides:
-                    blocked_recycle_attempts = []
                     for merge_target, recycle_positions in recycle_merge_candidates(
                         splitter_x,
                         overflow_y,
@@ -2642,7 +2656,13 @@ def add_boundary_connectors(
                             recycle_merge_target = merge_target
                             recycle_flow_audit = audit_exact_route_positions("pre-fanin-output-byproduct-recycle-merge", recycle_positions)
                             break
-                        blocked_recycle_attempts.append({"collisions": candidate_collisions})
+                        blocked_recycle_attempts.append(
+                            blocked_recycle_attempt(
+                                "pre-fanin-output-byproduct-filter-splitter-recycle-merge",
+                                candidate_collisions,
+                                merge_target,
+                            )
+                        )
                     if current_handling != "pre-fanin-recycle-merge-to-input-boundary":
                         for recycle_positions in recycle_return_candidates(splitter_x, overflow_y, belt_name, boundary):
                             candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
@@ -2655,7 +2675,12 @@ def add_boundary_connectors(
                                 recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "left"}
                                 recycle_flow_audit = audit_exact_route_positions("pre-fanin-output-byproduct-recycle-return", recycle_positions)
                                 break
-                            blocked_recycle_attempts.append({"collisions": candidate_collisions})
+                            blocked_recycle_attempts.append(
+                                blocked_recycle_attempt(
+                                    "pre-fanin-output-byproduct-filter-splitter-recycle-return",
+                                    candidate_collisions,
+                                )
+                            )
                         if current_handling == "pre-fanin-finite-overflow-buffer" and blocked_recycle_attempts:
                             route_collisions = blocked_recycle_attempts[-1]["collisions"]
                 if current_handling == "pre-fanin-finite-overflow-buffer":
@@ -2696,6 +2721,8 @@ def add_boundary_connectors(
                         "recycle_exit": recycle_exit,
                         "recycle_merge_target": recycle_merge_target,
                         "recycle_flow_audit": recycle_flow_audit,
+                        "blocked_recycle_attempt_count": len(blocked_recycle_attempts),
+                        "blocked_recycle_attempts": blocked_recycle_attempts[:3],
                         "from_instance": fanin.get("from_instance"),
                         "to_instance": fanin.get("to_instance"),
                         "existing_belts_used": existing_belts_used,
@@ -2835,8 +2862,8 @@ def add_boundary_connectors(
             recycle_exit: dict[str, Any] | None = None
             recycle_flow_audit: dict[str, Any] | None = None
             recycle_merge_target: dict[str, Any] | None = None
+            blocked_recycle_attempts: list[dict[str, Any]] = []
             if recommended_handling == "recycle-to-input-boundary" and "left" in input_sides:
-                blocked_recycle_attempts = []
                 for merge_target, recycle_positions in recycle_merge_candidates(
                     splitter_x,
                     overflow_y,
@@ -2864,7 +2891,13 @@ def add_boundary_connectors(
                         recycle_merge_target = merge_target
                         recycle_flow_audit = audit_exact_route_positions("output-byproduct-recycle-merge", recycle_positions)
                         break
-                    blocked_recycle_attempts.append({"collisions": candidate_collisions})
+                    blocked_recycle_attempts.append(
+                        blocked_recycle_attempt(
+                            "output-byproduct-filter-splitter-recycle-merge",
+                            candidate_collisions,
+                            merge_target,
+                        )
+                    )
                 if current_handling != "recycle-merge-to-input-boundary":
                     for recycle_positions in recycle_return_candidates(splitter_x, overflow_y, belt_name, boundary):
                         candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
@@ -2876,7 +2909,12 @@ def add_boundary_connectors(
                             recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "left"}
                             recycle_flow_audit = audit_exact_route_positions("output-byproduct-recycle-return", recycle_positions)
                             break
-                        blocked_recycle_attempts.append({"collisions": candidate_collisions})
+                        blocked_recycle_attempts.append(
+                            blocked_recycle_attempt(
+                                "output-byproduct-filter-splitter-recycle-return",
+                                candidate_collisions,
+                            )
+                        )
                 if current_handling == "finite-overflow-buffer":
                     route_collisions = blocked_recycle_attempts[-1]["collisions"] if blocked_recycle_attempts else []
 
@@ -2912,6 +2950,8 @@ def add_boundary_connectors(
                     "recycle_exit": recycle_exit,
                     "recycle_merge_target": recycle_merge_target,
                     "recycle_flow_audit": recycle_flow_audit,
+                    "blocked_recycle_attempt_count": len(blocked_recycle_attempts),
+                    "blocked_recycle_attempts": blocked_recycle_attempts[:3],
                     "existing_belts_used": existing_belts_used,
                     "collisions": route_collisions,
                     "route_kind": (
@@ -4359,7 +4399,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     finite_or_blocked_output_separations = sum(
         1
         for item in output_separations
-        if item.get("status") != "connected" or item.get("current_handling") == "finite-overflow-buffer"
+        if item.get("status") != "connected" or str(item.get("current_handling") or "").endswith("finite-overflow-buffer")
     )
     blocked_output_boundary_compressors = sum(
         1
@@ -4868,6 +4908,15 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             if item.get("recycle_flow_audit"):
                 audit = item["recycle_flow_audit"]
                 line += f" recycle_flow={audit.get('status')} recycle_positions={audit.get('positions_checked')}"
+            if item.get("blocked_recycle_attempt_count"):
+                line += f" blocked_recycle_attempts={item['blocked_recycle_attempt_count']}"
+                attempts = item.get("blocked_recycle_attempts") or []
+                first_collision = ((attempts[0] or {}).get("collisions") or [None])[0] if attempts else None
+                if first_collision:
+                    line += (
+                        f" first_block=({first_collision.get('x')},{first_collision.get('y')})"
+                        f"/{first_collision.get('reason')}"
+                    )
             if item.get("existing_belts_used"):
                 line += f" existing_belts={item['existing_belts_used']}"
             if item.get("reason"):
