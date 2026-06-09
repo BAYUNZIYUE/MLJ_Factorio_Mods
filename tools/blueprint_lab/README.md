@@ -23,6 +23,7 @@ tree.
 - Audit production-machine inserter endpoints against data.raw entity boxes, so generated reports can distinguish target machines with belt-fed input/output from copied but disconnected machines.
 - Upgrade target recipe machine-to-belt output inserters to the strongest same-geometry inserter known in data.raw, preferring `stack-inserter` over `bulk-inserter` when both are available.
 - Audit per-output-lane planned load after fan-in reachability, so reports can catch cases where total boundary capacity is sufficient but one lane is overloaded while another lane is underused.
+- Audit output routes before target/byproduct separation, so strict-boundary near-miss reports can show when several production instances have already been merged before the filter splitter.
 - Audit target recipes for item byproducts that are not the requested output, including whether a byproduct is also a same-recipe input that should be recycled to the input boundary.
 - Insert target-item filter splitters on output routes when a target recipe has item byproducts; the current separator keeps the target item on the main output route and sends byproducts into a non-boundary overflow lane while reporting whether that overflow is only a temporary stand-in for recycling.
 - Import a generated blueprint through a real Factorio runtime scenario and attempt to build it on the matching surface type. Space platform blueprints are validated on a temporary space platform with foundation tiles pre-placed before entity building is attempted; if `build_blueprint` returns zero entities, the validator can fall back to direct `surface.create_entity` placement to prove the entity names, qualities, recipe qualities, underground-belt endpoint types, module item stacks, and occupied positions are accepted by the current game runtime.
@@ -533,6 +534,18 @@ A 2400-tick runtime probe of `--row-spacing 3.0` reached only `7092/min` in its
 best window. The current evidence says spacing and separator position are
 secondary parameters; strict two-belt output needs a different merge/compression
 topology or earlier target/byproduct split, not a larger spacing sweep.
+
+The materialized reports now include an Output Pre-separation Exposure audit to
+make that topology problem explicit. On the forced 3x2 exact `iron-ore`
+candidate, both final output routes are reported as
+`mixed-before-separation`: the top route covers instances `[0, 1, 2]` and the
+bottom route covers `[3, 4, 5]`, each with two fan-in segments before the
+target-item filter splitter at `x=47.5`. This explains why the offline contract
+can look exact while runtime still misses a few items per window: target and
+recyclable byproduct traffic are merged across several crushers before the
+first separation point. The next generator attempt should either split
+target/byproduct output before fan-in or replace this row fan-in with a
+runtime-proven lane-aware compressor.
 
 Two follow-up probes narrowed the next design space. First, routing experimental
 new drop belts back into the main output lane made the extra inserters visible

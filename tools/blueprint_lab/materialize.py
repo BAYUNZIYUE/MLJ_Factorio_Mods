@@ -1033,6 +1033,7 @@ def add_boundary_connectors(
             "boundary_coverage": [],
             "boundary_capacity_audit": [],
             "boundary_contract_audit": [],
+            "output_preseparation_exposure_audit": [],
             "output_lane_load_audit": [],
             "output_byproduct_audit": [],
             "belt_flow_audit": [],
@@ -2626,6 +2627,7 @@ def add_boundary_connectors(
                     "recommended_handling": recommended_handling,
                     "current_handling": current_handling,
                     "recyclable_byproducts": recyclable_byproducts,
+                    "route_y": route_y,
                     "overflow_y": overflow_y,
                     "overflow_belts_added": belts_added if current_handling == "finite-overflow-buffer" else 0,
                     "recycle_belts_added": belts_added if current_handling == "recycle-return-to-input-boundary" else 0,
@@ -3582,11 +3584,97 @@ def add_boundary_connectors(
             )
         return audits
 
+    def output_preseparation_exposure_audit() -> list[dict[str, Any]]:
+        if knowledge is None or not pending_byproduct_audit:
+            return []
+        node_index = {
+            str(node.get("fingerprint")): node
+            for node in layout_plan.get("nodes") or []
+            if node.get("fingerprint") is not None
+        }
+        byproducts_by_target = {
+            str(item.get("target_item") or ""): [
+                str(byproduct.get("item") or "")
+                for byproduct in item.get("byproducts") or []
+                if byproduct.get("item")
+            ]
+            for item in pending_byproduct_audit
+            if item.get("target_item")
+        }
+        separator_by_route: dict[tuple[str, float], dict[str, Any]] = {}
+        for separation in output_separations:
+            boundary = str(separation.get("boundary") or "")
+            route_y = separation.get("route_y")
+            if not boundary or route_y is None:
+                continue
+            separator_by_route[(boundary, round(float(route_y), 3))] = separation
+
+        audits: list[dict[str, Any]] = []
+        for boundary in sorted(byproducts_by_target):
+            if not boundary:
+                continue
+            output_boundary = f"output:{boundary}"
+            for route in routes_for_production_audit(output_boundary):
+                if route.get("status") != "connected" or not route.get("port"):
+                    continue
+                port = route["port"]
+                fingerprint = str(port.get("node_fingerprint") or "")
+                node = node_index.get(fingerprint)
+                if node is None:
+                    continue
+                start_instance = int(port.get("node_instance") or 0)
+                route_y = round(float(port.get("y") or 0.0), 3)
+                covered_instances = reachable_instances(
+                    start_instance,
+                    bridge_edges_for_node(fingerprint, route_y),
+                    direction="reverse",
+                )
+                fanin_segments = [
+                    item
+                    for item in output_fanins
+                    if item.get("status") == "connected"
+                    and str(item.get("boundary") or "") == output_boundary
+                    and str(item.get("node_fingerprint") or "") == fingerprint
+                    and round(float(item.get("fanin_y") or 0.0), 3) == route_y
+                ]
+                separator = separator_by_route.get((output_boundary, route_y))
+                status = (
+                    "mixed-before-separation"
+                    if len(covered_instances) > 1 and separator is not None
+                    else "single-source-before-separation"
+                    if separator is not None
+                    else "no-target-separator"
+                )
+                audits.append(
+                    {
+                        "boundary": output_boundary,
+                        "status": status,
+                        "node_item": node.get("item"),
+                        "node_recipe": node.get("recipe"),
+                        "node_fingerprint": fingerprint,
+                        "route_y": route_y,
+                        "start_instance": start_instance,
+                        "covered_instances": covered_instances,
+                        "covered_instance_count": len(covered_instances),
+                        "fanin_segment_count": len(fanin_segments),
+                        "byproducts": byproducts_by_target[boundary],
+                        "separator_x": separator.get("splitter_x") if separator else None,
+                        "separator_handling": separator.get("current_handling") if separator else None,
+                        "recommendation": (
+                            "split-target-and-byproduct-before-output-fanin-or-use-runtime-proven-lane-aware-compression"
+                            if len(covered_instances) > 1
+                            else "current-separator-is-after-a-single-source-output-route"
+                        ),
+                    }
+                )
+        return audits
+
     coverage = boundary_coverage()
     flow_audit = belt_flow_audit()
     capacity_audit = boundary_capacity_audit(flow_audit)
     contract_audit = boundary_contract_audit()
     lane_load_audit = output_lane_load_audit()
+    preseparation_exposure_audit = output_preseparation_exposure_audit()
     byproduct_audit = output_byproduct_audit()
     entities.extend(connectors)
     return {
@@ -3608,6 +3696,7 @@ def add_boundary_connectors(
         "boundary_coverage": coverage,
         "boundary_capacity_audit": capacity_audit,
         "boundary_contract_audit": contract_audit,
+        "output_preseparation_exposure_audit": preseparation_exposure_audit,
         "output_lane_load_audit": lane_load_audit,
         "output_byproduct_audit": byproduct_audit,
         "belt_flow_audit": flow_audit,
@@ -3737,6 +3826,7 @@ def materialize_layout_with_summary(
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
+        "output_preseparation_exposure_audit": [],
         "output_lane_load_audit": [],
         "output_byproduct_audit": [],
         "belt_flow_audit": [],
@@ -4079,6 +4169,7 @@ def render_summary(
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
+        "output_preseparation_exposure_audit": [],
         "output_lane_load_audit": [],
         "output_byproduct_audit": [],
         "belt_flow_audit": [],
@@ -4316,6 +4407,16 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"instances={item.get('covered_instances')} load={item.get('load_rate_per_minute', 0):g}/min "
                 f"capacity={item.get('lane_capacity_per_minute', 0):g}/min "
                 f"overload={item.get('overload_per_minute', 0):g}/min"
+            )
+    if summary["connector_summary"].get("output_preseparation_exposure_audit"):
+        lines.extend(["", "## Output Pre-separation Exposure Audit", ""])
+        for item in summary["connector_summary"]["output_preseparation_exposure_audit"]:
+            byproducts = ",".join(item.get("byproducts") or [])
+            lines.append(
+                f"- {item.get('boundary')} y={item.get('route_y')}: status={item.get('status')} "
+                f"instances={item.get('covered_instances')} fanins={item.get('fanin_segment_count')} "
+                f"separator_x={item.get('separator_x')} byproducts={byproducts} "
+                f"next={item.get('recommendation')}"
             )
     if summary["connector_summary"].get("output_byproduct_audit"):
         lines.extend(["", "## Output Byproduct Audit", ""])

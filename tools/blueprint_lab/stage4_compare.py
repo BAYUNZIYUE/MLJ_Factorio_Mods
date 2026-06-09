@@ -64,6 +64,13 @@ def output_lane_load(summary: dict[str, Any]) -> list[dict[str, Any]]:
     return list(audit or [])
 
 
+def output_preseparation_exposure(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    audit = summary.get("output_preseparation_exposure_audit")
+    if audit is None:
+        audit = (summary.get("connector_summary") or {}).get("output_preseparation_exposure_audit")
+    return list(audit or [])
+
+
 def runtime_proof(summary: dict[str, Any], runtime_proof_path: Path | None) -> dict[str, Any] | None:
     if runtime_proof_path is not None:
         return load_json(runtime_proof_path)
@@ -167,6 +174,7 @@ def summarize_candidate(
     contract = output_contract(summary) or {}
     capacity = output_capacity(summary) or {}
     lane_load = output_lane_load(summary)
+    preseparation_exposure = output_preseparation_exposure(summary)
     width = float(summary.get("width") or 0.0)
     height = float(summary.get("height") or 0.0)
     candidate = {
@@ -187,6 +195,11 @@ def summarize_candidate(
             status: sum(1 for item in lane_load if item.get("status") == status)
             for status in sorted({str(item.get("status") or "unknown") for item in lane_load})
         },
+        "output_preseparation_exposure_status_counts": {
+            status: sum(1 for item in preseparation_exposure if item.get("status") == status)
+            for status in sorted({str(item.get("status") or "unknown") for item in preseparation_exposure})
+        },
+        "output_preseparation_exposure_audit": preseparation_exposure,
         "runtime_proof": proof,
     }
     candidate["runtime_gap_analysis"] = runtime_gap_analysis(candidate)
@@ -227,6 +240,11 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     if gap.get("near_miss"):
         lessons.append(
             f"strict near-miss: exact boundary is clean, invalid output inserters are zero, and best window is short by {gap.get('best_window_deficit_per_minute')}/min"
+        )
+    mixed_exposure = (candidate.get("output_preseparation_exposure_status_counts") or {}).get("mixed-before-separation", 0)
+    if mixed_exposure:
+        lessons.append(
+            f"{mixed_exposure} output route(s) merge multiple production instances before target/byproduct separation"
         )
     return lessons
 
@@ -289,6 +307,7 @@ def render_markdown_report(comparison: dict[str, Any]) -> str:
         best_window = window_diagnostics.get("best_window") or {}
         last_window = window_diagnostics.get("last_window") or {}
         gap = candidate.get("runtime_gap_analysis") or {}
+        exposure_counts = candidate.get("output_preseparation_exposure_status_counts") or {}
         lines.extend(
             [
                 f"### {candidate['label']}",
@@ -303,6 +322,7 @@ def render_markdown_report(comparison: dict[str, Any]) -> str:
                 f"- Runtime windows at target: {window_diagnostics.get('windows_at_or_above_target', 'unknown')}/{window_diagnostics.get('window_count', 'unknown')}",
                 f"- Runtime output lines: {lane_summary.get('line_count', 'unknown')} spread={lane_summary.get('spread_target_items', 'unknown')}",
                 f"- Runtime gap category: {gap.get('category', 'unknown')} next={gap.get('next_action', 'unknown')}",
+                f"- Output pre-separation exposure: {exposure_counts}",
                 f"- Bounds: {candidate.get('width'):g} x {candidate.get('height'):g}",
             ]
         )

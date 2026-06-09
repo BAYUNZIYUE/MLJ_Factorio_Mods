@@ -1479,6 +1479,30 @@ def main() -> int:
     ):
         print(f"FAIL: expected byproduct output route to build a recycle return route for byproduct-as-input: {byproduct_summary} {byproduct_wrapper}")
         return 1
+    byproduct_replicated_layout = deepcopy(byproduct_layout)
+    byproduct_replicated_layout["estimated_width"] = 26
+    byproduct_replicated_layout["nodes"][0]["instances"] = 2
+    byproduct_replicated_layout["nodes"][0]["columns"] = 2
+    byproduct_replicated_layout["nodes"][0]["planned_width"] = 10
+    byproduct_replicated_layout["nodes"][0]["planned_net_output_per_minute"] = 3600
+    _, byproduct_replicated_summary = materialize_layout_with_summary(
+        byproduct_replicated_layout,
+        byproduct_mappings,
+        label="fixture-byproduct-preseparation-exposure",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    exposure_audit = byproduct_replicated_summary["output_preseparation_exposure_audit"]
+    if (
+        len(exposure_audit) != 1
+        or exposure_audit[0]["status"] != "mixed-before-separation"
+        or exposure_audit[0]["covered_instances"] != [0, 1]
+        or exposure_audit[0]["fanin_segment_count"] != 1
+        or exposure_audit[0]["byproducts"] != ["metallic-asteroid-chunk"]
+        or exposure_audit[0]["recommendation"] != "split-target-and-byproduct-before-output-fanin-or-use-runtime-proven-lane-aware-compression"
+    ):
+        print(f"FAIL: expected byproduct fan-in exposure audit to flag mixed output before the target splitter: {byproduct_replicated_summary}")
+        return 1
     capacity_unresolved_lane_mappings = deepcopy(capacity_multi_lane_mappings)
     capacity_unresolved_lane_mappings[0]["layout"]["entities"][-1] = {
         "name": "turbo-splitter",

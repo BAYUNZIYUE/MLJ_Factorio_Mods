@@ -127,6 +127,7 @@ def package_summary(package: dict[str, Any], *, blueprint_output: Path | None = 
         "boundary_contract_audit": materialized["connector_summary"].get("boundary_contract_audit") or [],
         "boundary_capacity_audit": materialized["connector_summary"].get("boundary_capacity_audit") or [],
         "output_lane_load_audit": materialized["connector_summary"].get("output_lane_load_audit") or [],
+        "output_preseparation_exposure_audit": materialized["connector_summary"].get("output_preseparation_exposure_audit") or [],
         "module_library": stage4.get("module_library"),
         "runtime_proof": package.get("runtime_proof"),
         "stage4_design_decisions": stage4.get("design_decisions") or [],
@@ -163,6 +164,14 @@ def render_package_markdown(package: dict[str, Any], *, blueprint_output: Path |
             f"proven={item.get('proven_capacity_per_minute', 0):g}/min "
             f"required={item.get('required_rate_per_minute', 0):g}/min"
         )
+    if summary["output_preseparation_exposure_audit"]:
+        lines.extend(["", "## Output Pre-separation Exposure", ""])
+        for item in summary["output_preseparation_exposure_audit"]:
+            lines.append(
+                f"- {item.get('boundary')} y={item.get('route_y')}: status={item.get('status')} "
+                f"instances={item.get('covered_instances')} fanins={item.get('fanin_segment_count')} "
+                f"separator_x={item.get('separator_x')}"
+            )
     lines.extend(["", "## Module Library", ""])
     module_library = summary.get("module_library") or {}
     lines.append(
