@@ -290,6 +290,43 @@ def main() -> int:
     if knowledge.belt("turbo-underground-belt") is None or knowledge.belt("turbo-underground-belt").max_underground_distance != 11:
         print(f"FAIL: expected data.raw fixture to import underground belt max_distance: {knowledge.belts}")
         return 1
+    recipe_tmp = ROOT / ".codex" / "tests" / "blueprint_lab_recipe_template.txt"
+    recipe_grid_entities = []
+    for row in range(6):
+        for column in range(10):
+            recipe_grid_entities.append(
+                {
+                    "entity_number": len(recipe_grid_entities) + 1,
+                    "name": "assembling-machine-3",
+                    "position": {"x": 1 + column * 4, "y": 1 + row * 4},
+                    "recipe": "iron-gear-wheel",
+                    "items": [{"id": {"name": "speed-module-3"}, "items": {"in_inventory": [{"inventory": 4, "stack": 0}]}}],
+                }
+            )
+    recipe_tmp.write_text(
+        encode_blueprint_string(
+            {
+                "blueprint": {
+                    "item": "blueprint",
+                    "label": "fixture-iron-gear-wheel-module",
+                    "entities": recipe_grid_entities,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    stage4_with_data = build_stage4_report([recipe_tmp], top=3, data_raw_json=data_raw_path, cell_size=4)
+    module_library = stage4_with_data.get("module_library") or {}
+    produced_items = {item["item"]: item for item in module_library.get("produced_items") or []}
+    gear_options = produced_items.get("iron-gear-wheel", {}).get("best_options") or []
+    if (
+        module_library.get("produced_item_count", 0) < 1
+        or "iron-gear-wheel" not in produced_items
+        or gear_options[0]["recipe"] != "iron-gear-wheel"
+        or gear_options[0]["net_target_rate_per_instance"] <= 0
+    ):
+        print(f"FAIL: expected stage4 data.raw module library to expose iron-gear-wheel production options: {stage4_with_data}")
+        return 1
     io_audit = audit_machine_io(
         {
             "blueprint": {

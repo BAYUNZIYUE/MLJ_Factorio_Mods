@@ -657,6 +657,13 @@ Build the current stage-4 strategy report from the local corpus:
 python3 -m tools.blueprint_lab.stage4_report /mnt/d/Desktop/游戏/异星工厂/蓝图 --top 8 --json-output .codex/tests/blueprint-stage4-report-summary.json --markdown-output .codex/tests/blueprint-stage4-report.md
 ```
 
+Add current game prototype knowledge to the same report so it can list resolved
+production module candidates:
+
+```bash
+python3 -m tools.blueprint_lab.stage4_report /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /mnt/d/project/factorio/metatorio-calc/assets/data-raw-dump.json --top 8 --cell-size 16 --json-output .codex/tests/blueprint-stage4-report-with-data-summary.json --markdown-output .codex/tests/blueprint-stage4-report-with-data.md
+```
+
 Generate the current seed blueprint:
 
 ```bash
