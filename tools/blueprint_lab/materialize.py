@@ -2838,6 +2838,8 @@ def add_boundary_connectors(
                         "y": output_y,
                     },
                     "route_kind": "output-boundary-compressor-output",
+                    "capacity_proof": "runtime-unproven-compressor",
+                    "capacity_proof_reason": "generic-3-to-2-compressor-collapsed-three-internal-lanes-to-about-one-turbo-belt-in-runtime-probe",
                     "route_positions": output_route_positions,
                 }
             )
@@ -2848,6 +2850,9 @@ def add_boundary_connectors(
                 "status": "connected",
                 "strategy": "corpus-3-to-2-throughput-balancer",
                 "source": "raynquist-fall-2024-3_2_tu_balancer-rotated",
+                "runtime_status": "known-insufficient",
+                "runtime_evidence": "right-boundary windows stabilized near 3540-3600/min; probe x=111.5 showed the generic compressor entry already collapsed to one turbo belt",
+                "capacity_proof": "unresolved",
                 "input_route_ys": [round(float((route.get("port") or {}).get("y") or 0.0), 3) for route in selected_routes],
                 "compressor_input_ys": input_ys,
                 "compressor_output_ys": output_ys,
@@ -2947,6 +2952,13 @@ def add_boundary_connectors(
                 instance = int(port.get("node_instance") or 0)
                 route_y = round(float(port.get("y") or 0.0), 3)
                 flow_status = flow_status_by_route.get((boundary, fingerprint, instance, route_y), "unknown")
+                flow_reason = None
+                if (
+                    route.get("route_kind") == "output-boundary-compressor-output"
+                    and route.get("capacity_proof") != "proven"
+                ):
+                    flow_status = "unresolved"
+                    flow_reason = str(route.get("capacity_proof_reason") or "compressor-runtime-capacity-unproven")
                 belt_name = connector_belt_name_for_port(port)
                 belt = knowledge.belt(belt_name)
                 key = (boundary, fingerprint)
@@ -2988,6 +3000,7 @@ def add_boundary_connectors(
                         "belt_name": belt_name,
                         "flow_status": flow_status,
                         "capacity_per_minute": capacity,
+                        **({"flow_reason": flow_reason} if flow_reason else {}),
                     }
                 )
                 required_rate = route_boundary_rate(route)
@@ -4337,8 +4350,14 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 line += f" input_ys={item.get('compressor_input_ys')}"
             if item.get("compressor_output_ys") is not None:
                 line += f" output_ys={item.get('compressor_output_ys')}"
+            if item.get("runtime_status"):
+                line += f" runtime_status={item.get('runtime_status')}"
+            if item.get("capacity_proof"):
+                line += f" capacity_proof={item.get('capacity_proof')}"
             if item.get("reason"):
                 line += f" reason={item.get('reason')}"
+            if item.get("runtime_evidence"):
+                line += f" evidence={item.get('runtime_evidence')}"
             lines.append(line)
     if summary["connector_summary"].get("belt_flow_audit"):
         lines.extend(["", "## Belt Flow Audit", ""])
@@ -4463,7 +4482,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-output-expansions-per-machine", type=int, default=4)
     parser.add_argument("--force-columns", type=int, help="Experimental: force the single-node repeated grid to this column count instead of running post-materialization column search.")
     parser.add_argument("--output-separation-min-distance", type=float, default=1.0, help="Experimental: require this many tiles between the selected machine-output port and the target-item filter splitter.")
-    parser.add_argument("--compress-output-boundary", action="store_true", help="Experimental: keep over-provisioned internal output lanes and add a corpus-derived 3-to-2 compressor so the external boundary matches a 2-belt full-belt target.")
+    parser.add_argument("--compress-output-boundary", action="store_true", help="Experimental: try to keep over-provisioned internal output lanes and add a corpus-derived 3-to-2 compressor for a 2-belt full-belt target; generic compressors with known runtime shortfall are reported as unresolved capacity and may be rejected by layout selection.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)

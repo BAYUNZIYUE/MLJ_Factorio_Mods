@@ -528,15 +528,22 @@ The first external-boundary compressor experiment keeps the default 2x3 internal
 shape and adds a corpus-derived 3-to-2 balancer on the right side. Offline this
 looks correct: the internal three output lanes stay at `3150/min <= 3600/min`,
 the visible boundary contract becomes exactly `2x turbo-transport-belt`,
-capacity audit reports `7200/min`, connector collisions are zero, and belt flow
-audit passes. Runtime probe shows the missing piece: both the Fall 2020 style
-3-to-2 balancer and the Fall 2024 throughput-priority variant place cleanly and
-preserve `invalid_output_inserters=0`, but the right-boundary windows stabilize
-near `3600/min`, not `7200/min`. The lane marker shows all four final transport
+connector collisions are zero, and belt flow audit passes. Runtime probe shows
+the missing piece: both the Fall 2020 style 3-to-2 balancer and the Fall 2024
+throughput-priority variant place cleanly and preserve
+`invalid_output_inserters=0`, but the right-boundary windows stabilize near
+`3600/min`, not `7200/min`. The lane marker shows all four final transport
 lines participating at roughly half fill, so a normal belt balancer is not
-enough for this generator case. The next strict-boundary step must be a
-lane-aware target-output compressor or a different output unloading topology,
-not another generic 3-to-2 belt balancer.
+enough for this generator case. The materializer now marks this generic
+compressor as `runtime_status=known-insufficient` and downgrades the external
+boundary capacity proof to unresolved: the structural capacity is still two
+turbo belts, but proven capacity is not counted as `7200/min`. The next
+strict-boundary step must be a lane-aware target-output compressor or a
+different output unloading topology, not another generic 3-to-2 belt balancer.
+Because unresolved output capacity is scored worse than an over-provisioned but
+proven boundary, post-materialize layout selection will avoid this compressor by
+default. Use `--force-columns 2 --compress-output-boundary` only when explicitly
+inspecting the failed exact-boundary experiment.
 
 The follow-up diagnosis adds an exact-x throughput probe with
 `--throughput-probe-x`. It reuses the same runtime drain and lane markers, but
