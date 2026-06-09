@@ -704,6 +704,13 @@ Parse a Factorio validation log into a reusable runtime proof report:
 python3 -m tools.blueprint_lab.runtime_proof .codex/tests/factorio-probe-stage4-generate-write-data/factorio-current.log --target-item iron-ore --target-rate-per-minute 7200 --json-output .codex/tests/blueprint-stage4-generate-runtime-proof.json --markdown-output .codex/tests/blueprint-stage4-generate-runtime-proof.md
 ```
 
+The proof report also parses `right_boundary_throughput_lane_summary`. For the
+current stage-4 package proof this reports six active right-boundary transport
+lines with a `507` item spread across the full 2400-tick probe. That is useful
+diagnostic evidence: the package is runtime-proven for `7200/min`, but its
+throughput is distributed across six external output lines, so it remains an
+over-provisioned boundary rather than a strict two-belt solution.
+
 The stage-4 package command can also merge that proof back into the generated
 package summary with `--runtime-log`. Use the `factorio-current.log` under the
 isolated `--user-data-dir` when parsing markers; the `--console-log` path is a

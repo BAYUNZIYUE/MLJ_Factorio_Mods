@@ -337,8 +337,9 @@ def main() -> int:
 1.002 Script @__level__/control.lua:3: BLUEPRINT_LAB_VALIDATION manual_entities=10 manual_failures=0 manual_recipe_set=1 manual_recipe_failures=0
 2.000 Script @__level__/control.lua:4: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_summary window_ticks=300 windows=2 observed_ticks=600 probe_x=nil target_item=iron-gear-wheel target_removed=200 target_per_minute=200.0 product_items=iron-gear-wheel:200 input_items=
 2.001 Script @__level__/control.lua:5: BLUEPRINT_LAB_VALIDATION right_boundary_cleanliness status=clean product_items=5 input_items=0
-2.002 Script @__level__/control.lua:6: BLUEPRINT_LAB_VALIDATION invalid_output_inserters=0 samples=
-2.003 Script @__level__/control.lua:7: BLUEPRINT_LAB_VALIDATION success
+2.002 Script @__level__/control.lua:6: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_lane_summary target_item=iron-gear-wheel target_by_line=x=10.5/y=1.5/line=1:90,x=10.5/y=2.5/line=2:110
+2.003 Script @__level__/control.lua:7: BLUEPRINT_LAB_VALIDATION invalid_output_inserters=0 samples=
+2.004 Script @__level__/control.lua:8: BLUEPRINT_LAB_VALIDATION success
 """,
         encoding="utf-8",
     )
@@ -350,6 +351,9 @@ def main() -> int:
     if (
         runtime_proof["status"] != "runtime-proven"
         or runtime_proof["throughput_summary"]["target_per_minute"] != 200.0
+        or runtime_proof["throughput_lane_summary"]["line_count"] != 2
+        or runtime_proof["throughput_lane_summary"]["spread_target_items"] != 20
+        or runtime_proof["throughput_lane_summary"]["per_minute_by_line"]["x=10.5/y=1.5/line=1"] != 540.0
         or runtime_proof["right_boundary_cleanliness"]["status"] != "clean"
         or runtime_proof["invalid_output_inserters"]["count"] != 0
         or "Blueprint Runtime Proof Report" not in render_runtime_proof_markdown_report(runtime_proof)
@@ -379,6 +383,7 @@ def main() -> int:
         or stage4_package_summary["module_library"]["produced_item_count"] < 1
         or stage4_package["materialized_summary"]["label"] != "fixture-stage4-package"
         or stage4_package_summary["runtime_proof"]["status"] != "runtime-proven"
+        or stage4_package_summary["runtime_proof"]["throughput_lane_summary"]["line_count"] != 2
         or decode_blueprint_string(encode_blueprint_string(stage4_package["blueprint"])) != stage4_package["blueprint"]
         or "Runtime Proof" not in stage4_package_markdown
         or "Blueprint Lab Stage 4 Generation Package" not in stage4_package_markdown

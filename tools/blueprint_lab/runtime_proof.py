@@ -43,6 +43,21 @@ def parse_marker_payload(payload: str) -> dict[str, Any]:
     return values
 
 
+def parse_count_map(value: Any) -> dict[str, int]:
+    if not isinstance(value, str) or not value:
+        return {}
+    counts: dict[str, int] = {}
+    for part in value.split(","):
+        if not part or ":" not in part:
+            continue
+        key, raw_count = part.rsplit(":", 1)
+        try:
+            counts[key] = int(raw_count)
+        except ValueError:
+            continue
+    return counts
+
+
 def iter_runtime_markers(log_path: Path) -> list[dict[str, Any]]:
     markers: list[dict[str, Any]] = []
     for line_number, line in enumerate(log_path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
@@ -98,6 +113,37 @@ def runtime_proof_status(
     return "runtime-incomplete", reasons
 
 
+def line_distribution_summary(
+    lane_marker: dict[str, Any] | None,
+    *,
+    observed_ticks: int | float | None,
+) -> dict[str, Any] | None:
+    if lane_marker is None:
+        return None
+    counts = parse_count_map(lane_marker.get("target_by_line"))
+    if not counts:
+        return {
+            "line_count": 0,
+            "target_by_line": {},
+            "reason": "missing-target-by-line",
+        }
+    values = list(counts.values())
+    per_minute_by_line: dict[str, float] = {}
+    if isinstance(observed_ticks, (int, float)) and float(observed_ticks) > 0:
+        multiplier = 3600.0 / float(observed_ticks)
+        per_minute_by_line = {line: round(count * multiplier, 3) for line, count in counts.items()}
+    return {
+        "line_count": len(counts),
+        "target_by_line": counts,
+        "total_target_items": sum(values),
+        "min_target_items": min(values),
+        "max_target_items": max(values),
+        "spread_target_items": max(values) - min(values),
+        "per_minute_by_line": per_minute_by_line,
+        "line_marker": lane_marker,
+    }
+
+
 def build_runtime_proof(
     log_path: Path,
     *,
@@ -106,6 +152,7 @@ def build_runtime_proof(
 ) -> dict[str, Any]:
     markers = iter_runtime_markers(log_path)
     throughput = latest_marker(markers, "right_boundary_throughput_summary")
+    lane_summary_marker = latest_marker(markers, "right_boundary_throughput_lane_summary")
     cleanliness = latest_marker(markers, "right_boundary_cleanliness")
     invalid_output_marker = latest_marker(markers, "invalid_output_inserters")
     invalid_output_inserters = None
@@ -140,6 +187,10 @@ def build_runtime_proof(
         "blueprint_entities": latest_marker(markers, "blueprint_entities"),
         "manual_placement": latest_marker(markers, "manual_entities"),
         "throughput_summary": throughput,
+        "throughput_lane_summary": line_distribution_summary(
+            lane_summary_marker,
+            observed_ticks=throughput.get("observed_ticks") if throughput else None,
+        ),
         "right_boundary_cleanliness": cleanliness,
         "invalid_output_inserters": invalid_output_inserters,
         "recipe_machine_audit": latest_marker(markers, "recipe_machine_audit"),
@@ -150,6 +201,7 @@ def build_runtime_proof(
 
 def render_markdown_report(proof: dict[str, Any]) -> str:
     throughput = proof.get("throughput_summary") or {}
+    lane_summary = proof.get("throughput_lane_summary") or {}
     cleanliness = proof.get("right_boundary_cleanliness") or {}
     invalid_output = proof.get("invalid_output_inserters") or {}
     lines = [
@@ -163,6 +215,8 @@ def render_markdown_report(proof: dict[str, Any]) -> str:
         f"- Success marker: {proof['success_marker']}",
         f"- Throughput: {throughput.get('target_per_minute', 'unknown')}/min",
         f"- Throughput windows: {throughput.get('windows', 'unknown')}",
+        f"- Throughput lane count: {lane_summary.get('line_count', 'unknown')}",
+        f"- Throughput lane item spread: {lane_summary.get('spread_target_items', 'unknown')}",
         f"- Right boundary cleanliness: {cleanliness.get('status', 'unknown')}",
         f"- Invalid output inserters: {invalid_output.get('count', 'unknown')}",
     ]

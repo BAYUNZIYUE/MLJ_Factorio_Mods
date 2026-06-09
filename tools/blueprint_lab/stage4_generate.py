@@ -178,6 +178,7 @@ def render_package_markdown(package: dict[str, Any], *, blueprint_output: Path |
     runtime_proof = summary.get("runtime_proof")
     if runtime_proof:
         throughput = runtime_proof.get("throughput_summary") or {}
+        lane_summary = runtime_proof.get("throughput_lane_summary") or {}
         cleanliness = runtime_proof.get("right_boundary_cleanliness") or {}
         invalid_output = runtime_proof.get("invalid_output_inserters") or {}
         lines.extend(
@@ -187,6 +188,7 @@ def render_package_markdown(package: dict[str, Any], *, blueprint_output: Path |
                 "",
                 f"- status={runtime_proof.get('status')} target_rate={runtime_proof.get('target_rate_per_minute'):g}/min",
                 f"- throughput={throughput.get('target_per_minute', 'unknown')}/min windows={throughput.get('windows', 'unknown')}",
+                f"- throughput_lane_count={lane_summary.get('line_count', 'unknown')} spread={lane_summary.get('spread_target_items', 'unknown')}",
                 f"- right_boundary_cleanliness={cleanliness.get('status', 'unknown')}",
                 f"- invalid_output_inserters={invalid_output.get('count', 'unknown')}",
             ]
