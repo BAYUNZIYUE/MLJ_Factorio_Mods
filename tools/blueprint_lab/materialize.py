@@ -3941,7 +3941,12 @@ def select_best_materialized_layout(
     if base_lane_width > 0:
         force_lane_width_candidates.append(round(base_lane_width + 2.0, 3))
 
-    def materialize_candidate(columns: int, lane_width: float) -> tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    def materialize_candidate(
+        columns: int,
+        lane_width: float,
+        *,
+        candidate_compress_output_boundary: bool,
+    ) -> tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any], bool]:
         candidate_layout = layout_with_single_node_columns(layout_plan, columns, lane_width=lane_width)
         wrapper, connector_summary = materialize_layout_with_summary(
             candidate_layout,
@@ -3952,46 +3957,58 @@ def select_best_materialized_layout(
             allow_new_drop_belts=allow_new_drop_belts,
             max_output_expansions_per_machine=max_output_expansions_per_machine,
             output_separation_min_distance=output_separation_min_distance,
-            compress_output_boundary=compress_output_boundary,
+            compress_output_boundary=candidate_compress_output_boundary,
         )
         summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
-        return materialized_layout_score(summary), wrapper, connector_summary, candidate_layout
+        return materialized_layout_score(summary), wrapper, connector_summary, candidate_layout, candidate_compress_output_boundary
 
     if force_columns is not None:
         if force_columns < 1 or force_columns > max_columns:
             raise ValueError(f"force_columns must be between 1 and {max_columns}, got {force_columns}")
-        forced_best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
+        forced_best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any], bool] | None = None
         for lane_width in force_lane_width_candidates:
-            candidate = materialize_candidate(force_columns, lane_width)
+            candidate = materialize_candidate(
+                force_columns,
+                lane_width,
+                candidate_compress_output_boundary=compress_output_boundary,
+            )
             if forced_best is None or candidate[0] < forced_best[0]:
                 forced_best = candidate
         assert forced_best is not None
-        score, wrapper, connector_summary, forced_layout = forced_best
+        score, wrapper, connector_summary, forced_layout, selected_compress_output_boundary = forced_best
         forced_layout["layout_selection"] = {
             "strategy": "forced-single-node-columns",
             "candidate_count": len(force_lane_width_candidates),
             "selected_columns": forced_layout["nodes"][0]["columns"],
             "selected_rows": forced_layout["nodes"][0]["rows"],
             "selected_lane_width": forced_layout.get("lane_width"),
+            "selected_compress_output_boundary": selected_compress_output_boundary,
             "score": list(score),
         }
         return wrapper, connector_summary, forced_layout
 
-    best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
+    best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any], bool] | None = None
     candidate_count = 0
+    boundary_modes = [False, True] if compress_output_boundary else [False]
     for columns in range(1, max_columns + 1):
-        candidate_count += 1
-        candidate = materialize_candidate(columns, base_lane_width)
-        if best is None or candidate[0] < best[0]:
-            best = candidate
+        for candidate_compress_output_boundary in boundary_modes:
+            candidate_count += 1
+            candidate = materialize_candidate(
+                columns,
+                base_lane_width,
+                candidate_compress_output_boundary=candidate_compress_output_boundary,
+            )
+            if best is None or candidate[0] < best[0]:
+                best = candidate
     assert best is not None
-    score, wrapper, connector_summary, selected_layout = best
+    score, wrapper, connector_summary, selected_layout, selected_compress_output_boundary = best
     selected_layout["layout_selection"] = {
         "strategy": "post-materialize-column-search",
         "candidate_count": candidate_count,
         "selected_columns": selected_layout["nodes"][0]["columns"],
         "selected_rows": selected_layout["nodes"][0]["rows"],
         "selected_lane_width": selected_layout.get("lane_width"),
+        "selected_compress_output_boundary": selected_compress_output_boundary,
         "score": list(score),
     }
     return wrapper, connector_summary, selected_layout

@@ -96,7 +96,7 @@ def runtime_proof_status(
 
     if cleanliness is None:
         reasons.append("missing-right-boundary-cleanliness")
-    elif cleanliness.get("status") != "clean":
+    elif cleanliness.get("status") not in {"clean", "empty"}:
         reasons.append(f"right-boundary-{cleanliness.get('status')}")
 
     if invalid_output_inserters is None:

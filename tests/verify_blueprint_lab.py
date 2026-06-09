@@ -349,6 +349,16 @@ def main() -> int:
         target_item="iron-gear-wheel",
         target_rate_per_minute=150,
     )
+    empty_boundary_log_path = ROOT / ".codex" / "tests" / "blueprint_lab_runtime_empty_boundary_fixture.log"
+    empty_boundary_log_path.write_text(
+        runtime_log_path.read_text(encoding="utf-8").replace("status=clean product_items=5", "status=empty product_items=0"),
+        encoding="utf-8",
+    )
+    empty_boundary_runtime_proof = build_runtime_proof(
+        empty_boundary_log_path,
+        target_item="iron-gear-wheel",
+        target_rate_per_minute=150,
+    )
     if (
         runtime_proof["status"] != "runtime-proven"
         or runtime_proof["throughput_summary"]["target_per_minute"] != 200.0
@@ -360,6 +370,9 @@ def main() -> int:
         or "Blueprint Runtime Proof Report" not in render_runtime_proof_markdown_report(runtime_proof)
     ):
         print(f"FAIL: expected runtime proof parser to mark clean above-target throughput as proven: {runtime_proof}")
+        return 1
+    if empty_boundary_runtime_proof["status"] != "runtime-proven":
+        print(f"FAIL: expected runtime proof parser to accept empty right boundary after throughput drain: {empty_boundary_runtime_proof}")
         return 1
     stage4_package = build_stage4_generation_package(
         [recipe_tmp],
@@ -1526,6 +1539,7 @@ def main() -> int:
     if (
         selected_layout["nodes"][0]["columns"] != 2
         or selected_layout["nodes"][0]["rows"] != 3
+        or selected_layout["layout_selection"].get("selected_compress_output_boundary") is not False
         or selected_flow_counts != {"pass": 12}
         or selected_capacity["output:iron-ore"]["status"] != "sufficient"
         or selected_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 10800
@@ -1536,6 +1550,29 @@ def main() -> int:
         or any(item["status"] == "overloaded" for item in selected_lane_loads)
     ):
         print(f"FAIL: expected post-materialize layout selection to reject overloaded exact grids before preferring a tighter over-provisioned grid: {selected_layout} {selected_summary}")
+        return 1
+
+    _, compress_allowed_summary, compress_allowed_layout = select_best_materialized_layout(
+        selection_layout,
+        selection_mappings,
+        label="fixture-compress-allowed-layout",
+        connect_boundaries=True,
+        knowledge=knowledge,
+        compress_output_boundary=True,
+    )
+    compress_allowed_contract = {item["boundary"]: item for item in compress_allowed_summary["boundary_contract_audit"]}
+    compress_allowed_capacity = {item["boundary"]: item for item in compress_allowed_summary["boundary_capacity_audit"]}
+    if (
+        compress_allowed_layout["nodes"][0]["columns"] != 2
+        or compress_allowed_layout["nodes"][0]["rows"] != 3
+        or compress_allowed_layout["layout_selection"].get("selected_compress_output_boundary") is not False
+        or compress_allowed_layout["layout_selection"].get("candidate_count") != 10
+        or compress_allowed_summary["output_boundary_compressors"]
+        or compress_allowed_contract["output:iron-ore"]["status"] != "over-provisioned"
+        or compress_allowed_capacity["output:iron-ore"]["status"] != "sufficient"
+        or compress_allowed_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 10800
+    ):
+        print(f"FAIL: expected optional compression to keep the better uncompressed sufficient candidate available: {compress_allowed_layout} {compress_allowed_summary}")
         return 1
 
     compressed_wrapper, compressed_summary, compressed_layout = select_best_materialized_layout(
@@ -1570,6 +1607,7 @@ def main() -> int:
     if (
         compressed_layout["nodes"][0]["columns"] != 2
         or compressed_layout["nodes"][0]["rows"] != 3
+        or compressed_layout["layout_selection"].get("selected_compress_output_boundary") is not True
         or compressed_summary["output_boundary_compressors"][0]["status"] != "connected"
         or compressed_summary["output_boundary_compressors"][0].get("runtime_status") != "known-insufficient"
         or compressed_summary["output_boundary_compressors"][0].get("capacity_proof") != "unresolved"

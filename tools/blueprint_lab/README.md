@@ -556,14 +556,16 @@ inspecting the failed exact-boundary experiment.
 
 The stage-4 package command currently demonstrates the conservative default
 path for `iron-ore` at `2x turbo-transport-belt`: it avoids the known-insufficient
-compressor and selects a vertical `1x6` materialized layout with six external
+compressor and selects the tighter `2x3` materialized layout with three external
 turbo output routes. Its audit reports an over-provisioned output contract, not
 an exact two-belt contract, but the right boundary is runtime-proven for the
 target. A 2400-tick Factorio probe with sustained left-boundary input and a
-300-tick throughput window produced `7528.64/min` at the right boundary,
-`right_boundary_cleanliness status=clean`, and `invalid_output_inserters=0`.
-That makes it a valid current stage-4 generated black-box candidate for the
-requested throughput, while strict external two-belt compression remains a
+300-tick throughput window produced `7582.66/min` at the right boundary,
+`right_boundary_cleanliness status=empty`, and `invalid_output_inserters=0`.
+The empty right boundary is accepted by the proof parser when the throughput
+drain already removed the target item above the target rate. That makes the
+`42 x 54.5` package output the current best generated black-box candidate for
+the requested throughput, while strict external two-belt compression remains a
 separate unsolved milestone.
 
 The follow-up diagnosis adds an exact-x throughput probe with
@@ -685,11 +687,14 @@ python3 -m tools.blueprint_lab.stage4_generate /mnt/d/Desktop/游戏/异星工�
 ```
 
 This package command is a coordination entry point, not a proof that strict
-two-belt compression is solved. If the selected materialized layout avoids the
-known-insufficient compressor, the generated audit can still report an
-over-provisioned external boundary. If a forced compressed layout is requested,
-the capacity audit must keep known runtime-insufficient compressor capacity
-unresolved until a runtime throughput probe proves otherwise.
+two-belt compression is solved. `--compress-output-boundary` allows the selector
+to evaluate the experimental compressor, but uncompressed candidates remain in
+the pool so a known-insufficient compressor cannot poison a better sufficient
+layout. If the selected materialized layout avoids the compressor, the generated
+audit can still report an over-provisioned external boundary. If a forced
+compressed layout is requested, the capacity audit must keep known
+runtime-insufficient compressor capacity unresolved until a runtime throughput
+probe proves otherwise.
 
 Runtime-check that package output with sustained input and right-boundary
 throughput measurement:
@@ -701,12 +706,12 @@ python3 -m tools.blueprint_lab.factorio_validate --scenario-name blueprint_lab_v
 Parse a Factorio validation log into a reusable runtime proof report:
 
 ```bash
-python3 -m tools.blueprint_lab.runtime_proof .codex/tests/factorio-probe-stage4-generate-write-data/factorio-current.log --target-item iron-ore --target-rate-per-minute 7200 --json-output .codex/tests/blueprint-stage4-generate-runtime-proof.json --markdown-output .codex/tests/blueprint-stage4-generate-runtime-proof.md
+python3 -m tools.blueprint_lab.runtime_proof .codex/tests/factorio-probe-2x3-selector-fixed-write-data/factorio-current.log --target-item iron-ore --target-rate-per-minute 7200 --json-output .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-runtime-proof.json --markdown-output .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-runtime-proof.md
 ```
 
 The proof report also parses `right_boundary_throughput_lane_summary`. For the
 current stage-4 package proof this reports six active right-boundary transport
-lines with a `507` item spread across the full 2400-tick probe. That is useful
+lines with a `458` item spread across the full 2400-tick probe. That is useful
 diagnostic evidence: the package is runtime-proven for `7200/min`, but its
 throughput is distributed across six external output lines, so it remains an
 over-provisioned boundary rather than a strict two-belt solution.
