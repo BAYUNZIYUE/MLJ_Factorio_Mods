@@ -301,17 +301,29 @@ five crushers at `full_output`. That explains the low throughput-window result:
 the current generated box is still output-unloading and lane-distribution
 limited before it is right-boundary-belt limited.
 
-The materialization report also includes a machine-output expansion audit. This
-is a preflight step for the next generator pass: it enumerates extra
-`stack-inserter` positions around recipe machines, checks inserter and proposed
-drop-belt collision boxes from data.raw, and rejects candidates that would drop
-below the machine centerline or to the left of the machine in the current
-left-input/right-output box. The audit is intentionally report-only; it does not
-yet add those inserters to the blueprint. In the current `iron-ore 2x
-turbo-transport-belt` sample, all five crushers have safe output-expansion
-candidates (`60` total candidates after directional filtering), so the next
-generation step can promote audited candidates into real extra output unloaders
-instead of guessing placements that Factorio later rejects.
+The materialization report also includes a machine-output expansion audit and a
+conservative materialization pass. The audit enumerates extra `stack-inserter`
+positions around recipe machines, checks inserter and proposed drop-belt
+collision boxes from data.raw, and rejects candidates that would drop below the
+machine centerline or to the left of the machine in the current
+left-input/right-output box. The materialization pass promotes the safest subset
+first: extra inserters that can drop onto an existing same-tier belt. It does not
+yet create independent new output lanes from scratch, because isolated drop
+belts can bypass byproduct filtering or fail runtime placement unless they are
+also routed and validated. In the current `iron-ore 2x turbo-transport-belt`
+sample, this adds five extra `stack-inserter` unloaders, one per crusher.
+
+The same sample also showed why route selection must prefer actual
+`machine-output` drop lanes over ordinary edge buses. The old 4x2 candidate had
+a structurally exact 2x turbo output contract, but one output route was an
+edge-bus-style lane that did not carry enough runtime product. After preferring
+machine-output lanes, the generator selects a taller 1x5 box with five
+right-side machine-output lanes. This is over-provisioned relative to a strict
+2-belt boundary, but the runtime throughput probe reaches post-startup windows
+around `7188-7452/min` delivered `iron-ore` with a clean right boundary. The
+next optimization target is therefore not "make product reach the boundary" but
+"compress proven machine-output lanes back down to the requested boundary
+contract without losing throughput or byproduct separation."
 
 The runtime validation command is a heavier final gate, not part of the normal
 unit regression guard. It writes a temporary scenario under the Factorio user

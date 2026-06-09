@@ -20,7 +20,7 @@ from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, prune_template_entities_for_recipe, select_best_materialized_layout
+from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, materialize_machine_output_expansions, prune_template_entities_for_recipe, select_best_materialized_layout
 from tools.blueprint_lab.factorio_validate import (
     effective_runtime_audit_wait_ticks,
     render_control_lua,
@@ -449,6 +449,21 @@ def main() -> int:
         or expansion_by_recipe["iron-gear-wheel"]["expandable_machine_count"] != 1
     ):
         print(f"FAIL: expected machine output expansion audit to find safe candidate inserter/drop-belt positions: {output_expansion}")
+        return 1
+    expansion_fixture_entities = [
+        {"entity_number": 1, "name": "assembling-machine-3", "position": {"x": 4, "y": 4}, "recipe": "iron-gear-wheel"},
+        {"entity_number": 2, "name": "stack-inserter", "position": {"x": 4, "y": 3}, "direction": DIR_SOUTH},
+        {"entity_number": 3, "name": "transport-belt", "position": {"x": 4, "y": 2}, "direction": DIR_EAST},
+        {"entity_number": 4, "name": "transport-belt", "position": {"x": 6, "y": 4}, "direction": DIR_EAST},
+    ]
+    expansion_summary = materialize_machine_output_expansions(expansion_fixture_entities, knowledge)
+    if (
+        expansion_summary.get("inserters_added") != 1
+        or expansion_summary.get("drop_belts_added") != 0
+        or expansion_summary.get("machines_expanded") != 1
+        or Counter(entity["name"] for entity in expansion_fixture_entities)["stack-inserter"] != 2
+    ):
+        print(f"FAIL: expected materialized output expansion to add one extra stack inserter to an existing drop belt: {expansion_summary} {expansion_fixture_entities}")
         return 1
     pruned_entities = prune_template_entities_for_recipe(
         [

@@ -433,6 +433,51 @@ def audit_machine_output_expansion(
     *,
     inserter_name: str = "stack-inserter",
 ) -> list[dict[str, Any]]:
+    per_machine = machine_output_expansion_candidates(wrapper, knowledge, inserter_name=inserter_name)
+    grouped: dict[str, dict[str, Any]] = {}
+    for machine in per_machine:
+        recipe = str(machine.get("recipe") or "")
+        recipe_item = grouped.setdefault(
+            recipe,
+            {
+                "recipe": recipe,
+                "machine_count": 0,
+                "machines_with_existing_output": 0,
+                "existing_output_inserter_count": 0,
+                "expandable_machine_count": 0,
+                "candidate_count": 0,
+                "blocked_candidate_count": 0,
+                "invalid_endpoint_count": 0,
+                "samples": [],
+                "blocked_samples": [],
+            },
+        )
+        recipe_item["machine_count"] += 1
+        recipe_item["machines_with_existing_output"] += 1 if machine.get("existing_output_inserter_count") else 0
+        recipe_item["existing_output_inserter_count"] += int(machine.get("existing_output_inserter_count") or 0)
+        recipe_item["candidate_count"] += len(machine.get("candidates") or [])
+        recipe_item["blocked_candidate_count"] += len(machine.get("blocked_candidates") or [])
+        recipe_item["invalid_endpoint_count"] += int(machine.get("invalid_endpoint_count") or 0)
+        candidates = machine.get("candidates") or []
+        blocked = machine.get("blocked_candidates") or []
+        if candidates:
+            recipe_item["expandable_machine_count"] += 1
+            recipe_item["samples"].extend(candidates[: max(0, 8 - len(recipe_item["samples"]))])
+        if blocked:
+            recipe_item["blocked_samples"].extend(blocked[: max(0, 8 - len(recipe_item["blocked_samples"]))])
+
+    audits = list(grouped.values())
+    for item in audits:
+        item["status"] = "expandable" if item["expandable_machine_count"] else "blocked"
+    return sorted(audits, key=lambda item: item["recipe"])
+
+
+def machine_output_expansion_candidates(
+    wrapper: dict[str, Any],
+    knowledge: PrototypeKnowledge | None,
+    *,
+    inserter_name: str = "stack-inserter",
+) -> list[dict[str, Any]]:
     if knowledge is None or knowledge.inserter(inserter_name) is None:
         return []
     entities = list((wrapper.get("blueprint") or {}).get("entities") or [])
@@ -479,7 +524,7 @@ def audit_machine_output_expansion(
     inserter = knowledge.inserter(inserter_name)
     assert inserter is not None
     candidate_offsets = [offset / 2.0 for offset in range(-6, 7)]
-    grouped: dict[str, dict[str, Any]] = {}
+    per_machine: list[dict[str, Any]] = []
     for machine in machine_entities:
         machine_number = int(machine.get("entity_number") or 0)
         machine_x, machine_y = entity_position(machine)
@@ -603,37 +648,140 @@ def audit_machine_output_expansion(
                         }
                     )
 
-        recipe_item = grouped.setdefault(
-            recipe,
+        per_machine.append(
             {
                 "recipe": recipe,
-                "machine_count": 0,
-                "machines_with_existing_output": 0,
-                "existing_output_inserter_count": 0,
-                "expandable_machine_count": 0,
-                "candidate_count": 0,
-                "blocked_candidate_count": 0,
-                "invalid_endpoint_count": 0,
-                "samples": [],
-                "blocked_samples": [],
-            },
+                "machine_entity_number": machine_number,
+                "machine_x": round(machine_x, 3),
+                "machine_y": round(machine_y, 3),
+                "existing_output_inserter_count": len(existing_outputs),
+                "candidates": candidates,
+                "blocked_candidates": blocked,
+                "invalid_endpoint_count": invalid_endpoint_count,
+            }
         )
-        recipe_item["machine_count"] += 1
-        recipe_item["machines_with_existing_output"] += 1 if existing_outputs else 0
-        recipe_item["existing_output_inserter_count"] += len(existing_outputs)
-        recipe_item["candidate_count"] += len(candidates)
-        recipe_item["blocked_candidate_count"] += len(blocked)
-        recipe_item["invalid_endpoint_count"] += invalid_endpoint_count
-        if candidates:
-            recipe_item["expandable_machine_count"] += 1
-            recipe_item["samples"].extend(candidates[: max(0, 8 - len(recipe_item["samples"]))])
-        if blocked:
-            recipe_item["blocked_samples"].extend(blocked[: max(0, 8 - len(recipe_item["blocked_samples"]))])
+    return per_machine
 
-    audits = list(grouped.values())
-    for item in audits:
-        item["status"] = "expandable" if item["expandable_machine_count"] else "blocked"
-    return sorted(audits, key=lambda item: item["recipe"])
+
+def materialize_machine_output_expansions(
+    entities: list[dict[str, Any]],
+    knowledge: PrototypeKnowledge | None,
+    *,
+    inserter_name: str = "stack-inserter",
+    max_per_machine: int = 1,
+    allow_new_drop_belts: bool = False,
+) -> dict[str, Any]:
+    if knowledge is None or max_per_machine <= 0:
+        return {
+            "enabled": False,
+            "inserters_added": 0,
+            "drop_belts_added": 0,
+            "machines_expanded": 0,
+            "skipped_new_drop_belt_candidates": 0,
+            "blocked_candidate_count": 0,
+            "selected": [],
+            "blocked": [],
+        }
+
+    wrapper = {"blueprint": {"entities": entities}}
+    per_machine = machine_output_expansion_candidates(wrapper, knowledge, inserter_name=inserter_name)
+    selected: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    skipped_new_drop_belt_candidates = 0
+    inserters_added = 0
+    drop_belts_added = 0
+
+    def candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, float, float, float]:
+        drop_priority = 0 if candidate.get("drop") == "existing-belt" else 1
+        return (
+            drop_priority,
+            float(candidate.get("drop_y") or 0.0),
+            -float(candidate.get("drop_x") or 0.0),
+            float(candidate.get("candidate_x") or 0.0),
+        )
+
+    def next_entity_number() -> int:
+        return max((int(entity.get("entity_number") or 0) for entity in entities), default=0) + 1
+
+    for machine in per_machine:
+        added_for_machine = 0
+        for candidate in sorted(machine.get("candidates") or [], key=candidate_sort_key):
+            if added_for_machine >= max_per_machine:
+                break
+            if candidate.get("drop") == "new-belt" and not allow_new_drop_belts:
+                skipped_new_drop_belt_candidates += 1
+                continue
+
+            candidate_inserter = {
+                "entity_number": next_entity_number(),
+                "name": inserter_name,
+                "position": {
+                    "x": round(float(candidate["candidate_x"]), 3),
+                    "y": round(float(candidate["candidate_y"]), 3),
+                },
+                "direction": int(candidate["direction"]),
+            }
+            proposed_entities = [candidate_inserter]
+            if candidate.get("drop") == "new-belt":
+                proposed_entities.append(
+                    connector_belt(
+                        candidate_inserter["entity_number"] + 1,
+                        float(candidate["drop_x"]),
+                        float(candidate["drop_y"]),
+                        direction=DIR_EAST,
+                        name=str(candidate.get("drop_belt_name") or "transport-belt"),
+                    )
+                )
+
+            candidate_collisions: list[dict[str, Any]] = []
+            for proposed in proposed_entities:
+                candidate_collisions.extend(placement_collisions(proposed, entities, knowledge))
+            if candidate_collisions:
+                blocked.append(
+                    {
+                        "recipe": machine.get("recipe"),
+                        "machine_entity_number": machine.get("machine_entity_number"),
+                        "candidate": candidate,
+                        "collisions": candidate_collisions[:3],
+                    }
+                )
+                continue
+
+            for proposed in proposed_entities:
+                proposed["entity_number"] = next_entity_number()
+                entities.append(proposed)
+                if proposed["name"] == inserter_name:
+                    inserters_added += 1
+                elif is_belt_like_entity_name(str(proposed.get("name") or "")):
+                    drop_belts_added += 1
+            selected.append(
+                {
+                    "recipe": machine.get("recipe"),
+                    "machine_entity_number": machine.get("machine_entity_number"),
+                    "inserter_name": inserter_name,
+                    "inserter_x": candidate_inserter["position"]["x"],
+                    "inserter_y": candidate_inserter["position"]["y"],
+                    "direction": candidate_inserter["direction"],
+                    "drop": candidate.get("drop"),
+                    "drop_x": candidate.get("drop_x"),
+                    "drop_y": candidate.get("drop_y"),
+                    "drop_belt_name": candidate.get("drop_belt_name"),
+                }
+            )
+            added_for_machine += 1
+
+    return {
+        "enabled": True,
+        "inserters_added": inserters_added,
+        "drop_belts_added": drop_belts_added,
+        "machines_expanded": len({item["machine_entity_number"] for item in selected}),
+        "skipped_new_drop_belt_candidates": skipped_new_drop_belt_candidates,
+        "blocked_candidate_count": len(blocked),
+        "selected": selected,
+        "blocked": blocked,
+        "strategy": "prefer-existing-drop-belt",
+        "allow_new_drop_belts": allow_new_drop_belts,
+    }
 
 
 def prune_template_entities_for_recipe(
@@ -871,6 +1019,7 @@ def add_boundary_connectors(
             "output_byproduct_audit": [],
             "belt_flow_audit": [],
             "output_inserter_upgrades": [],
+            "machine_output_expansions": {},
         }
 
     root = layout_plan["nodes"][0]
@@ -1254,8 +1403,8 @@ def add_boundary_connectors(
         return sorted(
             ports,
             key=lambda port: (
-                -bridge_lane_score(port),
                 machine_output_drop_priority(port),
+                -bridge_lane_score(port),
                 belt_surface_priority(port),
                 role_priority.get(str(port.get("role")), 9),
                 -float(port["y"]) if str(port.get("role")) == "machine-output" else 0.0,
@@ -3165,6 +3314,7 @@ def materialize_layout_with_summary(
         "output_byproduct_audit": [],
         "belt_flow_audit": [],
         "output_inserter_upgrades": output_inserter_upgrades,
+        "machine_output_expansions": {},
     }
     if connect_boundaries:
         occupied_entities = {entity_position_key(entity): entity for entity in entities}
@@ -3177,6 +3327,8 @@ def materialize_layout_with_summary(
             knowledge=knowledge,
         )
         connector_result["output_inserter_upgrades"] = output_inserter_upgrades
+
+    connector_result["machine_output_expansions"] = materialize_machine_output_expansions(entities, knowledge)
 
     target_item = str(working_layout["target_item"])
     wrapper = make_blueprint_wrapper(
@@ -3405,6 +3557,7 @@ def render_summary(
         "output_byproduct_audit": [],
         "belt_flow_audit": [],
         "output_inserter_upgrades": [],
+        "machine_output_expansions": {},
         "machine_output_expansion_audit": [],
     }
     route_status_counts = Counter(route.get("status", "unknown") for route in summary.get("routes") or [])
@@ -3479,6 +3632,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Output separation recycle belts: {summary['connector_summary'].get('output_separation_recycle_belts', 0)}",
         f"- Output separation merge belts: {summary['connector_summary'].get('output_separation_merge_belts', 0)}",
         f"- Output inserter upgrades: {sum(int(item.get('materialized_count') or 0) for item in summary['connector_summary'].get('output_inserter_upgrades') or [])}",
+        f"- Machine output expansion inserters: {int((summary['connector_summary'].get('machine_output_expansions') or {}).get('inserters_added') or 0)}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
         f"- Route status counts: {summary['route_status_counts']}",
         f"- Belt flow status counts: {dict(Counter(item.get('status', 'unknown') for item in summary['connector_summary'].get('belt_flow_audit') or []))}",
@@ -3699,6 +3853,21 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"- {item.get('node_recipe')}: {item.get('from')} -> {item.get('to')} "
                 f"template_count={item.get('template_count')} instances={item.get('instances')} "
                 f"materialized={item.get('materialized_count')}"
+            )
+    output_expansions = summary["connector_summary"].get("machine_output_expansions") or {}
+    if output_expansions.get("enabled"):
+        lines.extend(["", "## Materialized Machine Output Expansions", ""])
+        lines.append(
+            f"- strategy={output_expansions.get('strategy')} inserters={output_expansions.get('inserters_added')} "
+            f"drop_belts={output_expansions.get('drop_belts_added')} machines={output_expansions.get('machines_expanded')} "
+            f"skipped_new_drop_belts={output_expansions.get('skipped_new_drop_belt_candidates')} "
+            f"blocked={output_expansions.get('blocked_candidate_count')}"
+        )
+        for item in (output_expansions.get("selected") or [])[:8]:
+            lines.append(
+                f"- {item.get('recipe')} machine={item.get('machine_entity_number')} "
+                f"inserter=({item.get('inserter_x')},{item.get('inserter_y')}) "
+                f"drop={item.get('drop')}@({item.get('drop_x')},{item.get('drop_y')})"
             )
     if summary.get("machine_output_expansion_audit"):
         lines.extend(["", "## Machine Output Expansion Audit", ""])
