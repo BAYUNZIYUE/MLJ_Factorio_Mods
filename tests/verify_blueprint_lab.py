@@ -25,7 +25,7 @@ from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, materialize_machine_output_expansions, materialized_layout_score, prune_template_entities_for_recipe, render_markdown_report as render_materialize_markdown_report, select_best_materialized_layout
+from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, materialize_machine_output_expansions, materialized_layout_score, prune_template_entities_for_recipe, render_markdown_report as render_materialize_markdown_report, render_summary, select_best_materialized_layout
 from tools.blueprint_lab.factorio_validate import (
     effective_runtime_audit_wait_ticks,
     render_control_lua,
@@ -1820,13 +1820,30 @@ def main() -> int:
         knowledge=knowledge,
     )
     selector_constraint = selector_layout.get("output_preseparation_safe_width_constraint") or {}
+    selector_candidates = selector_layout.get("layout_selection", {}).get("candidates") or []
     if (
         selector_layout["layout_selection"]["selected_columns"] != 2
         or selector_constraint.get("status") != "within-limit"
         or selector_constraint.get("max_safe_instances_before_separation") != 2
         or selector_summary["output_preseparation_exposure_audit"][0]["max_safe_instances_before_separation"] != 2
+        or selector_layout["layout_selection"].get("candidate_count") != 3
+        or len(selector_candidates) != 3
+        or sum(1 for item in selector_candidates if item.get("selected")) != 1
+        or not any(item.get("columns") == 3 and item.get("safe_width_status") == "over-limit" for item in selector_candidates)
+        or not any(item.get("selected") and item.get("columns") == 2 and item.get("safe_width_status") == "within-limit" for item in selector_candidates)
     ):
         print(f"FAIL: expected selector to keep byproduct row fan-in within the pre-separation safe width: {selector_layout} {selector_summary}")
+        return 1
+    selector_markdown = render_materialize_markdown_report(
+        render_summary(
+            {"blueprint": {"item": "blueprint", "label": "fixture-selector-audit", "entities": []}},
+            selector_layout,
+            selector_summary,
+            knowledge=knowledge,
+        )
+    )
+    if "Layout Candidate Audit" not in selector_markdown or "selected: columns=2" not in selector_markdown or "candidate: columns=3" not in selector_markdown:
+        print(f"FAIL: expected materialize markdown to explain selector candidates: {selector_markdown}")
         return 1
     _, forced_selector_summary, forced_selector_layout = select_best_materialized_layout(
         preseparation_selector_layout,
@@ -1837,11 +1854,15 @@ def main() -> int:
         force_columns=3,
     )
     forced_constraint = forced_selector_layout.get("output_preseparation_safe_width_constraint") or {}
+    forced_candidates = forced_selector_layout.get("layout_selection", {}).get("candidates") or []
     if (
         forced_selector_layout["layout_selection"]["selected_columns"] != 3
         or forced_constraint.get("status") != "over-limit"
         or forced_constraint.get("max_safe_instances_before_separation") != 2
         or forced_selector_summary["output_preseparation_exposure_audit"][0]["status"] != "mixed-overloaded-before-separation"
+        or len(forced_candidates) != 1
+        or sum(1 for item in forced_candidates if item.get("selected")) != 1
+        or not all(item.get("columns") == 3 for item in forced_candidates)
     ):
         print(f"FAIL: expected forced over-wide rows to be marked over the pre-separation safe width: {forced_selector_layout} {forced_selector_summary}")
         return 1
@@ -1955,6 +1976,8 @@ def main() -> int:
         selected_layout["nodes"][0]["columns"] != 2
         or selected_layout["nodes"][0]["rows"] != 3
         or selected_layout["layout_selection"].get("selected_compress_output_boundary") is not False
+        or len(selected_layout["layout_selection"].get("candidates") or []) != 5
+        or sum(1 for item in selected_layout["layout_selection"].get("candidates") or [] if item.get("selected")) != 1
         or selected_flow_counts != {"pass": 12}
         or selected_capacity["output:iron-ore"]["status"] != "sufficient"
         or selected_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 10800

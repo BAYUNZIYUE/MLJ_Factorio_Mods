@@ -4836,6 +4836,37 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     )
 
 
+def layout_candidate_audit(
+    summary: dict[str, Any],
+    score: tuple[float, ...],
+    *,
+    compress_output_boundary: bool,
+) -> dict[str, Any]:
+    connector_summary = summary.get("connector_summary") or {}
+    layout_nodes = summary.get("layout_nodes") or []
+    node = layout_nodes[0] if layout_nodes else {}
+    output_separations = connector_summary.get("output_separations") or []
+    return {
+        "columns": node.get("columns"),
+        "rows": node.get("rows"),
+        "compress_output_boundary": compress_output_boundary,
+        "width": summary.get("width"),
+        "height": summary.get("height"),
+        "entity_count": summary.get("entity_count"),
+        "score": list(score),
+        "safe_width_status": (summary.get("output_preseparation_safe_width_constraint") or {}).get("status"),
+        "collision_count": len(connector_summary.get("collisions") or []),
+        "route_status_counts": dict(Counter(item.get("status", "unknown") for item in connector_summary.get("routes") or [])),
+        "belt_flow_status_counts": dict(Counter(item.get("status", "unknown") for item in connector_summary.get("belt_flow_audit") or [])),
+        "boundary_capacity_status_counts": dict(Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_capacity_audit") or [])),
+        "boundary_contract_status_counts": dict(Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_contract_audit") or [])),
+        "output_lane_load_status_counts": dict(Counter(item.get("status", "unknown") for item in connector_summary.get("output_lane_load_audit") or [])),
+        "output_separation_status_counts": dict(Counter(item.get("status", "unknown") for item in output_separations)),
+        "output_separation_handling_counts": dict(Counter(str(item.get("current_handling") or "none") for item in output_separations)),
+        "selected": False,
+    }
+
+
 def select_best_materialized_layout(
     layout_plan: dict[str, Any],
     mappings: list[dict[str, Any]],
@@ -4874,6 +4905,7 @@ def select_best_materialized_layout(
     force_lane_width_candidates = [base_lane_width]
     if base_lane_width > 0:
         force_lane_width_candidates.append(round(base_lane_width + 2.0, 3))
+    candidate_audits: list[dict[str, Any]] = []
 
     def materialize_candidate(
         columns: int,
@@ -4899,7 +4931,15 @@ def select_best_materialized_layout(
             experimental_prefanin_input_sideload=experimental_prefanin_input_sideload,
         )
         summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
-        return materialized_layout_score(summary), wrapper, connector_summary, candidate_layout, candidate_compress_output_boundary
+        score = materialized_layout_score(summary)
+        candidate_audits.append(
+            layout_candidate_audit(
+                summary,
+                score,
+                compress_output_boundary=candidate_compress_output_boundary,
+            )
+        )
+        return score, wrapper, connector_summary, candidate_layout, candidate_compress_output_boundary
 
     if force_columns is not None:
         if force_columns < 1 or force_columns > max_columns:
@@ -4915,14 +4955,24 @@ def select_best_materialized_layout(
                 forced_best = candidate
         assert forced_best is not None
         score, wrapper, connector_summary, forced_layout, selected_compress_output_boundary = forced_best
+        selected_columns = forced_layout["nodes"][0]["columns"]
+        selected_rows = forced_layout["nodes"][0]["rows"]
+        for audit in candidate_audits:
+            audit["selected"] = (
+                audit.get("columns") == selected_columns
+                and audit.get("rows") == selected_rows
+                and audit.get("compress_output_boundary") == selected_compress_output_boundary
+                and audit.get("score") == list(score)
+            )
         forced_layout["layout_selection"] = {
             "strategy": "forced-single-node-columns",
             "candidate_count": len(force_lane_width_candidates),
-            "selected_columns": forced_layout["nodes"][0]["columns"],
-            "selected_rows": forced_layout["nodes"][0]["rows"],
+            "selected_columns": selected_columns,
+            "selected_rows": selected_rows,
             "selected_lane_width": forced_layout.get("lane_width"),
             "selected_compress_output_boundary": selected_compress_output_boundary,
             "score": list(score),
+            "candidates": candidate_audits,
         }
         return wrapper, connector_summary, forced_layout
 
@@ -4941,14 +4991,24 @@ def select_best_materialized_layout(
                 best = candidate
     assert best is not None
     score, wrapper, connector_summary, selected_layout, selected_compress_output_boundary = best
+    selected_columns = selected_layout["nodes"][0]["columns"]
+    selected_rows = selected_layout["nodes"][0]["rows"]
+    for audit in candidate_audits:
+        audit["selected"] = (
+            audit.get("columns") == selected_columns
+            and audit.get("rows") == selected_rows
+            and audit.get("compress_output_boundary") == selected_compress_output_boundary
+            and audit.get("score") == list(score)
+        )
     selected_layout["layout_selection"] = {
         "strategy": "post-materialize-column-search",
         "candidate_count": candidate_count,
-        "selected_columns": selected_layout["nodes"][0]["columns"],
-        "selected_rows": selected_layout["nodes"][0]["rows"],
+        "selected_columns": selected_columns,
+        "selected_rows": selected_rows,
         "selected_lane_width": selected_layout.get("lane_width"),
         "selected_compress_output_boundary": selected_compress_output_boundary,
         "score": list(score),
+        "candidates": candidate_audits,
     }
     return wrapper, connector_summary, selected_layout
 
@@ -5128,6 +5188,23 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             f"byproducts={constraint.get('byproducts')} "
             f"next={constraint.get('recommendation')}"
         )
+    selection_candidates = (summary.get("layout_selection") or {}).get("candidates") or []
+    if selection_candidates:
+        lines.extend(["", "## Layout Candidate Audit", ""])
+        for item in selection_candidates[:8]:
+            marker = "selected" if item.get("selected") else "candidate"
+            lines.append(
+                f"- {marker}: columns={item.get('columns')} rows={item.get('rows')} "
+                f"compress={item.get('compress_output_boundary')} "
+                f"safe_width={item.get('safe_width_status')} "
+                f"collisions={item.get('collision_count')} "
+                f"routes={item.get('route_status_counts')} "
+                f"flow={item.get('belt_flow_status_counts')} "
+                f"capacity={item.get('boundary_capacity_status_counts')} "
+                f"contract={item.get('boundary_contract_status_counts')} "
+                f"lane_load={item.get('output_lane_load_status_counts')} "
+                f"separations={item.get('output_separation_handling_counts')}"
+            )
     lines.extend(["", "## Boundary Inputs", ""])
     if summary["boundary_inputs"]:
         for item in summary["boundary_inputs"]:
