@@ -476,6 +476,17 @@ optimization target is therefore not general machine count, but a stricter
 two-belt compression strategy that can fully saturate both final turbo belts
 without letting byproducts consume output-lane slots.
 
+Two follow-up probes narrowed the next design space. First, routing experimental
+new drop belts back into the main output lane made the extra inserters visible
+to the runtime audit, but the route crossed output-inserter pickup semantics:
+the probe reported `invalid_output_inserters=2` and throughput dropped to about
+`3.5k/min`. Second, filtering all stack inserters to the target product removed
+most target output instead of improving it, because recyclable
+`metallic-asteroid-chunk` stayed in machine output inventories and all six
+crushers reached `full_output`. The generator therefore needs separate,
+runtime-proven byproduct unloading and recycle paths; simply hiding byproducts
+from the main output inserters is not a valid long-run compression strategy.
+
 ## Commands
 
 Analyze a blueprint directory:
