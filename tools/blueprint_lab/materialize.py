@@ -2466,25 +2466,38 @@ def add_boundary_connectors(
             route_y = round(float(port.get("y") or 0.0), 3)
             port_x = round(float(port.get("x") or 0.0), 3)
             min_splitter_x = round(port_x + 1.0, 3)
-            preferred_splitter_x = round(min_splitter_x + 12.0, 3)
-            if right_boundary_x - preferred_splitter_x - 1.0 >= 1.0:
-                min_splitter_x = preferred_splitter_x
-            available_overflow = int(math.floor(right_boundary_x - min_splitter_x - 1.0))
-            if available_overflow < 1:
+            splitter_x: float | None = None
+            probe_x = min_splitter_x
+            while right_boundary_x - probe_x - 1.0 >= 1.0:
+                route_key = (probe_x, route_y)
+                existing = occupied_entities.get(route_key)
+                existing_name = str((existing or {}).get("name") or "")
+                if (
+                    existing is not None
+                    and any(existing is connector for connector in connectors)
+                    and existing_name.endswith("transport-belt")
+                    and canonical_transport_belt_name(existing_name) == belt_name
+                    and existing.get("direction") == DIR_EAST
+                ):
+                    splitter_x = probe_x
+                    break
+                probe_x = round(probe_x + 1.0, 3)
+            if splitter_x is None:
                 separations.append(
                     {
                         "boundary": boundary,
                         "status": "blocked",
-                        "reason": "route-too-short-for-overflow-separation",
+                        "reason": "no-removable-east-connector-belt-for-separation",
                         "recommended_handling": recommended_handling,
                         "current_handling": "none",
                         "recyclable_byproducts": recyclable_byproducts,
                         "route_y": route_y,
+                        "min_splitter_x": min_splitter_x,
                     }
                 )
                 continue
+            available_overflow = int(math.floor(right_boundary_x - splitter_x - 1.0))
             overflow_length = available_overflow
-            splitter_x = min_splitter_x
             route_key = (splitter_x, route_y)
             existing = occupied_entities.get(route_key)
             existing_name = str((existing or {}).get("name") or "")
@@ -3332,6 +3345,7 @@ def materialize_layout_with_summary(
     connect_boundaries: bool = False,
     knowledge: PrototypeKnowledge | None = None,
     allow_new_drop_belts: bool = False,
+    max_output_expansions_per_machine: int = 4,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     mapping_index = mapping_by_fingerprint(mappings)
     working_layout = copy.deepcopy(layout_plan)
@@ -3463,6 +3477,7 @@ def materialize_layout_with_summary(
     connector_result["machine_output_expansions"] = materialize_machine_output_expansions(
         entities,
         knowledge,
+        max_per_machine=max_output_expansions_per_machine,
         allow_new_drop_belts=allow_new_drop_belts,
         target_item=str(working_layout.get("target_item") or ""),
     )
@@ -3489,6 +3504,7 @@ def materialize_layout(
     connect_boundaries: bool = False,
     knowledge: PrototypeKnowledge | None = None,
     allow_new_drop_belts: bool = False,
+    max_output_expansions_per_machine: int = 4,
 ) -> dict[str, Any]:
     wrapper, _ = materialize_layout_with_summary(
         layout_plan,
@@ -3497,6 +3513,7 @@ def materialize_layout(
         connect_boundaries=connect_boundaries,
         knowledge=knowledge,
         allow_new_drop_belts=allow_new_drop_belts,
+        max_output_expansions_per_machine=max_output_expansions_per_machine,
     )
     return wrapper
 
@@ -3592,6 +3609,7 @@ def select_best_materialized_layout(
     connect_boundaries: bool = False,
     knowledge: PrototypeKnowledge | None = None,
     allow_new_drop_belts: bool = False,
+    max_output_expansions_per_machine: int = 4,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if not connect_boundaries or knowledge is None or len(layout_plan.get("nodes") or []) != 1:
         wrapper, connector_summary = materialize_layout_with_summary(
@@ -3601,6 +3619,7 @@ def select_best_materialized_layout(
             connect_boundaries=connect_boundaries,
             knowledge=knowledge,
             allow_new_drop_belts=allow_new_drop_belts,
+            max_output_expansions_per_machine=max_output_expansions_per_machine,
         )
         return wrapper, connector_summary, layout_plan
 
@@ -3619,6 +3638,7 @@ def select_best_materialized_layout(
             connect_boundaries=connect_boundaries,
             knowledge=knowledge,
             allow_new_drop_belts=allow_new_drop_belts,
+            max_output_expansions_per_machine=max_output_expansions_per_machine,
         )
         summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
         score = materialized_layout_score(summary)
@@ -4092,6 +4112,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label")
     parser.add_argument("--connect-boundaries", action="store_true")
     parser.add_argument("--allow-new-drop-belts", action="store_true", help="Experimental: allow generated machine-output expansion inserters to create new drop belts. Default keeps only runtime-proven existing drop belts.")
+    parser.add_argument("--max-output-expansions-per-machine", type=int, default=4)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)
@@ -4138,6 +4159,7 @@ def main(argv: list[str] | None = None) -> int:
         connect_boundaries=args.connect_boundaries,
         knowledge=knowledge,
         allow_new_drop_belts=args.allow_new_drop_belts,
+        max_output_expansions_per_machine=args.max_output_expansions_per_machine,
     )
     save_blueprint_file(args.output, wrapper)
     summary = render_summary(wrapper, layout, connector_summary, knowledge=knowledge)

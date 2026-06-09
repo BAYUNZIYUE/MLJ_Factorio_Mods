@@ -454,9 +454,27 @@ moved from `0/min` on a broken exact 3x2 candidate, to about `4.0-4.5k/min`
 after source-port fan-in, to about `5.3k/min` after filtered multi-inserter
 unloading on existing drop belts, and then to a `7539/min` 2400-tick summary
 after output fan-in routes learned to avoid machine-output pickup positions.
-The requested external contract is still not solved: the current passing sample
-uses three right-side output lanes, so it is over-provisioned relative to a
-strict `2x turbo-transport-belt` boundary.
+The current default passing sample then moved its byproduct filter splitters
+closer to the selected machine-output ports by choosing the first removable
+generated east belt instead of a fixed downstream offset. On the same
+`iron-ore 2x turbo-transport-belt` target this reduced the generated sample
+from 786 to 753 entities while keeping the runtime probe clean:
+`manual_entities=753`, `manual_failures=0`, `invalid_output_inserters=0`, and
+right-boundary throughput windows of `8172/9204/8952/8532/8448/8520/min`.
+The 2400-tick summary was `7542/min`, still above the `7200/min` test-sink
+target.
+
+The requested external contract is still not solved. A forced exact 3x2
+candidate now has exactly two right-side `turbo-transport-belt` output routes,
+places 780 entities with no manual failures, restores 22 target-filtered output
+expansion inserters, and reports `invalid_output_inserters=0`, but its best
+300-tick throughput window was `7164/min`. Moving the byproduct filter splitter
+nearer to the machine-output port reduced byproduct pollution on output drop
+lines, but the best exact 3x2 follow-up still reached only `7152/min`. A 4x2
+overbuild experiment also stayed below target at `7152/min`. The next
+optimization target is therefore not general machine count, but a stricter
+two-belt compression strategy that can fully saturate both final turbo belts
+without letting byproducts consume output-lane slots.
 
 ## Commands
 
