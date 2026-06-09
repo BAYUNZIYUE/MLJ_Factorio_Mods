@@ -43,6 +43,7 @@ def build_stage4_generation_package(
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
     preseparate_output_before_fanin: bool = False,
+    experimental_prefanin_input_sideload: bool = False,
     runtime_log: Path | None = None,
 ) -> dict[str, Any]:
     knowledge = load_data_raw(data_raw_json)
@@ -93,6 +94,7 @@ def build_stage4_generation_package(
         output_separation_min_distance=output_separation_min_distance,
         compress_output_boundary=compress_output_boundary,
         preseparate_output_before_fanin=preseparate_output_before_fanin,
+        experimental_prefanin_input_sideload=experimental_prefanin_input_sideload,
     )
     materialized_summary = render_summary(wrapper, selected_layout, connector_summary, knowledge=knowledge)
     materialized_summary["template_mapping_status_counts"] = template_summary["status_counts"]
@@ -247,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force-columns", type=int)
     parser.add_argument("--output-separation-min-distance", type=float, default=1.0)
     parser.add_argument("--preseparate-output-before-fanin", action="store_true")
+    parser.add_argument("--experimental-prefanin-input-sideload", action="store_true")
     parser.add_argument("--compress-output-boundary", action="store_true")
     parser.add_argument("--blueprint-output", type=Path, required=True)
     parser.add_argument("--summary-output", type=Path)
@@ -290,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
             output_separation_min_distance=args.output_separation_min_distance,
             compress_output_boundary=args.compress_output_boundary,
             preseparate_output_before_fanin=args.preseparate_output_before_fanin,
+            experimental_prefanin_input_sideload=args.experimental_prefanin_input_sideload,
             runtime_log=args.runtime_log,
         )
     except ValueError as error:

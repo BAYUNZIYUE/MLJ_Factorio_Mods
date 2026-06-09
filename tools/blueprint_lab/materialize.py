@@ -1010,6 +1010,7 @@ def add_boundary_connectors(
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
     preseparate_output_before_fanin: bool = False,
+    experimental_prefanin_input_sideload: bool = False,
 ) -> dict[str, Any]:
     connectors: list[dict[str, Any]] = []
     collisions: list[dict[str, Any]] = []
@@ -2458,6 +2459,52 @@ def add_boundary_connectors(
                     candidates.append(positions)
             return candidates
 
+        def pre_fanin_input_sideload_candidate(
+            fanin: dict[str, Any],
+            splitter_x: float,
+            overflow_y: float,
+            belt_name: str,
+            boundary: str,
+        ) -> tuple[dict[str, Any], list[RoutePosition]] | None:
+            from_port = fanin.get("from_port") or {}
+            feed_x = round(float(from_port.get("x") or 0.0) + 1.0, 3)
+            input_y = round(overflow_y + 1.0, 3)
+            feed_key = (feed_x, input_y)
+            feed_entity = occupied_entities.get(feed_key)
+            if (
+                feed_entity is None
+                or str(feed_entity.get("name") or "") != belt_name
+                or feed_entity.get("direction") != DIR_NORTH
+            ):
+                return None
+            first_x = round(splitter_x + 1.0, 3)
+            side_load_x = round(feed_x + 1.0, 3)
+            reason = f"{boundary}:pre-fanin-output-byproduct-recycle-sideload-input-lane"
+            for offset in range(4, 16):
+                turn_x = round(first_x + float(offset), 3)
+                if turn_x > right_boundary_x:
+                    break
+                positions: list[RoutePosition] = []
+                positions.extend(directional_horizontal_positions(first_x, round(turn_x - 1.0, 3), overflow_y, reason, DIR_EAST, belt_name))
+                positions.append((turn_x, overflow_y, reason, DIR_SOUTH, belt_name))
+                positions.append((turn_x, input_y, reason, DIR_WEST, belt_name))
+                positions.extend(directional_horizontal_positions(round(turn_x - 1.0, 3), side_load_x, input_y, reason, DIR_WEST, belt_name))
+                if positions:
+                    return (
+                        {
+                            "item": "",
+                            "input_x": feed_x,
+                            "input_y": input_y,
+                            "merge_x": feed_x,
+                            "merge_y": input_y,
+                            "sideload_x": side_load_x,
+                            "sideload_y": input_y,
+                            "merge_direction": DIR_NORTH,
+                        },
+                        positions,
+                    )
+            return None
+
         def blocked_recycle_attempt(
             route_kind: str,
             collisions: list[dict[str, Any]],
@@ -2628,13 +2675,13 @@ def add_boundary_connectors(
                 )
                 input_sides = recyclable_input_sides(matching_audits)
                 if recommended_handling == "recycle-to-input-boundary" and "left" in input_sides:
-                    for merge_target, recycle_positions in recycle_merge_candidates(
-                        splitter_x,
-                        overflow_y,
-                        belt_name,
-                        boundary,
-                        recyclable_byproducts,
-                    ):
+                    sideload_candidate = (
+                        pre_fanin_input_sideload_candidate(fanin, splitter_x, overflow_y, belt_name, boundary)
+                        if experimental_prefanin_input_sideload
+                        else None
+                    )
+                    if sideload_candidate is not None:
+                        merge_target, recycle_positions = sideload_candidate
                         (
                             candidate_belts_added,
                             candidate_collisions,
@@ -2649,21 +2696,57 @@ def add_boundary_connectors(
                             existing_belts_used = candidate_existing_belts_used
                             recycle_belts_added += candidate_belts_added
                             merge_belts_added += candidate_belts_added
-                            current_handling = "pre-fanin-recycle-merge-to-input-boundary"
-                            route_kind = "pre-fanin-output-byproduct-filter-splitter-recycle-merge"
-                            last = recycle_positions[-1] if recycle_positions else (left_boundary_x, overflow_y, "", DIR_WEST, belt_name)
-                            recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "input-bus"}
+                            current_handling = "pre-fanin-recycle-sideload-to-input-lane"
+                            route_kind = "pre-fanin-output-byproduct-filter-splitter-recycle-sideload-input-lane"
+                            last = recycle_positions[-1] if recycle_positions else (merge_target["sideload_x"], merge_target["sideload_y"], "", DIR_WEST, belt_name)
+                            recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "input-lane"}
                             recycle_merge_target = merge_target
-                            recycle_flow_audit = audit_exact_route_positions("pre-fanin-output-byproduct-recycle-merge", recycle_positions)
-                            break
-                        blocked_recycle_attempts.append(
-                            blocked_recycle_attempt(
-                                "pre-fanin-output-byproduct-filter-splitter-recycle-merge",
-                                candidate_collisions,
-                                merge_target,
+                            recycle_flow_audit = audit_exact_route_positions("pre-fanin-output-byproduct-recycle-sideload-input-lane", recycle_positions)
+                        else:
+                            blocked_recycle_attempts.append(
+                                blocked_recycle_attempt(
+                                    "pre-fanin-output-byproduct-filter-splitter-recycle-sideload-input-lane",
+                                    candidate_collisions,
+                                    merge_target,
+                                )
                             )
-                        )
-                    if current_handling != "pre-fanin-recycle-merge-to-input-boundary":
+                    if current_handling != "pre-fanin-recycle-sideload-to-input-lane":
+                        for merge_target, recycle_positions in recycle_merge_candidates(
+                            splitter_x,
+                            overflow_y,
+                            belt_name,
+                            boundary,
+                            recyclable_byproducts,
+                        ):
+                            (
+                                candidate_belts_added,
+                                candidate_collisions,
+                                candidate_existing_belts_used,
+                            ) = add_positions_reusing_existing_belts(
+                                recycle_positions,
+                                record_collisions=False,
+                                reuse_existing_plain_belts_only=True,
+                            )
+                            if not candidate_collisions:
+                                belts_added = candidate_belts_added
+                                existing_belts_used = candidate_existing_belts_used
+                                recycle_belts_added += candidate_belts_added
+                                merge_belts_added += candidate_belts_added
+                                current_handling = "pre-fanin-recycle-merge-to-input-boundary"
+                                route_kind = "pre-fanin-output-byproduct-filter-splitter-recycle-merge"
+                                last = recycle_positions[-1] if recycle_positions else (left_boundary_x, overflow_y, "", DIR_WEST, belt_name)
+                                recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "input-bus"}
+                                recycle_merge_target = merge_target
+                                recycle_flow_audit = audit_exact_route_positions("pre-fanin-output-byproduct-recycle-merge", recycle_positions)
+                                break
+                            blocked_recycle_attempts.append(
+                                blocked_recycle_attempt(
+                                    "pre-fanin-output-byproduct-filter-splitter-recycle-merge",
+                                    candidate_collisions,
+                                    merge_target,
+                                )
+                            )
+                    if current_handling not in {"pre-fanin-recycle-sideload-to-input-lane", "pre-fanin-recycle-merge-to-input-boundary"}:
                         for recycle_positions in recycle_return_candidates(splitter_x, overflow_y, belt_name, boundary):
                             candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
                             if not candidate_collisions:
@@ -2712,12 +2795,15 @@ def add_boundary_connectors(
                         "splitter_y": splitter_y,
                         "recommended_handling": "pre-fanin-separate-before-output-merge",
                         "current_handling": current_handling,
+                        "experimental": current_handling == "pre-fanin-recycle-sideload-to-input-lane",
                         "recyclable_byproducts": recyclable_byproducts,
                         "route_y": route_y,
                         "overflow_y": overflow_y,
                         "overflow_belts_added": belts_added if current_handling == "pre-fanin-finite-overflow-buffer" else 0,
                         "recycle_belts_added": belts_added if current_handling == "pre-fanin-recycle-return-to-input-boundary" else 0,
-                        "merge_belts_added": belts_added if current_handling == "pre-fanin-recycle-merge-to-input-boundary" else 0,
+                        "merge_belts_added": belts_added
+                        if current_handling in {"pre-fanin-recycle-merge-to-input-boundary", "pre-fanin-recycle-sideload-to-input-lane"}
+                        else 0,
                         "recycle_exit": recycle_exit,
                         "recycle_merge_target": recycle_merge_target,
                         "recycle_flow_audit": recycle_flow_audit,
@@ -4080,6 +4166,7 @@ def materialize_layout_with_summary(
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
     preseparate_output_before_fanin: bool = False,
+    experimental_prefanin_input_sideload: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     mapping_index = mapping_by_fingerprint(mappings)
     working_layout = copy.deepcopy(layout_plan)
@@ -4211,6 +4298,7 @@ def materialize_layout_with_summary(
             output_separation_min_distance=output_separation_min_distance,
             compress_output_boundary=compress_output_boundary,
             preseparate_output_before_fanin=preseparate_output_before_fanin,
+            experimental_prefanin_input_sideload=experimental_prefanin_input_sideload,
         )
         connector_result["output_inserter_upgrades"] = output_inserter_upgrades
 
@@ -4401,6 +4489,11 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         for item in output_separations
         if item.get("status") != "connected" or str(item.get("current_handling") or "").endswith("finite-overflow-buffer")
     )
+    experimental_sideload_separations = sum(
+        1
+        for item in output_separations
+        if item.get("current_handling") == "pre-fanin-recycle-sideload-to-input-lane"
+    )
     blocked_output_boundary_compressors = sum(
         1
         for item in output_boundary_compressors
@@ -4418,6 +4511,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         float(output_coverage_not_met),
         float(flow_statuses.get("failed", 0)),
         float(finite_or_blocked_output_separations),
+        float(experimental_sideload_separations),
         float(mixed_overloaded_preseparation),
         float(overloaded_output_lanes),
         float(contract_not_exact),
@@ -4446,6 +4540,7 @@ def select_best_materialized_layout(
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
     preseparate_output_before_fanin: bool = False,
+    experimental_prefanin_input_sideload: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if not connect_boundaries or knowledge is None or len(layout_plan.get("nodes") or []) != 1:
         wrapper, connector_summary = materialize_layout_with_summary(
@@ -4459,6 +4554,7 @@ def select_best_materialized_layout(
             output_separation_min_distance=output_separation_min_distance,
             compress_output_boundary=compress_output_boundary,
             preseparate_output_before_fanin=preseparate_output_before_fanin,
+            experimental_prefanin_input_sideload=experimental_prefanin_input_sideload,
         )
         return wrapper, connector_summary, layout_plan
 
@@ -4491,6 +4587,7 @@ def select_best_materialized_layout(
             output_separation_min_distance=output_separation_min_distance,
             compress_output_boundary=candidate_compress_output_boundary,
             preseparate_output_before_fanin=preseparate_output_before_fanin,
+            experimental_prefanin_input_sideload=experimental_prefanin_input_sideload,
         )
         summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
         return materialized_layout_score(summary), wrapper, connector_summary, candidate_layout, candidate_compress_output_boundary
@@ -5067,6 +5164,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force-columns", type=int, help="Experimental: force the single-node repeated grid to this column count instead of running post-materialization column search.")
     parser.add_argument("--output-separation-min-distance", type=float, default=1.0, help="Experimental: require this many tiles between the selected machine-output port and the target-item filter splitter.")
     parser.add_argument("--preseparate-output-before-fanin", action="store_true", help="Experimental: insert target/byproduct filter splitters on output fan-in source segments before multiple production instances merge.")
+    parser.add_argument("--experimental-prefanin-input-sideload", action="store_true", help="Experimental negative-evidence topology: let pre-fanin byproduct separators side-load recycled chunks into a nearby input lane. Not enabled by default because the real 3x2 crusher probe stayed below target.")
     parser.add_argument("--compress-output-boundary", action="store_true", help="Experimental: try to keep over-provisioned internal output lanes and add a corpus-derived 3-to-2 compressor for a 2-belt full-belt target; generic compressors with known runtime shortfall are reported as unresolved capacity and may be rejected by layout selection.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
@@ -5120,6 +5218,7 @@ def main(argv: list[str] | None = None) -> int:
         output_separation_min_distance=args.output_separation_min_distance,
         compress_output_boundary=args.compress_output_boundary,
         preseparate_output_before_fanin=args.preseparate_output_before_fanin,
+        experimental_prefanin_input_sideload=args.experimental_prefanin_input_sideload,
     )
     save_blueprint_file(args.output, wrapper)
     summary = render_summary(wrapper, layout, connector_summary, knowledge=knowledge)

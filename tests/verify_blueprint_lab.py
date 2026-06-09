@@ -17,7 +17,7 @@ from tools.blueprint_lab.directions import DIR_EAST, DIR_SOUTH, DIR_WEST
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.runtime_proof import build_runtime_proof, render_markdown_report as render_runtime_proof_markdown_report
-from tools.blueprint_lab.stage4_compare import build_comparison, summarize_candidate
+from tools.blueprint_lab.stage4_compare import build_comparison, candidate_lessons, candidate_score, summarize_candidate
 from tools.blueprint_lab.stage4_report import build_stage4_report, render_markdown_report as render_stage4_markdown_report
 from tools.blueprint_lab.stage4_generate import build_stage4_generation_package, package_summary, render_package_markdown
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
@@ -506,6 +506,16 @@ def main() -> int:
         or "pre-fanin byproduct separator" not in "\n".join(comparison["candidates"][1]["lessons"])
     ):
         print(f"FAIL: expected stage4 comparison to prefer runtime-proven candidate over exact unresolved candidate: {comparison}")
+        return 1
+    sideload_candidate = deepcopy(comparison["candidates"][1])
+    sideload_candidate["runtime_proof"] = below_target_runtime_proof
+    sideload_candidate["output_separation_handling_counts"] = {"pre-fanin-recycle-sideload-to-input-lane": 1}
+    missing_runtime_candidate = deepcopy(comparison["candidates"][2])
+    if (
+        candidate_score(sideload_candidate) <= candidate_score(missing_runtime_candidate)
+        or "side-load into input lanes" not in "\n".join(candidate_lessons(sideload_candidate))
+    ):
+        print("FAIL: expected below-target pre-fanin sideload candidate to rank as experimental negative evidence")
         return 1
     io_audit = audit_machine_io(
         {
@@ -1600,15 +1610,22 @@ def main() -> int:
             "routes": [],
             "connectors_added": 0,
             "output_separations": [
-                {"status": "connected", "current_handling": "pre-fanin-recycle-return-to-input-boundary"},
+                {"status": "connected", "current_handling": "pre-fanin-recycle-merge-to-input-boundary"},
             ],
         },
     }
+    sideload_score_fixture = deepcopy(score_fixture)
+    sideload_score_fixture["connector_summary"]["output_separations"] = [
+        {"status": "connected", "current_handling": "pre-fanin-recycle-sideload-to-input-lane", "experimental": True},
+    ]
     finite_score_fixture = deepcopy(score_fixture)
     finite_score_fixture["connector_summary"]["output_separations"] = [
         {"status": "connected", "current_handling": "pre-fanin-finite-overflow-buffer"},
     ]
-    if materialized_layout_score(finite_score_fixture) <= materialized_layout_score(score_fixture):
+    if materialized_layout_score(sideload_score_fixture) <= materialized_layout_score(score_fixture):
+        print("FAIL: expected materialized layout score to penalize experimental pre-fanin input-lane sideload")
+        return 1
+    if materialized_layout_score(finite_score_fixture) <= materialized_layout_score(sideload_score_fixture):
         print("FAIL: expected materialized layout score to penalize pre-fanin finite overflow buffers")
         return 1
     byproduct_overloaded_layout = deepcopy(byproduct_replicated_layout)

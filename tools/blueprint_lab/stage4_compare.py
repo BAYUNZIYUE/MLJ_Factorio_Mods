@@ -109,14 +109,19 @@ def candidate_score(candidate: dict[str, Any]) -> list[float]:
     output_separation_handling_counts = candidate.get("output_separation_handling_counts") or {}
     pre_fanin_finite_overflow = int(output_separation_handling_counts.get("pre-fanin-finite-overflow-buffer") or 0)
     finite_overflow = int(output_separation_handling_counts.get("finite-overflow-buffer") or 0)
+    pre_fanin_sideload = int(output_separation_handling_counts.get("pre-fanin-recycle-sideload-to-input-lane") or 0)
+    runtime_rank = float(RUNTIME_STATUS_RANK.get(runtime_status, 5))
+    if pre_fanin_sideload and runtime_status != "runtime-proven":
+        runtime_rank += 4.0
     return [
-        float(RUNTIME_STATUS_RANK.get(runtime_status, 5)),
+        runtime_rank,
         decay_penalty,
         best_window_deficit,
         last_window_deficit,
         float(CAPACITY_STATUS_RANK.get(capacity.get("status"), 5)),
         float(pre_fanin_finite_overflow),
         float(finite_overflow),
+        float(pre_fanin_sideload),
         float(mixed_overloaded_exposure),
         float(target_overloaded_after_preseparation),
         float(CONTRACT_STATUS_RANK.get(contract.get("status"), 5)),
@@ -301,6 +306,7 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     output_separation_handling_counts = candidate.get("output_separation_handling_counts") or {}
     pre_fanin_finite_overflow = output_separation_handling_counts.get("pre-fanin-finite-overflow-buffer", 0)
     finite_overflow = output_separation_handling_counts.get("finite-overflow-buffer", 0)
+    pre_fanin_sideload = output_separation_handling_counts.get("pre-fanin-recycle-sideload-to-input-lane", 0)
     if pre_fanin_finite_overflow:
         lessons.append(
             f"{pre_fanin_finite_overflow} pre-fanin byproduct separator(s) still use finite overflow buffers; recycle stability is unresolved"
@@ -308,6 +314,10 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     if finite_overflow:
         lessons.append(
             f"{finite_overflow} output byproduct separator(s) still use finite overflow buffers"
+        )
+    if pre_fanin_sideload:
+        lessons.append(
+            f"{pre_fanin_sideload} pre-fanin byproduct separator(s) side-load into input lanes; this is experimental negative evidence until runtime proves the input lane stays uncongested"
         )
     if mixed_overloaded_exposure:
         lessons.append(
@@ -346,11 +356,26 @@ def build_comparison(candidates: list[dict[str, Any]]) -> dict[str, Any]:
         for item in ordered
         if (item.get("runtime_gap_analysis") or {}).get("near_miss")
     ]
+    recommended_reason = None
+    if recommended:
+        runtime_status = (recommended.get("runtime_proof") or {}).get("status")
+        handling_counts = recommended.get("output_separation_handling_counts") or {}
+        if runtime_status == "runtime-proven":
+            recommended_reason = "runtime proof outranks visual/exact boundary contract until strict compression is runtime-proven"
+        elif handling_counts.get("pre-fanin-recycle-sideload-to-input-lane"):
+            recommended_reason = "experimental pre-fanin input-lane sideload is selected only for inspection; it still needs runtime proof before it can be treated as solved"
+        elif runtime_status is None and any(
+            (item.get("output_separation_handling_counts") or {}).get("pre-fanin-recycle-sideload-to-input-lane")
+            and (item.get("runtime_proof") or {}).get("status") != "runtime-proven"
+            for item in ordered
+        ):
+            recommended_reason = "below-target input-lane sideload is negative evidence, so the default candidate remains the safer follow-up despite missing runtime proof"
+        else:
+            recommended_reason = "candidate score balances runtime proof, boundary capacity, output separation stability, and compactness"
     return {
         "candidate_count": len(candidates),
         "recommended_label": recommended.get("label") if recommended else None,
-        "recommended_reason": "runtime proof outranks visual/exact boundary contract until strict compression is runtime-proven"
-        if recommended else None,
+        "recommended_reason": recommended_reason,
         "candidates": ordered,
         "strict_boundary_candidates": [item["label"] for item in strict_candidates],
         "runtime_proven_candidates": [item["label"] for item in runtime_proven],
