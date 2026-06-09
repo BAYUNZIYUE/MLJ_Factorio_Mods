@@ -404,15 +404,25 @@ routes, and routes the recyclable chunk side outputs back to the left input
 boundary with U-shaped recycle-return belts. This remains a generated diagnostic
 geometry, not a proof that the recycle loop is fully drained or long-run stable.
 
-Runtime probes against the current 2x3 source-fan-in blueprint import 771
+The learned blueprint corpus also shows that inserter filters are common in
+large black-box builds: inserters use `filters`, `use_filters`, and sometimes
+`filter_mode` to keep mixed belts semantically clean. Blueprint Lab applies that
+lesson to generated output expansion inserters. Extra output inserters are now
+filtered to the target product, and the runtime validator restores those filters
+in its direct-placement fallback with `LuaEntity::set_filter`.
+
+Runtime probes against the current 2x3 source-fan-in blueprint import 780
 entities through the direct-placement fallback, set six recipes, restore six
-splitter settings, and place all entities without manual failures. A 2400-tick
-probe with 300-tick sustained input intervals reports right-boundary windows
-around `3924/min`, `4368/min`, `4476/min`, `4476/min`, `4380/min`, and
-`4524/min`, with `right_boundary_cleanliness status=clean`. This is a clear
-improvement over the broken exact 3x2 candidate, but it is still well below
-`2x turbo = 7200/min`; the remaining bottleneck is output unloading and
-machine-output buffering, with `recipe_machine_audit status=full_output:6`.
+splitter settings, restore fifteen inserter filters, and place all entities
+without manual failures. A 2400-tick probe with 300-tick sustained input
+intervals reports right-boundary windows around `4152/min`, `4704/min`,
+`5088/min`, `5220/min`, `5340/min`, and `5292/min`, with
+`right_boundary_cleanliness status=clean`. This improves over the previous
+2x3 source-fan-in result, but it is still below `2x turbo = 7200/min`. The
+runtime state shifted from all machines being output-blocked to
+`full_output:4,item_ingredient_shortage:2`, so the next generator problem is not
+just more existing-belt unloaders; it needs routed new drop lanes and stronger
+input/recycle feeding.
 
 For throughput-style validation, the runtime validator can run a right-boundary
 window drain with `--throughput-window-ticks` and `--throughput-target-item`.
@@ -425,14 +435,11 @@ generator goal better than lane-perfect accounting. It is still a diagnostic
 sink: removing items from the right boundary prevents output backup during the
 probe, so the result is evidence for delivered product rate under a test sink,
 not a complete proof of natural steady-state full-belt throughput.
-In the current `iron-ore 2x turbo-transport-belt` recycle-merge sample, the
-300-tick throughput windows after startup were first measured at about
-`444-456/min` delivered `iron-ore`. After upgrading the real output inserters
-from `fast-inserter` to `stack-inserter`, the same 2400-tick probe reports
-steady post-startup windows around `1224-1248/min`, while the requested contract
-is `7200/min`. That is useful negative evidence: the generated box now has
-clean output, repeated runtime delivery, and stronger output inserters, but it
-is still far from a sustained 2x turbo full-belt output.
+Earlier probes are still useful as regression markers. The generated output has
+moved from `0/min` on a broken exact 3x2 candidate, to about `4.0-4.5k/min`
+after source-port fan-in, to about `5.3k/min` after filtered multi-inserter
+unloading on existing drop belts. The requested contract is still `7200/min`,
+so the current result is progress evidence, not completion evidence.
 
 ## Commands
 

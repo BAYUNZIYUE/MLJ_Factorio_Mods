@@ -1092,6 +1092,8 @@ local function run_validation()
     local module_insert_failures = 0
     local splitter_setting_count = 0
     local splitter_setting_failures = 0
+    local inserter_filter_count = 0
+    local inserter_filter_failures = 0
     for _, entity in pairs(blueprint_entities) do
       local entity_direction = entity.direction or defines.direction.north
       local ok_create, created = pcall(function()
@@ -1184,6 +1186,33 @@ local function run_validation()
             end
           end
         end
+        if entity.filters ~= nil then
+          for filter_index, filter in pairs(entity.filters) do
+            local target_index = filter.index or filter_index
+            local ok_inserter_filter, inserter_filter_result = pcall(function()
+              created.set_filter(target_index, filter)
+            end)
+            if ok_inserter_filter then
+              inserter_filter_count = inserter_filter_count + 1
+            else
+              inserter_filter_failures = inserter_filter_failures + 1
+              if inserter_filter_failures <= 8 then
+                log("BLUEPRINT_LAB_VALIDATION manual_inserter_filter_failed " .. entity.name .. "=" .. tostring(inserter_filter_result))
+              end
+            end
+          end
+        end
+        if entity.use_filters ~= nil then
+          local ok_inserter_use_filters, inserter_use_filters_result = pcall(function()
+            created.use_filters = entity.use_filters
+          end)
+          if not ok_inserter_use_filters then
+            inserter_filter_failures = inserter_filter_failures + 1
+            if inserter_filter_failures <= 8 then
+              log("BLUEPRINT_LAB_VALIDATION manual_inserter_use_filters_failed " .. entity.name .. "=" .. tostring(inserter_use_filters_result))
+            end
+          end
+        end
         if entity.items ~= nil then
           local module_inventory = created.get_module_inventory()
           if module_inventory ~= nil then
@@ -1225,7 +1254,8 @@ local function run_validation()
     log("BLUEPRINT_LAB_VALIDATION manual_entities=" .. tostring(manual_count) .. " manual_failures=" .. tostring(manual_failures) .. " manual_recipe_set=" .. tostring(recipe_set_count) .. " manual_recipe_failures=" .. tostring(recipe_failures))
     log("BLUEPRINT_LAB_VALIDATION manual_underground_types=" .. tostring(underground_type_count) .. " manual_underground_type_failures=" .. tostring(underground_type_failures) .. " manual_modules_inserted=" .. tostring(module_inserted_count) .. " manual_module_failures=" .. tostring(module_insert_failures))
     log("BLUEPRINT_LAB_VALIDATION manual_splitter_settings=" .. tostring(splitter_setting_count) .. " manual_splitter_setting_failures=" .. tostring(splitter_setting_failures))
-    if manual_failures > 0 or recipe_failures > 0 or underground_type_failures > 0 or module_insert_failures > 0 or splitter_setting_failures > 0 then
+    log("BLUEPRINT_LAB_VALIDATION manual_inserter_filters=" .. tostring(inserter_filter_count) .. " manual_inserter_filter_failures=" .. tostring(inserter_filter_failures))
+    if manual_failures > 0 or recipe_failures > 0 or underground_type_failures > 0 or module_insert_failures > 0 or splitter_setting_failures > 0 or inserter_filter_failures > 0 then
       validation_fail("manual fallback failed to place all entities")
     end
   end

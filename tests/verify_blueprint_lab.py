@@ -71,9 +71,11 @@ def main() -> int:
         "manual_underground_types=",
         "manual_modules_inserted=",
         "manual_splitter_settings=",
+        "manual_inserter_filters=",
         "created.splitter_filter",
         "created.splitter_input_priority",
         "created.splitter_output_priority",
+        "created.set_filter(target_index, filter)",
         "created.set_recipe(entity.recipe, entity.recipe_quality)",
         "runtime_audit_wait_ticks=",
         "sustained_input_interval_ticks=",
@@ -458,12 +460,33 @@ def main() -> int:
     ]
     expansion_summary = materialize_machine_output_expansions(expansion_fixture_entities, knowledge)
     if (
-        expansion_summary.get("inserters_added") != 1
+        expansion_summary.get("inserters_added") != 2
         or expansion_summary.get("drop_belts_added") != 0
         or expansion_summary.get("machines_expanded") != 1
-        or Counter(entity["name"] for entity in expansion_fixture_entities)["stack-inserter"] != 2
+        or Counter(entity["name"] for entity in expansion_fixture_entities)["stack-inserter"] != 3
     ):
-        print(f"FAIL: expected materialized output expansion to add one extra stack inserter to an existing drop belt: {expansion_summary} {expansion_fixture_entities}")
+        print(f"FAIL: expected materialized output expansion to add two extra stack inserters to an existing drop belt: {expansion_summary} {expansion_fixture_entities}")
+        return 1
+    filtered_fixture_entities = [
+        {"entity_number": 1, "name": "assembling-machine-3", "position": {"x": 4, "y": 4}, "recipe": "iron-gear-wheel"},
+        {"entity_number": 2, "name": "stack-inserter", "position": {"x": 4, "y": 3}, "direction": DIR_SOUTH},
+        {"entity_number": 3, "name": "transport-belt", "position": {"x": 4, "y": 2}, "direction": DIR_EAST},
+        {"entity_number": 4, "name": "transport-belt", "position": {"x": 6, "y": 4}, "direction": DIR_EAST},
+    ]
+    materialize_machine_output_expansions(filtered_fixture_entities, knowledge, target_item="iron-gear-wheel")
+    added_filtered_inserters = [
+        entity
+        for entity in filtered_fixture_entities
+        if entity["name"] == "stack-inserter" and entity.get("filters")
+    ]
+    if (
+        len(added_filtered_inserters) != 2
+        or added_filtered_inserters[0]["filters"][0]["name"] != "iron-gear-wheel"
+        or added_filtered_inserters[1]["filters"][0]["name"] != "iron-gear-wheel"
+        or added_filtered_inserters[0].get("use_filters") is not True
+        or added_filtered_inserters[1].get("use_filters") is not True
+    ):
+        print(f"FAIL: expected generated output expansion inserters to filter the target product: {filtered_fixture_entities}")
         return 1
     pruned_entities = prune_template_entities_for_recipe(
         [

@@ -668,8 +668,9 @@ def materialize_machine_output_expansions(
     knowledge: PrototypeKnowledge | None,
     *,
     inserter_name: str = "stack-inserter",
-    max_per_machine: int = 1,
+    max_per_machine: int = 4,
     allow_new_drop_belts: bool = False,
+    target_item: str | None = None,
 ) -> dict[str, Any]:
     if knowledge is None or max_per_machine <= 0:
         return {
@@ -721,6 +722,16 @@ def materialize_machine_output_expansions(
                 },
                 "direction": int(candidate["direction"]),
             }
+            if target_item:
+                candidate_inserter["filters"] = [
+                    {
+                        "index": 1,
+                        "name": target_item,
+                        "quality": "normal",
+                        "comparator": "=",
+                    }
+                ]
+                candidate_inserter["use_filters"] = True
             proposed_entities = [candidate_inserter]
             if candidate.get("drop") == "new-belt":
                 proposed_entities.append(
@@ -781,6 +792,7 @@ def materialize_machine_output_expansions(
         "blocked": blocked,
         "strategy": "prefer-existing-drop-belt",
         "allow_new_drop_belts": allow_new_drop_belts,
+        "target_item_filter": target_item,
     }
 
 
@@ -3395,7 +3407,11 @@ def materialize_layout_with_summary(
         )
         connector_result["output_inserter_upgrades"] = output_inserter_upgrades
 
-    connector_result["machine_output_expansions"] = materialize_machine_output_expansions(entities, knowledge)
+    connector_result["machine_output_expansions"] = materialize_machine_output_expansions(
+        entities,
+        knowledge,
+        target_item=str(working_layout.get("target_item") or ""),
+    )
 
     target_item = str(working_layout["target_item"])
     wrapper = make_blueprint_wrapper(
