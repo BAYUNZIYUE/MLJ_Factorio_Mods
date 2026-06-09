@@ -552,6 +552,8 @@ while runtime still misses a few items per window. The next strict generator
 attempt should either split target/byproduct output before fan-in or replace
 this row fan-in with a runtime-proven lane-aware compressor.
 
+The same value is now used during post-materialize layout selection for single-node full-belt candidates with item byproducts. If a candidate row has more columns than `max_safe_instances_before_separation`, its summary records `output_preseparation_safe_width_constraint.status=over-limit` and the selector scores it worse than a width-safe candidate. This is intentionally conservative: it does not make the strict two-belt design impossible, but it requires that an over-wide row come from an explicit forced experiment, an earlier target/byproduct separation topology, or a runtime-proven lane-aware compressor rather than from the default compactness search.
+
 Two follow-up probes narrowed the next design space. First, routing experimental
 new drop belts back into the main output lane made the extra inserters visible
 to the runtime audit, but the route crossed output-inserter pickup semantics:

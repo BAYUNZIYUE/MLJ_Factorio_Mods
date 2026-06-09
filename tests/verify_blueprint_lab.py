@@ -1527,6 +1527,55 @@ def main() -> int:
     ):
         print(f"FAIL: expected byproduct pre-separation exposure audit to escalate mixed overloaded routes: {byproduct_overloaded_summary}")
         return 1
+    preseparation_selector_layout = deepcopy(byproduct_layout)
+    preseparation_selector_layout["target_rate_per_minute"] = 7200
+    preseparation_selector_layout["target_rate_basis"] = {
+        "kind": "full-belt",
+        "belt_name": "turbo-transport-belt",
+        "belt_count": 2,
+        "items_per_second_per_belt": 60,
+    }
+    preseparation_selector_layout["max_columns"] = 3
+    preseparation_selector_layout["estimated_width"] = 32
+    preseparation_selector_layout["boundary_outputs"] = [{"item": "iron-ore", "rate_per_minute": 7200, "side": "right"}]
+    preseparation_selector_layout["nodes"][0]["instances"] = 3
+    preseparation_selector_layout["nodes"][0]["columns"] = 3
+    preseparation_selector_layout["nodes"][0]["rows"] = 1
+    preseparation_selector_layout["nodes"][0]["planned_width"] = 16
+    preseparation_selector_layout["nodes"][0]["planned_net_output_per_minute"] = 5400
+    _, selector_summary, selector_layout = select_best_materialized_layout(
+        preseparation_selector_layout,
+        byproduct_mappings,
+        label="fixture-byproduct-safe-width-selector",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    selector_constraint = selector_layout.get("output_preseparation_safe_width_constraint") or {}
+    if (
+        selector_layout["layout_selection"]["selected_columns"] != 2
+        or selector_constraint.get("status") != "within-limit"
+        or selector_constraint.get("max_safe_instances_before_separation") != 2
+        or selector_summary["output_preseparation_exposure_audit"][0]["max_safe_instances_before_separation"] != 2
+    ):
+        print(f"FAIL: expected selector to keep byproduct row fan-in within the pre-separation safe width: {selector_layout} {selector_summary}")
+        return 1
+    _, forced_selector_summary, forced_selector_layout = select_best_materialized_layout(
+        preseparation_selector_layout,
+        byproduct_mappings,
+        label="fixture-byproduct-safe-width-forced",
+        connect_boundaries=True,
+        knowledge=knowledge,
+        force_columns=3,
+    )
+    forced_constraint = forced_selector_layout.get("output_preseparation_safe_width_constraint") or {}
+    if (
+        forced_selector_layout["layout_selection"]["selected_columns"] != 3
+        or forced_constraint.get("status") != "over-limit"
+        or forced_constraint.get("max_safe_instances_before_separation") != 2
+        or forced_selector_summary["output_preseparation_exposure_audit"][0]["status"] != "mixed-overloaded-before-separation"
+    ):
+        print(f"FAIL: expected forced over-wide rows to be marked over the pre-separation safe width: {forced_selector_layout} {forced_selector_summary}")
+        return 1
     capacity_unresolved_lane_mappings = deepcopy(capacity_multi_lane_mappings)
     capacity_unresolved_lane_mappings[0]["layout"]["entities"][-1] = {
         "name": "turbo-splitter",

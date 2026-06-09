@@ -3949,8 +3949,69 @@ def layout_with_single_node_columns(layout_plan: dict[str, Any], columns: int, *
     return layout
 
 
+def output_preseparation_safe_width_constraint(
+    layout_plan: dict[str, Any],
+    knowledge: PrototypeKnowledge | None,
+) -> dict[str, Any] | None:
+    if knowledge is None or len(layout_plan.get("nodes") or []) != 1:
+        return None
+    target_rate_basis = layout_plan.get("target_rate_basis") or {}
+    if target_rate_basis.get("kind") != "full-belt":
+        return None
+    target_item = str(layout_plan.get("target_item") or "")
+    belt_name = str(target_rate_basis.get("belt_name") or "")
+    node = layout_plan["nodes"][0]
+    recipe_name = str(node.get("recipe") or "")
+    recipe = knowledge.recipe(recipe_name)
+    if recipe is None:
+        return None
+    byproducts = sorted(
+        {
+            product.name
+            for product in recipe.products
+            if product.type == "item"
+            and product.name != target_item
+            and product.amount * product.probability > 0
+        }
+    )
+    if not byproducts:
+        return None
+
+    instances = max(1, int(node.get("instances") or 1))
+    columns = max(1, int(node.get("columns") or instances))
+    planned_net = float(node.get("planned_net_output_per_minute") or 0.0)
+    per_instance_rate = planned_net / instances if instances else 0.0
+    belt = knowledge.belt(belt_name)
+    lane_capacity = float(belt.items_per_minute) if belt is not None else None
+    max_safe_instances = None
+    if lane_capacity is not None and per_instance_rate > 0:
+        max_safe_instances = max(1, int(math.floor(lane_capacity / per_instance_rate)))
+    status = "unknown"
+    if max_safe_instances is not None:
+        status = "over-limit" if columns > max_safe_instances else "within-limit"
+    return {
+        "status": status,
+        "strategy": "limit-row-fanin-before-target-byproduct-separation",
+        "target_item": target_item,
+        "recipe": recipe_name,
+        "byproducts": byproducts,
+        "columns": columns,
+        "per_instance_net_output_per_minute": per_instance_rate,
+        "lane_capacity_per_minute": lane_capacity,
+        "max_safe_instances_before_separation": max_safe_instances,
+        "recommendation": (
+            "reduce-row-width-or-add-pre-fanin-separation"
+            if status == "over-limit"
+            else "row-width-is-within-preseparation-lane-capacity"
+            if status == "within-limit"
+            else "cannot-compute-preseparation-safe-width"
+        ),
+    }
+
+
 def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     connector_summary = summary["connector_summary"]
+    safe_width_constraint = summary.get("output_preseparation_safe_width_constraint") or {}
     flow_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("belt_flow_audit") or [])
     capacity_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_capacity_audit") or [])
     contract_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_contract_audit") or [])
@@ -3979,6 +4040,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     output_not_sufficient = sum(1 for item in output_capacity if item.get("status") != "sufficient")
     output_coverage_not_met = sum(1 for item in output_coverage if not item.get("meets_required_rate", item.get("status") == "covered"))
     output_routes_without_machine_drop = sum(1 for item in output_routes if (item.get("port") or {}).get("role") != "machine-output")
+    preseparation_safe_width_over_limit = 1 if safe_width_constraint.get("status") == "over-limit" else 0
     contract_not_exact = sum(1 for item in connector_summary.get("boundary_contract_audit") or [] if item.get("status") != "exact")
     contract_over = contract_statuses.get("over-provisioned", 0)
     bad_capacity = capacity_statuses.get("failed", 0) + capacity_statuses.get("insufficient", 0)
@@ -4006,6 +4068,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     return (
         float(len(connector_summary.get("collisions") or [])),
         float(blocked_output_boundary_compressors),
+        float(preseparation_safe_width_over_limit),
         float(output_not_sufficient),
         float(output_coverage_not_met),
         float(flow_statuses.get("failed", 0)),
@@ -4067,6 +4130,9 @@ def select_best_materialized_layout(
         candidate_compress_output_boundary: bool,
     ) -> tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any], bool]:
         candidate_layout = layout_with_single_node_columns(layout_plan, columns, lane_width=lane_width)
+        safe_width_constraint = output_preseparation_safe_width_constraint(candidate_layout, knowledge)
+        if safe_width_constraint is not None:
+            candidate_layout["output_preseparation_safe_width_constraint"] = safe_width_constraint
         wrapper, connector_summary = materialize_layout_with_summary(
             candidate_layout,
             mappings,
@@ -4245,6 +4311,7 @@ def render_summary(
         "boundary_outputs": layout["boundary_outputs"],
         "layout_nodes": layout_nodes,
         "layout_selection": layout.get("layout_selection"),
+        "output_preseparation_safe_width_constraint": layout.get("output_preseparation_safe_width_constraint"),
         "connector_summary": summary,
         "route_status_counts": dict(route_status_counts),
         "machine_io_audit": audit_machine_io(wrapper, knowledge),
@@ -4297,6 +4364,15 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             f"- Layout selection: {selection.get('strategy')} "
             f"columns={selection.get('selected_columns', selection.get('columns'))} "
             f"rows={selection.get('selected_rows', selection.get('rows'))}"
+        )
+    if summary.get("output_preseparation_safe_width_constraint"):
+        constraint = summary["output_preseparation_safe_width_constraint"]
+        lines.append(
+            f"- Output pre-separation safe width: status={constraint.get('status')} "
+            f"columns={constraint.get('columns')} "
+            f"max_safe_instances={constraint.get('max_safe_instances_before_separation')} "
+            f"byproducts={constraint.get('byproducts')} "
+            f"next={constraint.get('recommendation')}"
         )
     lines.extend(["", "## Boundary Inputs", ""])
     if summary["boundary_inputs"]:
