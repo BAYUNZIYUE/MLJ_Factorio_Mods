@@ -554,6 +554,18 @@ proven boundary, post-materialize layout selection will avoid this compressor by
 default. Use `--force-columns 2 --compress-output-boundary` only when explicitly
 inspecting the failed exact-boundary experiment.
 
+The stage-4 package command currently demonstrates the conservative default
+path for `iron-ore` at `2x turbo-transport-belt`: it avoids the known-insufficient
+compressor and selects a vertical `1x6` materialized layout with six external
+turbo output routes. Its audit reports an over-provisioned output contract, not
+an exact two-belt contract, but the right boundary is runtime-proven for the
+target. A 2400-tick Factorio probe with sustained left-boundary input and a
+300-tick throughput window produced `7528.64/min` at the right boundary,
+`right_boundary_cleanliness status=clean`, and `invalid_output_inserters=0`.
+That makes it a valid current stage-4 generated black-box candidate for the
+requested throughput, while strict external two-belt compression remains a
+separate unsolved milestone.
+
 The follow-up diagnosis adds an exact-x throughput probe with
 `--throughput-probe-x`. It reuses the same runtime drain and lane markers, but
 measures a chosen belt column instead of only the rightmost boundary. On the
@@ -678,6 +690,13 @@ known-insufficient compressor, the generated audit can still report an
 over-provisioned external boundary. If a forced compressed layout is requested,
 the capacity audit must keep known runtime-insufficient compressor capacity
 unresolved until a runtime throughput probe proves otherwise.
+
+Runtime-check that package output with sustained input and right-boundary
+throughput measurement:
+
+```bash
+python3 -m tools.blueprint_lab.factorio_validate --scenario-name blueprint_lab_validation_stage4_generate_iron_ore_2x_turbo_2400 --blueprint .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo.txt --user-data-dir .codex/tests/factorio-probe-stage4-generate-write-data --mod-directory /mnt/c/Users/MLJ/AppData/Roaming/Factorio/mods --console-log .codex/tests/blueprint-lab-stage4-generate-iron-ore-2x-turbo-2400.log --until-tick 2400 --timeout-seconds 120 --input-probe left --runtime-audit-wait-ticks 2400 --sustained-input-interval-ticks 300 --throughput-window-ticks 300 --throughput-target-item iron-ore
+```
 
 Generate the current seed blueprint:
 
