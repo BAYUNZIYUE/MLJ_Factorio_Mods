@@ -493,10 +493,14 @@ def main() -> int:
         comparison["recommended_label"] != "runtime-over-provisioned"
         or comparison["strict_boundary_candidates"] != ["exact-near-miss", "exact-unresolved"]
         or comparison["runtime_proven_candidates"] != ["runtime-over-provisioned"]
+        or comparison["strict_near_miss_candidates"] != ["exact-near-miss"]
         or [item["label"] for item in comparison["candidates"]] != ["runtime-over-provisioned", "exact-near-miss", "exact-unresolved"]
         or "runtime proof outranks" not in comparison["recommended_reason"]
         or "best throughput window reached 240.0/min" not in "\n".join(comparison["candidates"][0]["lessons"])
         or "best throughput window reached 149.0/min with deficit 1.0/min" not in "\n".join(comparison["candidates"][1]["lessons"])
+        or comparison["candidates"][1]["runtime_gap_analysis"]["category"] != "strict-near-miss"
+        or comparison["candidates"][1]["runtime_gap_analysis"]["next_action"] != "tune-final-two-belt-compression-geometry"
+        or "strict near-miss" not in "\n".join(comparison["candidates"][1]["lessons"])
     ):
         print(f"FAIL: expected stage4 comparison to prefer runtime-proven candidate over exact unresolved candidate: {comparison}")
         return 1

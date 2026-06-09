@@ -30,6 +30,9 @@ CONTRACT_STATUS_RANK = {
 }
 
 
+NEAR_MISS_DEFICIT_RATIO = 0.02
+
+
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -93,6 +96,66 @@ def candidate_score(candidate: dict[str, Any]) -> list[float]:
     ]
 
 
+def runtime_gap_analysis(candidate: dict[str, Any]) -> dict[str, Any]:
+    runtime = candidate.get("runtime_proof") or {}
+    contract = candidate.get("output_contract") or {}
+    capacity = candidate.get("output_capacity") or {}
+    lane_summary = runtime.get("throughput_lane_summary") or {}
+    window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
+    best_window = window_diagnostics.get("best_window") or {}
+    cleanliness = runtime.get("right_boundary_cleanliness") or {}
+    invalid_output = runtime.get("invalid_output_inserters") or {}
+    target_rate = candidate.get("target_rate_per_minute")
+    best_deficit = best_window.get("target_rate_deficit_per_minute")
+    best_rate = best_window.get("target_per_minute")
+    expected_belt_count = int(contract.get("expected_belt_count") or 0)
+    expected_transport_lines = expected_belt_count * 2 if expected_belt_count else None
+    observed_lines = lane_summary.get("line_count")
+    exact_contract = contract.get("status") == "exact"
+    clean_boundary = cleanliness.get("status") in {"clean", "empty"}
+    invalid_count = int(invalid_output.get("count") or 0) if invalid_output else None
+    near_miss = False
+    if (
+        exact_contract
+        and runtime.get("status") == "below-target"
+        and capacity.get("status") == "sufficient"
+        and clean_boundary
+        and invalid_count == 0
+        and isinstance(best_deficit, (int, float))
+        and isinstance(target_rate, (int, float))
+    ):
+        near_miss = float(best_deficit) <= max(1.0, float(target_rate) * NEAR_MISS_DEFICIT_RATIO)
+    if runtime.get("status") == "runtime-proven":
+        category = "runtime-proven"
+        next_action = "preserve-runtime-proof-and-reduce-over-provisioning" if contract.get("status") == "over-provisioned" else "accept-strict-runtime-proven-candidate"
+    elif near_miss:
+        category = "strict-near-miss"
+        next_action = "tune-final-two-belt-compression-geometry"
+    elif runtime.get("status") == "below-target":
+        category = "below-target"
+        next_action = "fix-runtime-throughput-before-ranking-as-solved"
+    elif runtime:
+        category = str(runtime.get("status") or "runtime-unknown")
+        next_action = "collect-complete-runtime-proof"
+    else:
+        category = "missing-runtime-proof"
+        next_action = "run-factorio-runtime-proof"
+    return {
+        "category": category,
+        "near_miss": near_miss,
+        "best_window_rate_per_minute": best_rate,
+        "best_window_deficit_per_minute": best_deficit,
+        "target_rate_per_minute": target_rate,
+        "windows_at_or_above_target": window_diagnostics.get("windows_at_or_above_target"),
+        "window_count": window_diagnostics.get("window_count"),
+        "expected_transport_lines": expected_transport_lines,
+        "observed_transport_lines": observed_lines,
+        "clean_boundary": clean_boundary,
+        "invalid_output_inserters": invalid_count,
+        "next_action": next_action,
+    }
+
+
 def summarize_candidate(
     *,
     label: str,
@@ -126,6 +189,7 @@ def summarize_candidate(
         },
         "runtime_proof": proof,
     }
+    candidate["runtime_gap_analysis"] = runtime_gap_analysis(candidate)
     candidate["score"] = candidate_score(candidate)
     candidate["lessons"] = candidate_lessons(candidate)
     return candidate
@@ -139,6 +203,7 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     lane_summary = runtime.get("throughput_lane_summary") or {}
     window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
     best_window = window_diagnostics.get("best_window") or {}
+    gap = candidate.get("runtime_gap_analysis") or {}
     if runtime.get("status") == "runtime-proven":
         lessons.append("runtime probe proves target throughput, clean right boundary, and no invalid output inserters")
     elif runtime:
@@ -159,6 +224,10 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
         lessons.append(
             f"runtime throughput is distributed across {lane_summary.get('line_count')} output lines with spread {lane_summary.get('spread_target_items')}"
         )
+    if gap.get("near_miss"):
+        lessons.append(
+            f"strict near-miss: exact boundary is clean, invalid output inserters are zero, and best window is short by {gap.get('best_window_deficit_per_minute')}/min"
+        )
     return lessons
 
 
@@ -175,6 +244,11 @@ def build_comparison(candidates: list[dict[str, Any]]) -> dict[str, Any]:
         for item in ordered
         if (item.get("runtime_proof") or {}).get("status") == "runtime-proven"
     ]
+    strict_near_misses = [
+        item
+        for item in ordered
+        if (item.get("runtime_gap_analysis") or {}).get("near_miss")
+    ]
     return {
         "candidate_count": len(candidates),
         "recommended_label": recommended.get("label") if recommended else None,
@@ -183,11 +257,13 @@ def build_comparison(candidates: list[dict[str, Any]]) -> dict[str, Any]:
         "candidates": ordered,
         "strict_boundary_candidates": [item["label"] for item in strict_candidates],
         "runtime_proven_candidates": [item["label"] for item in runtime_proven],
+        "strict_near_miss_candidates": [item["label"] for item in strict_near_misses],
         "next_constraints": [
             "strict two-belt candidate must keep output contract exact",
             "strict two-belt candidate must provide runtime-proven throughput at or above target",
             "runtime lane summary must collapse external output to the expected final transport lines without falling below target",
             "right boundary must remain clean and invalid_output_inserters must stay zero",
+            "strict near-miss candidates should tune final two-belt compression geometry before changing machine count",
         ],
     }
 
@@ -212,6 +288,7 @@ def render_markdown_report(comparison: dict[str, Any]) -> str:
         window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
         best_window = window_diagnostics.get("best_window") or {}
         last_window = window_diagnostics.get("last_window") or {}
+        gap = candidate.get("runtime_gap_analysis") or {}
         lines.extend(
             [
                 f"### {candidate['label']}",
@@ -225,6 +302,7 @@ def render_markdown_report(comparison: dict[str, Any]) -> str:
                 f"- Runtime last window: {last_window.get('target_per_minute', 'unknown')}/min deficit={last_window.get('target_rate_deficit_per_minute', 'unknown')}/min",
                 f"- Runtime windows at target: {window_diagnostics.get('windows_at_or_above_target', 'unknown')}/{window_diagnostics.get('window_count', 'unknown')}",
                 f"- Runtime output lines: {lane_summary.get('line_count', 'unknown')} spread={lane_summary.get('spread_target_items', 'unknown')}",
+                f"- Runtime gap category: {gap.get('category', 'unknown')} next={gap.get('next_action', 'unknown')}",
                 f"- Bounds: {candidate.get('width'):g} x {candidate.get('height'):g}",
             ]
         )

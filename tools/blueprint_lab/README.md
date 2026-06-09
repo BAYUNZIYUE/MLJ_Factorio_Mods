@@ -508,12 +508,11 @@ external contract exact at two `turbo-transport-belt` output lanes, and routes
 both `metallic-asteroid-chunk` byproduct splitter outputs back to the input
 boundary instead of leaving one lane as a finite overflow buffer. That removes a
 known long-run stability problem, but it still does not finish the strict
-contract: a 2400-tick runtime probe reached
-`0/1440/6624/6960/7092/7104/7152/min`, with `invalid_output_inserters=0`
-and a clean right boundary. The best window is still `48/min` below the strict
-two-belt target, and a faster 60-tick input probe did not improve the result, so
-the remaining gap is a final two-belt compression problem rather than a simple
-input-feed problem.
+contract: a 4800-tick runtime probe reached steady 300-tick windows around
+`7092-7140/min`, with `invalid_output_inserters=0` and a clean right boundary.
+The best window is still `60/min` below the strict two-belt target, and a faster
+60-tick input probe did not improve the result, so the remaining gap is a final
+two-belt compression problem rather than a simple input-feed problem.
 The lane-level drain marker confirms that conclusion. In a 2400-tick strict
 3x2 diagnostic run, the steady windows removed about `592` target items per
 300 ticks instead of the `600` needed for exactly two full turbo belts, and the
@@ -728,17 +727,20 @@ Factorio log-open marker and may not contain the validation markers.
 Compare generated candidates with offline audits and runtime proof:
 
 ```bash
-python3 -m tools.blueprint_lab.stage4_compare --candidate compact-2x3-overprovisioned=.codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-materialized-summary.json,.codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-runtime-proof.json --candidate exact-3x2-near-miss=.codex/tests/blueprint-routed-iron-ore-2x-turbo-belt-forced-3x2-auto-corridor-summary.json,.codex/tests/blueprint-forced-3x2-window-diagnostics-runtime-proof.json --candidate exact-compressor-unresolved=.codex/tests/blueprint-routed-iron-ore-2x-turbo-belt-compressed-boundary-forced-c2-summary.json --json-output .codex/tests/blueprint-stage4-candidate-comparison-window-diagnostics.json --markdown-output .codex/tests/blueprint-stage4-candidate-comparison-window-diagnostics.md
+python3 -m tools.blueprint_lab.stage4_compare --candidate compact-2x3-overprovisioned=.codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-materialized-summary.json,.codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-runtime-proof.json --candidate exact-3x2-near-miss=.codex/tests/blueprint-routed-iron-ore-2x-turbo-belt-forced-3x2-auto-corridor-summary.json,.codex/tests/blueprint-forced-3x2-long-4800-runtime-proof.json --candidate exact-compressor-unresolved=.codex/tests/blueprint-routed-iron-ore-2x-turbo-belt-compressed-boundary-forced-c2-summary.json --json-output .codex/tests/blueprint-stage4-candidate-comparison-near-miss.json --markdown-output .codex/tests/blueprint-stage4-candidate-comparison-near-miss.md
 ```
 
 The comparison intentionally recommends the runtime-proven over-provisioned
 candidate over exact candidates until strict compression is runtime-proven. It
 also ranks a measured exact near-miss ahead of a missing-proof compressor
-experiment, because its best-window deficit is actionable evidence. That
-scoring is a guardrail for future generator work: strict two-belt output is
-still the target, but an exact-looking boundary cannot outrank a wider boundary
-until it has runtime-proven throughput, clean output, and zero invalid output
-inserters.
+experiment, because its best-window deficit is actionable evidence. Exact
+below-target candidates with clean boundary, zero invalid output inserters, and
+a best-window deficit within 2% of target are marked `strict-near-miss`; their
+next action is to tune the final two-belt compression geometry before changing
+machine count. That scoring is a guardrail for future generator work: strict
+two-belt output is still the target, but an exact-looking boundary cannot
+outrank a wider boundary until it has runtime-proven throughput, clean output,
+and zero invalid output inserters.
 
 Generate the current seed blueprint:
 
