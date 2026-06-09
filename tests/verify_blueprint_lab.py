@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from collections import Counter
 from copy import deepcopy
+import json
 from pathlib import Path
 import sys
 
@@ -15,6 +16,7 @@ from tools.blueprint_lab.decompose import decompose_blueprint
 from tools.blueprint_lab.directions import DIR_EAST, DIR_SOUTH, DIR_WEST
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
+from tools.blueprint_lab.stage4_report import build_stage4_report, render_markdown_report as render_stage4_markdown_report
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
 from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from_args
 from tools.blueprint_lab.template_knowledge import map_template
@@ -150,6 +152,22 @@ def main() -> int:
         return 1
     if not learned["blackbox_candidates"]:
         print(f"FAIL: expected generated seed to be a black-box candidate: {learned}")
+        return 1
+    stage4 = build_stage4_report([tmp], top=3)
+    stage4_decisions = {item["decision"]: item for item in stage4["design_decisions"]}
+    stage4_milestones = {item["name"]: item for item in stage4["next_generator_milestones"]}
+    stage4_markdown = render_stage4_markdown_report(stage4)
+    if (
+        stage4["inputs"]["blueprint_count"] != 1
+        or not stage4["knowledge_sources"]
+        or "game" not in stage4["knowledge_layers"]
+        or "smelting" not in stage4["compactness_profile"]
+        or "ship_tileable_single_recipe_modules_first" not in stage4_decisions
+        or "strict-external-boundary-compression" not in stage4_milestones
+        or "known-insufficient" not in json.dumps(stage4, ensure_ascii=False)
+        or "Blueprint Lab Stage 4 Report" not in stage4_markdown
+    ):
+        print(f"FAIL: expected stage4 report to preserve corpus lessons, knowledge sources, and strict-boundary milestones: {stage4}")
         return 1
 
     decomposition = decompose_blueprint("generated", "/", blueprints[0].payload, category="smelting", cell_size=4)

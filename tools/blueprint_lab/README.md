@@ -28,9 +28,17 @@ tree.
 - Import a generated blueprint through a real Factorio runtime scenario and attempt to build it on the matching surface type. Space platform blueprints are validated on a temporary space platform with foundation tiles pre-placed before entity building is attempted; if `build_blueprint` returns zero entities, the validator can fall back to direct `surface.create_entity` placement to prove the entity names, qualities, recipe qualities, underground-belt endpoint types, module item stacks, and occupied positions are accepted by the current game runtime.
 - The runtime fallback also restores splitter filters and input/output priorities, so future item-separation passes can be validated on platform blueprints that still require direct placement. Runtime boundary audit records right-boundary samples and cleanliness separately, distinguishing a boundary that contains target products from one that also leaks recipe input or byproduct items.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
+- Generate a stage-4 strategy report that combines corpus family learning, official knowledge-source links, current generator lessons, and next acceptance gates for compact blueprint generation.
 
 The current generator is a seed for later optimization. It is not yet a full
 from-ore-to-final-product Space Age black-box factory generator.
+
+Use `python3 -m tools.blueprint_lab.stage4_report <blueprint-folder>` when the
+goal is to explain why the generator is choosing a staged module-first path
+instead of directly producing a full integrated black box. The report scans the
+corpus, records compactness profiles for major blueprint families, lists
+high-signal black-box candidates, and turns the observed lessons into generator
+milestones.
 
 ## Knowledge Model
 
@@ -641,6 +649,12 @@ Run a right-boundary throughput-window probe:
 
 ```bash
 python3 -m tools.blueprint_lab.factorio_validate --scenario-name blueprint_lab_validation_recycle_merge_throughput_2400 --blueprint .codex/tests/blueprint-routed-iron-ore-2x-turbo-belt.txt --user-data-dir .codex/tests/factorio-probe-write-data --mod-directory /mnt/c/Users/MLJ/AppData/Roaming/Factorio/mods --console-log .codex/tests/blueprint-lab-factorio-recycle-merge-throughput-2400.log --until-tick 2400 --timeout-seconds 120 --input-probe left --runtime-audit-wait-ticks 2400 --sustained-input-interval-ticks 300 --throughput-window-ticks 300 --throughput-target-item iron-ore
+```
+
+Build the current stage-4 strategy report from the local corpus:
+
+```bash
+python3 -m tools.blueprint_lab.stage4_report /mnt/d/Desktop/游戏/异星工厂/蓝图 --top 8 --json-output .codex/tests/blueprint-stage4-report-summary.json --markdown-output .codex/tests/blueprint-stage4-report.md
 ```
 
 Generate the current seed blueprint:
