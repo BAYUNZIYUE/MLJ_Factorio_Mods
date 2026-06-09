@@ -538,6 +538,23 @@ enough for this generator case. The next strict-boundary step must be a
 lane-aware target-output compressor or a different output unloading topology,
 not another generic 3-to-2 belt balancer.
 
+The follow-up diagnosis adds an exact-x throughput probe with
+`--throughput-probe-x`. It reuses the same runtime drain and lane markers, but
+measures a chosen belt column instead of only the rightmost boundary. On the
+compressed 2x3 sample, probing the three internal output lanes before they enter
+the compressor (`x=105.5` in runtime coordinates) removes `8064-9336/min` after
+startup, so the internal lanes are not the bottleneck. Probing the first
+compressed-entry column (`x=111.5`) removes only about `3564-3600/min`, showing
+that the routing into the generic compressor has already collapsed to one full
+turbo belt. Splitting repeated-grid spacing into horizontal `--spacing` and
+vertical `--row-spacing` fixes the half-tile row alignment issue offline:
+`--spacing 2.0 --row-spacing 2.5 --force-columns 2` keeps bridge routes valid,
+keeps the external contract exact, and passes all belt-flow checks. Runtime is
+still about `3600/min`, which proves the remaining problem is compressor lane
+semantics rather than simple row pitch. The next useful generator change should
+therefore route individual transport lines or redesign target-output unloading;
+more rectangle spacing alone is not enough.
+
 ## Commands
 
 Analyze a blueprint directory:

@@ -66,9 +66,11 @@ def choose_repeated_columns(
     source_width: float,
     source_height: float,
     spacing: float,
+    row_spacing: float | None = None,
     lane_width: float = 4.0,
 ) -> int:
     """Pick a copy grid that favors reusable straight buses over sparse tail rows."""
+    effective_row_spacing = spacing if row_spacing is None else row_spacing
     max_candidate = max(1, min(max_columns, instances))
     best: tuple[float, float, float, int] | None = None
     best_columns = max_candidate
@@ -81,7 +83,7 @@ def choose_repeated_columns(
         incomplete_output_span = sum((columns - count) * (source_width + spacing) for count in row_counts if count)
         connector_estimate = bridge_segments * 2 + boundary_routes * lane_width + incomplete_output_span
         planned_width = columns * source_width + max(0, columns - 1) * spacing
-        planned_height = rows * source_height + max(0, rows - 1) * spacing
+        planned_height = rows * source_height + max(0, rows - 1) * effective_row_spacing
         area = (planned_width + lane_width * 2) * (planned_height + lane_width)
         score = (
             connector_estimate,
@@ -103,8 +105,10 @@ def node_layout(
     y: float,
     max_columns: int,
     spacing: float,
+    row_spacing: float | None = None,
     lane_width: float = 4.0,
 ) -> LayoutNode:
+    effective_row_spacing = spacing if row_spacing is None else row_spacing
     layout = mapping.get("layout") or {}
     source_width = float(layout.get("width") or mapping.get("cell_size") or 1)
     source_height = float(layout.get("height") or mapping.get("cell_size") or 1)
@@ -115,11 +119,12 @@ def node_layout(
         source_width=source_width,
         source_height=source_height,
         spacing=spacing,
+        row_spacing=effective_row_spacing,
         lane_width=lane_width,
     )
     rows = max(1, math.ceil(instances / columns))
     planned_width = columns * source_width + max(0, columns - 1) * spacing
-    planned_height = rows * source_height + max(0, rows - 1) * spacing
+    planned_height = rows * source_height + max(0, rows - 1) * effective_row_spacing
     return LayoutNode(
         item=str(node["item"]),
         recipe=str(node["recipe"]),
@@ -154,8 +159,10 @@ def build_layout_plan(
     *,
     max_columns: int = 12,
     spacing: float = 2.0,
+    row_spacing: float | None = None,
     lane_width: float = 4.0,
 ) -> dict[str, Any]:
+    effective_row_spacing = spacing if row_spacing is None else row_spacing
     mapping_index = mapping_by_fingerprint(mappings)
     nodes = flatten_plan_nodes(production_plan["root"])
     layout_nodes: list[LayoutNode] = []
@@ -170,13 +177,14 @@ def build_layout_plan(
             y=cursor_y,
             max_columns=max_columns,
             spacing=spacing,
+            row_spacing=effective_row_spacing,
             lane_width=lane_width,
         )
         layout_nodes.append(planned)
-        cursor_y += planned.planned_height + spacing
+        cursor_y += planned.planned_height + effective_row_spacing
         content_width = max(content_width, planned.planned_width)
 
-    content_height = max(0.0, cursor_y - spacing)
+    content_height = max(0.0, cursor_y - effective_row_spacing)
     overall_width = content_width + lane_width * 2
     overall_height = content_height + lane_width
     external_inputs = production_plan.get("external_inputs") or []
@@ -190,6 +198,7 @@ def build_layout_plan(
         },
         "max_columns": max_columns,
         "spacing": spacing,
+        "row_spacing": effective_row_spacing,
         "lane_width": lane_width,
         "layout_node_count": len(layout_nodes),
         "estimated_width": round(overall_width, 3),
@@ -302,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-depth", type=int, default=4)
     parser.add_argument("--max-columns", type=int, default=12)
     parser.add_argument("--spacing", type=float, default=2.0)
+    parser.add_argument("--row-spacing", type=float, help="Vertical spacing between repeated template rows. Defaults to --spacing.")
     parser.add_argument("--lane-width", type=float, default=4.0)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)
@@ -339,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         template_summary["mappings"],
         max_columns=args.max_columns,
         spacing=args.spacing,
+        row_spacing=args.row_spacing,
         lane_width=args.lane_width,
     )
     summary["production_node_count"] = production_plan["node_count"]

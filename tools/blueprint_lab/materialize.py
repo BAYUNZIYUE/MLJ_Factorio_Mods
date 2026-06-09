@@ -1374,13 +1374,14 @@ def add_boundary_connectors(
     def ports_for_instance(node: dict[str, Any], instance: int, side: str, roles: set[str]) -> list[dict[str, Any]]:
         ports: list[dict[str, Any]] = []
         spacing = float(layout_plan.get("spacing") or 0)
+        row_spacing = float(layout_plan.get("row_spacing", spacing))
         columns = max(1, int(node.get("columns") or 1))
         source_width = float(node.get("source_width") or 0)
         source_height = float(node.get("source_height") or 0)
         col = instance % columns
         row = instance // columns
         origin_x = float(node["x"]) + col * (source_width + spacing)
-        origin_y = float(node["y"]) + row * (source_height + spacing)
+        origin_y = float(node["y"]) + row * (source_height + row_spacing)
         for port in node.get("ports") or []:
             if port.get("side") != side or port.get("role") not in roles:
                 continue
@@ -3680,11 +3681,12 @@ def materialize_layout_with_summary(
         source_width = float(node["source_width"])
         source_height = float(node["source_height"])
         spacing = float(layout_plan["spacing"])
+        row_spacing = float(layout_plan.get("row_spacing", spacing))
         for instance in range(int(node["instances"])):
             col = instance % int(node["columns"])
             row = instance // int(node["columns"])
             origin_x = float(node["x"]) + col * (source_width + spacing)
-            origin_y = float(node["y"]) + row * (source_height + spacing)
+            origin_y = float(node["y"]) + row * (source_height + row_spacing)
             for raw in template_entities:
                 entities.append(
                     materialized_entity(
@@ -3799,9 +3801,10 @@ def layout_with_single_node_columns(layout_plan: dict[str, Any], columns: int, *
     source_width = float(node.get("source_width") or 1.0)
     source_height = float(node.get("source_height") or 1.0)
     spacing = float(layout.get("spacing") or 0.0)
+    row_spacing = float(layout.get("row_spacing", spacing))
     effective_lane_width = float(layout.get("lane_width") or 0.0)
     planned_width = columns * source_width + max(0, columns - 1) * spacing
-    planned_height = rows * source_height + max(0, rows - 1) * spacing
+    planned_height = rows * source_height + max(0, rows - 1) * row_spacing
     node["columns"] = columns
     node["rows"] = rows
     node["x"] = round(effective_lane_width, 3)
@@ -3816,6 +3819,7 @@ def layout_with_single_node_columns(layout_plan: dict[str, Any], columns: int, *
         "columns": columns,
         "rows": rows,
         "lane_width": effective_lane_width,
+        "row_spacing": row_spacing,
     }
     return layout
 
@@ -3991,6 +3995,7 @@ def build_materialized_blueprint(
     boundary_items: set[str] | None = None,
     max_columns: int = 12,
     spacing: float = 2.0,
+    row_spacing: float | None = None,
     lane_width: float = 4.0,
     label: str | None = None,
     connect_boundaries: bool = False,
@@ -4010,6 +4015,7 @@ def build_materialized_blueprint(
         mappings,
         max_columns=max_columns,
         spacing=spacing,
+        row_spacing=row_spacing,
         lane_width=lane_width,
     )
     return materialize_layout(layout, mappings, label=label, connect_boundaries=connect_boundaries, knowledge=knowledge)
@@ -4449,6 +4455,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-depth", type=int, default=4)
     parser.add_argument("--max-columns", type=int, default=12)
     parser.add_argument("--spacing", type=float, default=2.0)
+    parser.add_argument("--row-spacing", type=float, help="Vertical spacing between repeated template rows. Defaults to --spacing.")
     parser.add_argument("--lane-width", type=float, default=4.0)
     parser.add_argument("--label")
     parser.add_argument("--connect-boundaries", action="store_true")
@@ -4494,6 +4501,7 @@ def main(argv: list[str] | None = None) -> int:
         template_summary["mappings"],
         max_columns=args.max_columns,
         spacing=args.spacing,
+        row_spacing=args.row_spacing,
         lane_width=args.lane_width,
     )
     wrapper, connector_summary, layout = select_best_materialized_layout(

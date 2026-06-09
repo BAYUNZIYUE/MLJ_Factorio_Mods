@@ -81,7 +81,10 @@ def main() -> int:
         "sustained_input_interval_ticks=",
         "sustained_input_injection",
         "throughput_window_ticks=",
+        "throughput_probe_x",
+        "math.abs(entity.position.x - max_x) <= 0.1",
         "right_boundary_throughput_window",
+        "probe_x=",
         "right_boundary_throughput_lane_window",
         "right_boundary_throughput_summary",
         "right_boundary_throughput_lane_summary",
@@ -813,6 +816,36 @@ def main() -> int:
     )
     if compact_layout_16["nodes"][0]["columns"] != 8 or compact_layout_16["nodes"][0]["rows"] != 2:
         print(f"FAIL: expected compact column choice to avoid a sparse 12x2 tail row: {compact_layout_16}")
+        return 1
+    row_spaced_layout = build_layout_plan(
+        {
+            "target_item": "iron-plate",
+            "target_rate_per_minute": 300,
+            "root": {
+                "item": "iron-plate",
+                "recipe": "iron-plate",
+                "fingerprint": "plate-template",
+                "instances": 16,
+                "source": "fixture",
+                "path": "/plate",
+                "planned_net_output_per_minute": 300,
+                "rate_basis": "fixture",
+            },
+            "external_inputs": [{"item": "iron-ore", "rate_per_minute": 300, "reason": "boundary-input"}],
+        },
+        dag_mappings,
+        max_columns=8,
+        spacing=1,
+        row_spacing=1.5,
+        lane_width=4,
+    )
+    if (
+        row_spaced_layout["spacing"] != 1
+        or row_spaced_layout["row_spacing"] != 1.5
+        or row_spaced_layout["nodes"][0]["planned_width"] != 23
+        or row_spaced_layout["nodes"][0]["planned_height"] != 5.5
+    ):
+        print(f"FAIL: expected row spacing to affect repeated-row height without changing column width: {row_spaced_layout}")
         return 1
     materialized = build_materialized_blueprint(
         dag_mappings,
