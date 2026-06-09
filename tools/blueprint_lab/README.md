@@ -29,6 +29,7 @@ tree.
 - The runtime fallback also restores splitter filters and input/output priorities, so future item-separation passes can be validated on platform blueprints that still require direct placement. Runtime boundary audit records right-boundary samples and cleanliness separately, distinguishing a boundary that contains target products from one that also leaks recipe input or byproduct items.
 - Generate the first rectangular black-box seed blueprint: ore-to-plate with a stable left-input and right-output boundary.
 - Generate a stage-4 strategy report that combines corpus family learning, official knowledge-source links, current generator lessons, and next acceptance gates for compact blueprint generation.
+- Generate a stage-4 package that combines the strategy report, resolved production module library, materialized blueprint string, and audit summary in one command.
 
 The current generator is a seed for later optimization. It is not yet a full
 from-ore-to-final-product Space Age black-box factory generator.
@@ -663,6 +664,20 @@ production module candidates:
 ```bash
 python3 -m tools.blueprint_lab.stage4_report /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /mnt/d/project/factorio/metatorio-calc/assets/data-raw-dump.json --top 8 --cell-size 16 --json-output .codex/tests/blueprint-stage4-report-with-data-summary.json --markdown-output .codex/tests/blueprint-stage4-report-with-data.md
 ```
+
+Generate a stage-4 package that writes the strategy report, materialized
+blueprint, and combined audit summary from the same inputs:
+
+```bash
+python3 -m tools.blueprint_lab.stage4_generate /mnt/d/Desktop/游戏/异星工厂/蓝图 --data-raw-json /mnt/d/project/factorio/metatorio-calc/assets/data-raw-dump.json --target-item iron-ore --target-belt turbo-transport-belt --target-belt-count 2 --top 8 --cell-size 16 --max-depth 4 --max-columns 12 --compress-output-boundary --max-output-expansions-per-machine 6 --blueprint-output .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo.txt --summary-output .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-summary.json --markdown-output .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo.md --stage4-json-output .codex/tests/blueprint-stage4-generate-stage4-summary.json --stage4-markdown-output .codex/tests/blueprint-stage4-generate-stage4.md --materialize-json-output .codex/tests/blueprint-stage4-generate-materialized-summary.json --materialize-markdown-output .codex/tests/blueprint-stage4-generate-materialized.md
+```
+
+This package command is a coordination entry point, not a proof that strict
+two-belt compression is solved. If the selected materialized layout avoids the
+known-insufficient compressor, the generated audit can still report an
+over-provisioned external boundary. If a forced compressed layout is requested,
+the capacity audit must keep known runtime-insufficient compressor capacity
+unresolved until a runtime throughput probe proves otherwise.
 
 Generate the current seed blueprint:
 

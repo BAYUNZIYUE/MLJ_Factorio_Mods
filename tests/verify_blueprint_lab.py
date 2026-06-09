@@ -17,6 +17,7 @@ from tools.blueprint_lab.directions import DIR_EAST, DIR_SOUTH, DIR_WEST
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.stage4_report import build_stage4_report, render_markdown_report as render_stage4_markdown_report
+from tools.blueprint_lab.stage4_generate import build_stage4_generation_package, package_summary, render_package_markdown
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
 from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from_args
 from tools.blueprint_lab.template_knowledge import map_template
@@ -326,6 +327,32 @@ def main() -> int:
         or gear_options[0]["net_target_rate_per_instance"] <= 0
     ):
         print(f"FAIL: expected stage4 data.raw module library to expose iron-gear-wheel production options: {stage4_with_data}")
+        return 1
+    stage4_package = build_stage4_generation_package(
+        [recipe_tmp],
+        data_raw_json=data_raw_path,
+        target_item="iron-gear-wheel",
+        target_rate_per_minute=150,
+        external_items=["iron-plate"],
+        top=3,
+        cell_size=4,
+        max_columns=3,
+        spacing=1,
+        lane_width=4,
+        label="fixture-stage4-package",
+    )
+    stage4_package_summary = package_summary(stage4_package, blueprint_output=ROOT / ".codex" / "tests" / "fixture-stage4-package.txt")
+    stage4_package_markdown = render_package_markdown(stage4_package)
+    if (
+        "module_library" not in stage4_package["stage4_report"]
+        or stage4_package_summary["target_item"] != "iron-gear-wheel"
+        or stage4_package_summary["target_rate_per_minute"] != 150
+        or stage4_package_summary["module_library"]["produced_item_count"] < 1
+        or stage4_package["materialized_summary"]["label"] != "fixture-stage4-package"
+        or decode_blueprint_string(encode_blueprint_string(stage4_package["blueprint"])) != stage4_package["blueprint"]
+        or "Blueprint Lab Stage 4 Generation Package" not in stage4_package_markdown
+    ):
+        print(f"FAIL: expected stage4 generation package to combine report, module library, summary, and blueprint: {stage4_package_summary}")
         return 1
     io_audit = audit_machine_io(
         {
