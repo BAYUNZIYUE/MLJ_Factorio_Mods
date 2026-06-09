@@ -92,6 +92,10 @@ def is_belt_like_entity_name(name: str) -> bool:
     return name.endswith("transport-belt") or name.endswith("underground-belt") or name.endswith("splitter")
 
 
+def is_plain_transport_belt_entity_name(name: str) -> bool:
+    return name.endswith("transport-belt")
+
+
 def canonical_transport_belt_name(name: str) -> str:
     return connector_belt_name_for_port({"entity_name": name})
 
@@ -1128,6 +1132,7 @@ def add_boundary_connectors(
         positions: list[RoutePosition],
         *,
         record_collisions: bool = True,
+        reuse_existing_plain_belts_only: bool = False,
     ) -> tuple[int, list[dict[str, Any]], int]:
         positions = visible_route_positions(positions)
         route_collisions: list[dict[str, Any]] = []
@@ -1150,6 +1155,24 @@ def add_boundary_connectors(
             if existing is None:
                 continue
             existing_name = str(existing.get("name") or "")
+            if reuse_existing_plain_belts_only:
+                if (
+                    is_plain_transport_belt_entity_name(existing_name)
+                    and existing_name == belt_name
+                    and existing.get("direction") == direction
+                ):
+                    existing_belts_used += 1
+                    continue
+                collision = {
+                    "x": key[0],
+                    "y": key[1],
+                    "reason": f"{reason}:existing-belt-not-reusable",
+                    "entity_name": existing_name,
+                    "direction": existing.get("direction"),
+                    "expected_direction": direction,
+                }
+                route_collisions.append(collision)
+                continue
             if is_belt_like_entity_name(existing_name) and canonical_transport_belt_name(existing_name) == belt_name:
                 existing_is_connector = any(existing is connector for connector in connectors)
                 is_machine_feed_route = (
@@ -2598,9 +2621,18 @@ def add_boundary_connectors(
                         boundary,
                         recyclable_byproducts,
                     ):
-                        candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
+                        (
+                            candidate_belts_added,
+                            candidate_collisions,
+                            candidate_existing_belts_used,
+                        ) = add_positions_reusing_existing_belts(
+                            recycle_positions,
+                            record_collisions=False,
+                            reuse_existing_plain_belts_only=True,
+                        )
                         if not candidate_collisions:
                             belts_added = candidate_belts_added
+                            existing_belts_used = candidate_existing_belts_used
                             recycle_belts_added += candidate_belts_added
                             merge_belts_added += candidate_belts_added
                             current_handling = "pre-fanin-recycle-merge-to-input-boundary"
@@ -2812,9 +2844,18 @@ def add_boundary_connectors(
                     boundary,
                     recyclable_byproducts,
                 ):
-                    candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
+                    (
+                        candidate_belts_added,
+                        candidate_collisions,
+                        candidate_existing_belts_used,
+                    ) = add_positions_reusing_existing_belts(
+                        recycle_positions,
+                        record_collisions=False,
+                        reuse_existing_plain_belts_only=True,
+                    )
                     if not candidate_collisions:
                         belts_added = candidate_belts_added
+                        existing_belts_used = candidate_existing_belts_used
                         recycle_belts_added += candidate_belts_added
                         merge_belts_added += candidate_belts_added
                         current_handling = "recycle-merge-to-input-boundary"

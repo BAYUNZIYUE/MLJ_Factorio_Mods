@@ -1505,6 +1505,52 @@ def main() -> int:
     ):
         print(f"FAIL: expected byproduct fan-in exposure audit to flag mixed output before the target splitter: {byproduct_replicated_summary}")
         return 1
+    byproduct_merge_reuse_layout = deepcopy(byproduct_replicated_layout)
+    byproduct_merge_reuse_layout["estimated_height"] = 14
+    byproduct_merge_reuse_layout["nodes"][0]["source_height"] = 6
+    byproduct_merge_reuse_layout["nodes"][0]["source_entity_count"] = 4
+    byproduct_merge_reuse_layout["nodes"][0]["planned_height"] = 6
+    byproduct_merge_reuse_layout["nodes"][0]["ports"] = [
+        {"side": "left", "role": "input", "entity_name": "turbo-transport-belt", "x": 0, "y": 3},
+        {"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 2, "y": 1},
+    ]
+    byproduct_merge_reuse_layout["nodes"][0]["port_counts"] = [("left:input", 1), ("right:output", 1)]
+    byproduct_merge_reuse_mappings = [
+        {
+            "fingerprint": "byproduct-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 0, "y": 3, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 2, "y": 1, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 6, "y": 4, "direction": DIR_WEST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 7, "y": 4, "direction": DIR_WEST, "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, byproduct_merge_reuse_summary = materialize_layout_with_summary(
+        byproduct_merge_reuse_layout,
+        byproduct_merge_reuse_mappings,
+        label="fixture-byproduct-recycle-merge-reuses-input-belt",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    byproduct_merge_reuse = byproduct_merge_reuse_summary["output_separations"][0]
+    byproduct_merge_reuse_audit = byproduct_merge_reuse["recycle_flow_audit"]
+    if (
+        byproduct_merge_reuse["status"] != "connected"
+        or byproduct_merge_reuse["current_handling"] != "recycle-merge-to-input-boundary"
+        or byproduct_merge_reuse["merge_belts_added"] != 16
+        or byproduct_merge_reuse["existing_belts_used"] != 2
+        or byproduct_merge_reuse_summary["output_separation_merge_belts"] != 16
+        or byproduct_merge_reuse["recycle_merge_target"]["input_y"] != 7.0
+        or byproduct_merge_reuse["recycle_exit"]["side"] != "input-bus"
+        or byproduct_merge_reuse_audit["status"] != "pass"
+        or byproduct_merge_reuse_audit["positions_checked"] != byproduct_merge_reuse["merge_belts_added"] + byproduct_merge_reuse["existing_belts_used"]
+    ):
+        print(f"FAIL: expected byproduct recycle merge to safely reuse same-direction existing input-lane belts: {byproduct_merge_reuse_summary}")
+        return 1
     _, byproduct_preseparated_summary = materialize_layout_with_summary(
         byproduct_replicated_layout,
         byproduct_mappings,
