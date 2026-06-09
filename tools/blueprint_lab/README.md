@@ -698,6 +698,17 @@ throughput measurement:
 python3 -m tools.blueprint_lab.factorio_validate --scenario-name blueprint_lab_validation_stage4_generate_iron_ore_2x_turbo_2400 --blueprint .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo.txt --user-data-dir .codex/tests/factorio-probe-stage4-generate-write-data --mod-directory /mnt/c/Users/MLJ/AppData/Roaming/Factorio/mods --console-log .codex/tests/blueprint-lab-stage4-generate-iron-ore-2x-turbo-2400.log --until-tick 2400 --timeout-seconds 120 --input-probe left --runtime-audit-wait-ticks 2400 --sustained-input-interval-ticks 300 --throughput-window-ticks 300 --throughput-target-item iron-ore
 ```
 
+Parse a Factorio validation log into a reusable runtime proof report:
+
+```bash
+python3 -m tools.blueprint_lab.runtime_proof .codex/tests/factorio-probe-stage4-generate-write-data/factorio-current.log --target-item iron-ore --target-rate-per-minute 7200 --json-output .codex/tests/blueprint-stage4-generate-runtime-proof.json --markdown-output .codex/tests/blueprint-stage4-generate-runtime-proof.md
+```
+
+The stage-4 package command can also merge that proof back into the generated
+package summary with `--runtime-log`. Use the `factorio-current.log` under the
+isolated `--user-data-dir` when parsing markers; the `--console-log` path is a
+Factorio log-open marker and may not contain the validation markers.
+
 Generate the current seed blueprint:
 
 ```bash

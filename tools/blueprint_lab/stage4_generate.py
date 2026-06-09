@@ -12,6 +12,7 @@ from .materialize import render_markdown_report as render_materialize_markdown_r
 from .materialize import render_summary, select_best_materialized_layout
 from .production_dag import build_production_plan, default_boundary_items, template_options_from_mappings
 from .prototypes import load_data_raw, target_rate_basis_from_args
+from .runtime_proof import build_runtime_proof, render_markdown_report as render_runtime_proof_markdown_report
 from .stage4_report import build_stage4_report, render_markdown_report as render_stage4_markdown_report
 from .template_knowledge import map_template_library
 
@@ -41,6 +42,7 @@ def build_stage4_generation_package(
     force_columns: int | None = None,
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
+    runtime_log: Path | None = None,
 ) -> dict[str, Any]:
     knowledge = load_data_raw(data_raw_json)
     target_rate, target_rate_basis = target_rate_basis_from_args(
@@ -93,13 +95,20 @@ def build_stage4_generation_package(
     materialized_summary = render_summary(wrapper, selected_layout, connector_summary, knowledge=knowledge)
     materialized_summary["template_mapping_status_counts"] = template_summary["status_counts"]
     materialized_summary["template_mapping_failed_files"] = template_summary["failed_files"]
-    return {
+    package = {
         "stage4_report": stage4_report,
         "blueprint": wrapper,
         "materialized_summary": materialized_summary,
         "template_mapping_status_counts": template_summary["status_counts"],
         "template_mapping_failed_files": template_summary["failed_files"],
     }
+    if runtime_log is not None:
+        package["runtime_proof"] = build_runtime_proof(
+            runtime_log,
+            target_item=target_item,
+            target_rate_per_minute=target_rate,
+        )
+    return package
 
 
 def package_summary(package: dict[str, Any], *, blueprint_output: Path | None = None) -> dict[str, Any]:
@@ -119,6 +128,7 @@ def package_summary(package: dict[str, Any], *, blueprint_output: Path | None = 
         "boundary_capacity_audit": materialized["connector_summary"].get("boundary_capacity_audit") or [],
         "output_lane_load_audit": materialized["connector_summary"].get("output_lane_load_audit") or [],
         "module_library": stage4.get("module_library"),
+        "runtime_proof": package.get("runtime_proof"),
         "stage4_design_decisions": stage4.get("design_decisions") or [],
     }
     return summary
@@ -165,6 +175,22 @@ def render_package_markdown(package: dict[str, Any], *, blueprint_output: Path |
             f"- {item.get('item')}: options={item.get('option_count')} "
             f"best={best.get('recipe')} rate={best.get('net_target_rate_per_instance', 0):g}/min"
         )
+    runtime_proof = summary.get("runtime_proof")
+    if runtime_proof:
+        throughput = runtime_proof.get("throughput_summary") or {}
+        cleanliness = runtime_proof.get("right_boundary_cleanliness") or {}
+        invalid_output = runtime_proof.get("invalid_output_inserters") or {}
+        lines.extend(
+            [
+                "",
+                "## Runtime Proof",
+                "",
+                f"- status={runtime_proof.get('status')} target_rate={runtime_proof.get('target_rate_per_minute'):g}/min",
+                f"- throughput={throughput.get('target_per_minute', 'unknown')}/min windows={throughput.get('windows', 'unknown')}",
+                f"- right_boundary_cleanliness={cleanliness.get('status', 'unknown')}",
+                f"- invalid_output_inserters={invalid_output.get('count', 'unknown')}",
+            ]
+        )
     lines.extend(["", "## Design Decisions", ""])
     for item in summary["stage4_design_decisions"]:
         lines.append(f"- {item['decision']}: {item['generator_action']}")
@@ -203,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stage4-markdown-output", type=Path)
     parser.add_argument("--materialize-json-output", type=Path)
     parser.add_argument("--materialize-markdown-output", type=Path)
+    parser.add_argument("--runtime-log", type=Path)
+    parser.add_argument("--runtime-proof-json-output", type=Path)
+    parser.add_argument("--runtime-proof-markdown-output", type=Path)
     args = parser.parse_args(argv)
 
     files: list[Path] = []
@@ -234,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
             force_columns=args.force_columns,
             output_separation_min_distance=args.output_separation_min_distance,
             compress_output_boundary=args.compress_output_boundary,
+            runtime_log=args.runtime_log,
         )
     except ValueError as error:
         parser.error(str(error))
@@ -260,6 +290,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.materialize_markdown_output:
         args.materialize_markdown_output.parent.mkdir(parents=True, exist_ok=True)
         args.materialize_markdown_output.write_text(render_materialize_markdown_report(package["materialized_summary"]), encoding="utf-8")
+    if args.runtime_proof_json_output and package.get("runtime_proof"):
+        args.runtime_proof_json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.runtime_proof_json_output.write_text(json.dumps(package["runtime_proof"], ensure_ascii=False, indent=2), encoding="utf-8")
+    if args.runtime_proof_markdown_output and package.get("runtime_proof"):
+        args.runtime_proof_markdown_output.parent.mkdir(parents=True, exist_ok=True)
+        args.runtime_proof_markdown_output.write_text(render_runtime_proof_markdown_report(package["runtime_proof"]), encoding="utf-8")
 
     print(render_package_markdown(package, blueprint_output=args.blueprint_output))
     print(f"Wrote {args.blueprint_output}")

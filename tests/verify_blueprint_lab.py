@@ -16,6 +16,7 @@ from tools.blueprint_lab.decompose import decompose_blueprint
 from tools.blueprint_lab.directions import DIR_EAST, DIR_SOUTH, DIR_WEST
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
+from tools.blueprint_lab.runtime_proof import build_runtime_proof, render_markdown_report as render_runtime_proof_markdown_report
 from tools.blueprint_lab.stage4_report import build_stage4_report, render_markdown_report as render_stage4_markdown_report
 from tools.blueprint_lab.stage4_generate import build_stage4_generation_package, package_summary, render_package_markdown
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
@@ -328,6 +329,33 @@ def main() -> int:
     ):
         print(f"FAIL: expected stage4 data.raw module library to expose iron-gear-wheel production options: {stage4_with_data}")
         return 1
+    runtime_log_path = ROOT / ".codex" / "tests" / "blueprint_lab_runtime_proof_fixture.log"
+    runtime_log_path.write_text(
+        """
+1.000 Script @__level__/control.lua:1: BLUEPRINT_LAB_VALIDATION import_result=0
+1.001 Script @__level__/control.lua:2: BLUEPRINT_LAB_VALIDATION blueprint_entities=10 blueprint_tiles=0
+1.002 Script @__level__/control.lua:3: BLUEPRINT_LAB_VALIDATION manual_entities=10 manual_failures=0 manual_recipe_set=1 manual_recipe_failures=0
+2.000 Script @__level__/control.lua:4: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_summary window_ticks=300 windows=2 observed_ticks=600 probe_x=nil target_item=iron-gear-wheel target_removed=200 target_per_minute=200.0 product_items=iron-gear-wheel:200 input_items=
+2.001 Script @__level__/control.lua:5: BLUEPRINT_LAB_VALIDATION right_boundary_cleanliness status=clean product_items=5 input_items=0
+2.002 Script @__level__/control.lua:6: BLUEPRINT_LAB_VALIDATION invalid_output_inserters=0 samples=
+2.003 Script @__level__/control.lua:7: BLUEPRINT_LAB_VALIDATION success
+""",
+        encoding="utf-8",
+    )
+    runtime_proof = build_runtime_proof(
+        runtime_log_path,
+        target_item="iron-gear-wheel",
+        target_rate_per_minute=150,
+    )
+    if (
+        runtime_proof["status"] != "runtime-proven"
+        or runtime_proof["throughput_summary"]["target_per_minute"] != 200.0
+        or runtime_proof["right_boundary_cleanliness"]["status"] != "clean"
+        or runtime_proof["invalid_output_inserters"]["count"] != 0
+        or "Blueprint Runtime Proof Report" not in render_runtime_proof_markdown_report(runtime_proof)
+    ):
+        print(f"FAIL: expected runtime proof parser to mark clean above-target throughput as proven: {runtime_proof}")
+        return 1
     stage4_package = build_stage4_generation_package(
         [recipe_tmp],
         data_raw_json=data_raw_path,
@@ -340,6 +368,7 @@ def main() -> int:
         spacing=1,
         lane_width=4,
         label="fixture-stage4-package",
+        runtime_log=runtime_log_path,
     )
     stage4_package_summary = package_summary(stage4_package, blueprint_output=ROOT / ".codex" / "tests" / "fixture-stage4-package.txt")
     stage4_package_markdown = render_package_markdown(stage4_package)
@@ -349,7 +378,9 @@ def main() -> int:
         or stage4_package_summary["target_rate_per_minute"] != 150
         or stage4_package_summary["module_library"]["produced_item_count"] < 1
         or stage4_package["materialized_summary"]["label"] != "fixture-stage4-package"
+        or stage4_package_summary["runtime_proof"]["status"] != "runtime-proven"
         or decode_blueprint_string(encode_blueprint_string(stage4_package["blueprint"])) != stage4_package["blueprint"]
+        or "Runtime Proof" not in stage4_package_markdown
         or "Blueprint Lab Stage 4 Generation Package" not in stage4_package_markdown
     ):
         print(f"FAIL: expected stage4 generation package to combine report, module library, summary, and blueprint: {stage4_package_summary}")
