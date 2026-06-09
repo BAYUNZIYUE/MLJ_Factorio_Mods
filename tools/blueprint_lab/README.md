@@ -449,6 +449,11 @@ generator goal better than lane-perfect accounting. It is still a diagnostic
 sink: removing items from the right boundary prevents output backup during the
 probe, so the result is evidence for delivered product rate under a test sink,
 not a complete proof of natural steady-state full-belt throughput.
+The validator also logs `right_boundary_throughput_lane_window` and
+`right_boundary_throughput_lane_summary` markers. These split the drained target
+items by right-boundary belt position and transport-line index, so a near-miss
+can be diagnosed as a single dead lane, an imbalanced belt, or small gaps spread
+across all final lanes.
 Earlier probes are still useful as regression markers. The generated output has
 moved from `0/min` on a broken exact 3x2 candidate, to about `4.0-4.5k/min`
 after source-port fan-in, to about `5.3k/min` after filtered multi-inserter
@@ -499,6 +504,14 @@ contract: a 2400-tick runtime probe reached
 `invalid_output_inserters=0` and a clean right boundary. A faster 60-tick input
 probe did not improve the result, so the remaining gap is a final two-belt
 compression problem rather than a simple input-feed problem.
+The lane-level drain marker confirms that conclusion. In a 2400-tick strict
+3x2 diagnostic run, the steady windows removed about `592` target items per
+300 ticks instead of the `600` needed for exactly two full turbo belts, and the
+loss was spread across all four boundary transport lines: late-window line
+counts stayed around `147-149` per line rather than showing one dead or severely
+starved line. The next generator change should therefore target the final
+two-belt compression geometry itself, not only input rate or a single boundary
+lane.
 
 Two follow-up probes narrowed the next design space. First, routing experimental
 new drop belts back into the main output lane made the extra inserters visible

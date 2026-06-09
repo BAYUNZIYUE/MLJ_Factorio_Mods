@@ -45,9 +45,11 @@ local throughput_window_count = 0
 local throughput_removed_product_items = {{}}
 local throughput_removed_input_items = {{}}
 local throughput_removed_target_items = 0
+local throughput_removed_target_by_line = {{}}
 local throughput_current_product_items = {{}}
 local throughput_current_input_items = {{}}
 local throughput_current_target_items = 0
+local throughput_current_target_by_line = {{}}
 local throughput_current_start_tick = nil
 local throughput_current_max_x = nil
 local throughput_current_belt_count = 0
@@ -79,6 +81,10 @@ end
 local function add_amount(counts, key, amount)
   local count_key = tostring(key)
   counts[count_key] = (counts[count_key] or 0) + (amount or 0)
+end
+
+local function throughput_line_key(entity, line_index)
+  return "x=" .. tostring(entity.position.x) .. "/y=" .. tostring(entity.position.y) .. "/line=" .. tostring(line_index)
 end
 
 local function entity_status_name(status)
@@ -733,6 +739,9 @@ local function drain_right_boundary_throughput_tick(surface)
                   target_removed = target_removed + removed_count
                   throughput_removed_target_items = throughput_removed_target_items + removed_count
                   throughput_current_target_items = throughput_current_target_items + removed_count
+                  local line_key = throughput_line_key(entity, line_index)
+                  add_amount(throughput_removed_target_by_line, line_key, removed_count)
+                  add_amount(throughput_current_target_by_line, line_key, removed_count)
                 end
               end
             end
@@ -761,9 +770,11 @@ local function log_right_boundary_throughput_window()
     target_per_minute = throughput_current_target_items * 3600 / observed_ticks
   end
   log("BLUEPRINT_LAB_VALIDATION right_boundary_throughput_window index=" .. tostring(throughput_window_count) .. " tick=" .. tostring(game.tick) .. " observed_ticks=" .. tostring(observed_ticks) .. " max_x=" .. tostring(throughput_current_max_x) .. " belts=" .. tostring(throughput_current_belt_count) .. " lines=" .. tostring(throughput_current_line_count) .. " target_item=" .. tostring(throughput_target_item_name) .. " target_removed=" .. tostring(throughput_current_target_items) .. " target_per_minute=" .. string.format("%.2f", target_per_minute) .. " product_items=" .. sorted_count_string(throughput_current_product_items) .. " input_items=" .. sorted_count_string(throughput_current_input_items))
+  log("BLUEPRINT_LAB_VALIDATION right_boundary_throughput_lane_window index=" .. tostring(throughput_window_count) .. " target_item=" .. tostring(throughput_target_item_name) .. " target_by_line=" .. sorted_count_string(throughput_current_target_by_line))
   throughput_current_product_items = {{}}
   throughput_current_input_items = {{}}
   throughput_current_target_items = 0
+  throughput_current_target_by_line = {{}}
   throughput_current_start_tick = game.tick
   throughput_current_max_x = nil
   throughput_current_belt_count = 0
@@ -780,6 +791,7 @@ local function log_right_boundary_throughput_summary()
     target_per_minute = throughput_removed_target_items * 3600 / observed_ticks
   end
   log("BLUEPRINT_LAB_VALIDATION right_boundary_throughput_summary window_ticks=" .. tostring(throughput_window_ticks) .. " windows=" .. tostring(throughput_window_count) .. " observed_ticks=" .. tostring(observed_ticks) .. " target_item=" .. tostring(throughput_target_item_name) .. " target_removed=" .. tostring(throughput_removed_target_items) .. " target_per_minute=" .. string.format("%.2f", target_per_minute) .. " product_items=" .. sorted_count_string(throughput_removed_product_items) .. " input_items=" .. sorted_count_string(throughput_removed_input_items))
+  log("BLUEPRINT_LAB_VALIDATION right_boundary_throughput_lane_summary target_item=" .. tostring(throughput_target_item_name) .. " target_by_line=" .. sorted_count_string(throughput_removed_target_by_line))
 end
 
 local function inject_input_items_to_left_belts(surface, should_log)
