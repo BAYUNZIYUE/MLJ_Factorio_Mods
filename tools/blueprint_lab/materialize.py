@@ -2106,14 +2106,15 @@ def add_boundary_connectors(
                         }
                     )
                     break
-                belt_name = connector_belt_name_for_port(previous_port)
+                source_belt_name = connector_belt_name_for_port(previous_port)
+                belt_name = connector_belt_name_for_port(current_port)
                 reason = f"fanin:{boundary}:{previous_instance}->{current_instance}:{route_y:g}"
                 source_position: RoutePosition = (
                     source_x,
                     route_y,
                     f"fanin-source:{boundary}:{previous_instance}->{current_instance}:{route_y:g}",
                     DIR_EAST,
-                    belt_name,
+                    source_belt_name,
                 )
                 positions = [source_position]
                 positions.extend(horizontal_positions(start_x, end_x, route_y, reason, belt_name))
@@ -2159,14 +2160,8 @@ def add_boundary_connectors(
                         blocked_direct = []
                 status = "connected" if not route_collisions else "blocked"
                 output_fanins.append(
-                    (
-                        {
-                            "route_positions": positions,
-                        }
-                        if route_kind.startswith("output-fanin-detour")
-                        else {}
-                    )
-                    | {
+                    {
+                        "route_positions": positions,
                         "boundary": boundary,
                         "node_item": node.get("item"),
                         "node_recipe": node.get("recipe"),
@@ -3036,15 +3031,19 @@ def add_boundary_connectors(
                 unresolved.append({"x": key[0], "y": key[1], "entity_name": entity_name, "reason": "splitter-semantics"})
         status = "failed" if failures else "unresolved" if unresolved else "pass"
         port = route.get("port") or {}
+        if not port:
+            port = route.get("from_port") or route.get("to_port") or {}
         first = positions[0] if positions else (0.0, 0.0, "", DIR_EAST, "transport-belt")
         last = positions[-1] if positions else first
+        belt_names = [str(position[4]) for position in positions]
+        unique_belt_names = sorted(set(belt_names))
         return {
             "segment_type": segment_type,
             "status": status,
             "boundary": route.get("boundary"),
             "node_fingerprint": str(port.get("node_fingerprint") or ""),
             "from_instance": int(port.get("node_instance") or 0),
-            "belt_name": connector_belt_name_for_port(port),
+            "belt_name": unique_belt_names[0] if len(unique_belt_names) == 1 else "mixed:" + ",".join(unique_belt_names),
             "route_kind": route.get("route_kind"),
             "start_x": round(float(first[0]), 3),
             "end_x": round(float(last[0]), 3),
@@ -3518,10 +3517,12 @@ def materialize_layout(
     return wrapper
 
 
-def layout_with_single_node_columns(layout_plan: dict[str, Any], columns: int) -> dict[str, Any]:
+def layout_with_single_node_columns(layout_plan: dict[str, Any], columns: int, *, lane_width: float | None = None) -> dict[str, Any]:
     layout = copy.deepcopy(layout_plan)
     if len(layout.get("nodes") or []) != 1:
         return layout
+    if lane_width is not None:
+        layout["lane_width"] = lane_width
     node = layout["nodes"][0]
     instances = max(1, int(node.get("instances") or 1))
     columns = max(1, min(columns, instances))
@@ -3529,20 +3530,23 @@ def layout_with_single_node_columns(layout_plan: dict[str, Any], columns: int) -
     source_width = float(node.get("source_width") or 1.0)
     source_height = float(node.get("source_height") or 1.0)
     spacing = float(layout.get("spacing") or 0.0)
-    lane_width = float(layout.get("lane_width") or 0.0)
+    effective_lane_width = float(layout.get("lane_width") or 0.0)
     planned_width = columns * source_width + max(0, columns - 1) * spacing
     planned_height = rows * source_height + max(0, rows - 1) * spacing
     node["columns"] = columns
     node["rows"] = rows
+    node["x"] = round(effective_lane_width, 3)
+    node["y"] = round(effective_lane_width, 3)
     node["planned_width"] = round(planned_width, 3)
     node["planned_height"] = round(planned_height, 3)
-    layout["estimated_width"] = round(planned_width + lane_width * 2, 3)
-    layout["estimated_height"] = round(planned_height + lane_width * 2, 3)
+    layout["estimated_width"] = round(planned_width + effective_lane_width * 2, 3)
+    layout["estimated_height"] = round(planned_height + effective_lane_width * 2, 3)
     layout["estimated_area"] = round(layout["estimated_width"] * layout["estimated_height"], 3)
     layout["layout_selection"] = {
         "strategy": "forced-single-node-columns",
         "columns": columns,
         "rows": rows,
+        "lane_width": effective_lane_width,
     }
     return layout
 
@@ -3553,6 +3557,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     capacity_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_capacity_audit") or [])
     contract_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_contract_audit") or [])
     lane_load_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("output_lane_load_audit") or [])
+    output_separations = connector_summary.get("output_separations") or []
     output_capacity = [
         item
         for item in connector_summary.get("boundary_capacity_audit") or []
@@ -3578,6 +3583,11 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     bad_capacity = capacity_statuses.get("failed", 0) + capacity_statuses.get("insufficient", 0)
     unresolved_capacity = capacity_statuses.get("unresolved", 0)
     overloaded_output_lanes = lane_load_statuses.get("overloaded", 0)
+    finite_or_blocked_output_separations = sum(
+        1
+        for item in output_separations
+        if item.get("status") != "connected" or item.get("current_handling") == "finite-overflow-buffer"
+    )
     width = float(summary.get("width") or 0.0)
     height = float(summary.get("height") or 0.0)
     area = width * height
@@ -3587,6 +3597,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         float(output_not_sufficient),
         float(output_coverage_not_met),
         float(flow_statuses.get("failed", 0)),
+        float(finite_or_blocked_output_separations),
         float(overloaded_output_lanes),
         float(contract_not_exact),
         float(contract_over),
@@ -3610,6 +3621,7 @@ def select_best_materialized_layout(
     knowledge: PrototypeKnowledge | None = None,
     allow_new_drop_belts: bool = False,
     max_output_expansions_per_machine: int = 4,
+    force_columns: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if not connect_boundaries or knowledge is None or len(layout_plan.get("nodes") or []) != 1:
         wrapper, connector_summary = materialize_layout_with_summary(
@@ -3626,11 +3638,13 @@ def select_best_materialized_layout(
     node = layout_plan["nodes"][0]
     instances = max(1, int(node.get("instances") or 1))
     max_columns = max(1, min(int(layout_plan.get("max_columns") or instances), instances))
-    best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
-    candidate_count = 0
-    for columns in range(1, max_columns + 1):
-        candidate_count += 1
-        candidate_layout = layout_with_single_node_columns(layout_plan, columns)
+    base_lane_width = float(layout_plan.get("lane_width") or 0.0)
+    force_lane_width_candidates = [base_lane_width]
+    if base_lane_width > 0:
+        force_lane_width_candidates.append(round(base_lane_width + 2.0, 3))
+
+    def materialize_candidate(columns: int, lane_width: float) -> tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        candidate_layout = layout_with_single_node_columns(layout_plan, columns, lane_width=lane_width)
         wrapper, connector_summary = materialize_layout_with_summary(
             candidate_layout,
             mappings,
@@ -3641,9 +3655,35 @@ def select_best_materialized_layout(
             max_output_expansions_per_machine=max_output_expansions_per_machine,
         )
         summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
-        score = materialized_layout_score(summary)
-        if best is None or score < best[0]:
-            best = (score, wrapper, connector_summary, candidate_layout)
+        return materialized_layout_score(summary), wrapper, connector_summary, candidate_layout
+
+    if force_columns is not None:
+        if force_columns < 1 or force_columns > max_columns:
+            raise ValueError(f"force_columns must be between 1 and {max_columns}, got {force_columns}")
+        forced_best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
+        for lane_width in force_lane_width_candidates:
+            candidate = materialize_candidate(force_columns, lane_width)
+            if forced_best is None or candidate[0] < forced_best[0]:
+                forced_best = candidate
+        assert forced_best is not None
+        score, wrapper, connector_summary, forced_layout = forced_best
+        forced_layout["layout_selection"] = {
+            "strategy": "forced-single-node-columns",
+            "candidate_count": len(force_lane_width_candidates),
+            "selected_columns": forced_layout["nodes"][0]["columns"],
+            "selected_rows": forced_layout["nodes"][0]["rows"],
+            "selected_lane_width": forced_layout.get("lane_width"),
+            "score": list(score),
+        }
+        return wrapper, connector_summary, forced_layout
+
+    best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
+    candidate_count = 0
+    for columns in range(1, max_columns + 1):
+        candidate_count += 1
+        candidate = materialize_candidate(columns, base_lane_width)
+        if best is None or candidate[0] < best[0]:
+            best = candidate
     assert best is not None
     score, wrapper, connector_summary, selected_layout = best
     selected_layout["layout_selection"] = {
@@ -3651,6 +3691,7 @@ def select_best_materialized_layout(
         "candidate_count": candidate_count,
         "selected_columns": selected_layout["nodes"][0]["columns"],
         "selected_rows": selected_layout["nodes"][0]["rows"],
+        "selected_lane_width": selected_layout.get("lane_width"),
         "score": list(score),
     }
     return wrapper, connector_summary, selected_layout
@@ -4113,6 +4154,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--connect-boundaries", action="store_true")
     parser.add_argument("--allow-new-drop-belts", action="store_true", help="Experimental: allow generated machine-output expansion inserters to create new drop belts. Default keeps only runtime-proven existing drop belts.")
     parser.add_argument("--max-output-expansions-per-machine", type=int, default=4)
+    parser.add_argument("--force-columns", type=int, help="Experimental: force the single-node repeated grid to this column count instead of running post-materialization column search.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)
@@ -4160,6 +4202,7 @@ def main(argv: list[str] | None = None) -> int:
         knowledge=knowledge,
         allow_new_drop_belts=args.allow_new_drop_belts,
         max_output_expansions_per_machine=args.max_output_expansions_per_machine,
+        force_columns=args.force_columns,
     )
     save_blueprint_file(args.output, wrapper)
     summary = render_summary(wrapper, layout, connector_summary, knowledge=knowledge)

@@ -464,6 +464,16 @@ right-boundary throughput windows of `8172/9204/8952/8532/8448/8520/min`.
 The 2400-tick summary was `7542/min`, still above the `7200/min` test-sink
 target.
 
+The current default sample keeps that compact 753-entity, 2x3,
+over-provisioned shape. Output fan-in connector segments now use the selected
+boundary route's belt tier instead of inheriting a slower learned source belt,
+so the generated fan-in routes report `turbo-transport-belt` flow all the way
+to the target boundary. A fresh runtime probe of the default sample restored
+753 entities with no manual failures, no invalid output inserters, a clean
+right boundary, and 300-tick throughput windows of
+`7968/9252/9000/8472/8448/8388/min`; the 2400-tick summary was
+`7501.63/min`.
+
 The requested external contract is still not solved. A forced exact 3x2
 candidate now has exactly two right-side `turbo-transport-belt` output routes,
 places 780 entities with no manual failures, restores 22 target-filtered output
@@ -475,6 +485,20 @@ overbuild experiment also stayed below target at `7152/min`. The next
 optimization target is therefore not general machine count, but a stricter
 two-belt compression strategy that can fully saturate both final turbo belts
 without letting byproducts consume output-lane slots.
+
+For strict two-lane experiments, the materializer exposes `--force-columns`.
+When that option is used on a single-node repeated grid, the selector evaluates
+the requested column count with the normal lane width and with a slightly wider
+recycle corridor. The wider 3x2 candidate places 840 entities, keeps the
+external contract exact at two `turbo-transport-belt` output lanes, and routes
+both `metallic-asteroid-chunk` byproduct splitter outputs back to the input
+boundary instead of leaving one lane as a finite overflow buffer. That removes a
+known long-run stability problem, but it still does not finish the strict
+contract: a 2400-tick runtime probe reached
+`1500/6600/6960/7092/7140/7176/min` after startup, with
+`invalid_output_inserters=0` and a clean right boundary. A faster 60-tick input
+probe did not improve the result, so the remaining gap is a final two-belt
+compression problem rather than a simple input-feed problem.
 
 Two follow-up probes narrowed the next design space. First, routing experimental
 new drop belts back into the main output lane made the extra inserters visible
