@@ -424,6 +424,17 @@ runtime state shifted from all machines being output-blocked to
 just more existing-belt unloaders; it needs routed new drop lanes and stronger
 input/recycle feeding.
 
+A first routed-new-drop-lane experiment is intentionally not enabled by
+default. It generated 795 placeable entities, three new drop belts, and eighteen
+filtered output expansion inserters, but the 2400-tick runtime audit still saw
+only fifteen effective machine-to-belt output inserters and throughput did not
+improve beyond the existing-drop-belt result. This means the offline endpoint
+test is still too loose for new drop lanes: a pickup point can touch a
+production machine's box without Factorio assigning that inserter a valid
+`pickup_target`. Until `machine_output_expansion_candidates()` is aligned with
+runtime pickup-target semantics, `materialize_machine_output_expansions()` keeps
+`allow_new_drop_belts=False`.
+
 For throughput-style validation, the runtime validator can run a right-boundary
 window drain with `--throughput-window-ticks` and `--throughput-target-item`.
 The implementation follows the same rightmost transport-line boundary used by
