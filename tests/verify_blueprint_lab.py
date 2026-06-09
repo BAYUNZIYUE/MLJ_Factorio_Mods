@@ -336,11 +336,15 @@ def main() -> int:
 1.000 Script @__level__/control.lua:1: BLUEPRINT_LAB_VALIDATION import_result=0
 1.001 Script @__level__/control.lua:2: BLUEPRINT_LAB_VALIDATION blueprint_entities=10 blueprint_tiles=0
 1.002 Script @__level__/control.lua:3: BLUEPRINT_LAB_VALIDATION manual_entities=10 manual_failures=0 manual_recipe_set=1 manual_recipe_failures=0
-2.000 Script @__level__/control.lua:4: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_summary window_ticks=300 windows=2 observed_ticks=600 probe_x=nil target_item=iron-gear-wheel target_removed=200 target_per_minute=200.0 product_items=iron-gear-wheel:200 input_items=
-2.001 Script @__level__/control.lua:5: BLUEPRINT_LAB_VALIDATION right_boundary_cleanliness status=clean product_items=5 input_items=0
-2.002 Script @__level__/control.lua:6: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_lane_summary target_item=iron-gear-wheel target_by_line=x=10.5/y=1.5/line=1:90,x=10.5/y=2.5/line=2:110
-2.003 Script @__level__/control.lua:7: BLUEPRINT_LAB_VALIDATION invalid_output_inserters=0 samples=
-2.004 Script @__level__/control.lua:8: BLUEPRINT_LAB_VALIDATION success
+1.500 Script @__level__/control.lua:4: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_window index=1 tick=300 observed_ticks=300 max_x=10.5 probe_x=nil belts=1 lines=2 target_item=iron-gear-wheel target_removed=80 target_per_minute=160.0 product_items=iron-gear-wheel:80 input_items=
+1.501 Script @__level__/control.lua:5: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_lane_window index=1 target_item=iron-gear-wheel target_by_line=x=10.5/y=1.5/line=1:40,x=10.5/y=2.5/line=2:40
+1.900 Script @__level__/control.lua:6: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_window index=2 tick=600 observed_ticks=300 max_x=10.5 probe_x=nil belts=1 lines=2 target_item=iron-gear-wheel target_removed=120 target_per_minute=240.0 product_items=iron-gear-wheel:120 input_items=
+1.901 Script @__level__/control.lua:7: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_lane_window index=2 target_item=iron-gear-wheel target_by_line=x=10.5/y=1.5/line=1:50,x=10.5/y=2.5/line=2:70
+2.000 Script @__level__/control.lua:8: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_summary window_ticks=300 windows=2 observed_ticks=600 probe_x=nil target_item=iron-gear-wheel target_removed=200 target_per_minute=200.0 product_items=iron-gear-wheel:200 input_items=
+2.001 Script @__level__/control.lua:9: BLUEPRINT_LAB_VALIDATION right_boundary_cleanliness status=clean product_items=5 input_items=0
+2.002 Script @__level__/control.lua:10: BLUEPRINT_LAB_VALIDATION right_boundary_throughput_lane_summary target_item=iron-gear-wheel target_by_line=x=10.5/y=1.5/line=1:90,x=10.5/y=2.5/line=2:110
+2.003 Script @__level__/control.lua:11: BLUEPRINT_LAB_VALIDATION invalid_output_inserters=0 samples=
+2.004 Script @__level__/control.lua:12: BLUEPRINT_LAB_VALIDATION success
 """,
         encoding="utf-8",
     )
@@ -365,8 +369,13 @@ def main() -> int:
         or runtime_proof["throughput_lane_summary"]["line_count"] != 2
         or runtime_proof["throughput_lane_summary"]["spread_target_items"] != 20
         or runtime_proof["throughput_lane_summary"]["per_minute_by_line"]["x=10.5/y=1.5/line=1"] != 540.0
+        or runtime_proof["throughput_window_diagnostics"]["window_count"] != 2
+        or runtime_proof["throughput_window_diagnostics"]["best_window"]["target_per_minute"] != 240.0
+        or runtime_proof["throughput_window_diagnostics"]["last_window"]["target_rate_deficit_per_minute"] != 0.0
+        or runtime_proof["throughput_window_diagnostics"]["windows_at_or_above_target"] != 2
         or runtime_proof["right_boundary_cleanliness"]["status"] != "clean"
         or runtime_proof["invalid_output_inserters"]["count"] != 0
+        or "Best throughput window: 240.0/min" not in render_runtime_proof_markdown_report(runtime_proof)
         or "Blueprint Runtime Proof Report" not in render_runtime_proof_markdown_report(runtime_proof)
     ):
         print(f"FAIL: expected runtime proof parser to mark clean above-target throughput as proven: {runtime_proof}")
@@ -406,7 +415,9 @@ def main() -> int:
         return 1
     candidate_a_path = ROOT / ".codex" / "tests" / "blueprint_lab_candidate_a.json"
     candidate_b_path = ROOT / ".codex" / "tests" / "blueprint_lab_candidate_b.json"
+    candidate_c_path = ROOT / ".codex" / "tests" / "blueprint_lab_candidate_c.json"
     runtime_proof_path = ROOT / ".codex" / "tests" / "blueprint_lab_runtime_proof_fixture.json"
+    below_target_runtime_proof_path = ROOT / ".codex" / "tests" / "blueprint_lab_runtime_below_target_fixture.json"
     candidate_a_path.write_text(
         json.dumps(
             {
@@ -443,18 +454,49 @@ def main() -> int:
         ),
         encoding="utf-8",
     )
+    candidate_c_path.write_text(
+        json.dumps(
+            {
+                "target_item": "iron-gear-wheel",
+                "target_rate_per_minute": 150,
+                "entity_count": 9,
+                "tile_count": 0,
+                "width": 9,
+                "height": 9,
+                "route_status_counts": {"connected": 1},
+                "boundary_contract_audit": [{"boundary": "output:iron-gear-wheel", "status": "exact", "expected_belt_count": 1, "route_count": 1}],
+                "boundary_capacity_audit": [{"boundary": "output:iron-gear-wheel", "status": "sufficient", "proven_capacity_per_minute": 150, "required_rate_per_minute": 150}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     runtime_proof_path.write_text(json.dumps(runtime_proof, ensure_ascii=False), encoding="utf-8")
+    below_target_runtime_proof = deepcopy(runtime_proof)
+    below_target_runtime_proof["status"] = "below-target"
+    below_target_runtime_proof["reasons"] = ["throughput-below-target"]
+    below_target_runtime_proof["throughput_summary"]["target_per_minute"] = 140.0
+    below_target_runtime_proof["throughput_window_diagnostics"]["best_window"]["target_per_minute"] = 149.0
+    below_target_runtime_proof["throughput_window_diagnostics"]["best_window"]["target_rate_deficit_per_minute"] = 1.0
+    below_target_runtime_proof["throughput_window_diagnostics"]["last_window"]["target_per_minute"] = 149.0
+    below_target_runtime_proof["throughput_window_diagnostics"]["last_window"]["target_rate_deficit_per_minute"] = 1.0
+    below_target_runtime_proof["throughput_window_diagnostics"]["windows_at_or_above_target"] = 0
+    below_target_runtime_proof_path.write_text(json.dumps(below_target_runtime_proof, ensure_ascii=False), encoding="utf-8")
     comparison = build_comparison(
         [
             summarize_candidate(label="runtime-over-provisioned", summary_path=candidate_a_path, runtime_proof_path=runtime_proof_path),
+            summarize_candidate(label="exact-near-miss", summary_path=candidate_c_path, runtime_proof_path=below_target_runtime_proof_path),
             summarize_candidate(label="exact-unresolved", summary_path=candidate_b_path),
         ]
     )
     if (
         comparison["recommended_label"] != "runtime-over-provisioned"
-        or comparison["strict_boundary_candidates"] != ["exact-unresolved"]
+        or comparison["strict_boundary_candidates"] != ["exact-near-miss", "exact-unresolved"]
         or comparison["runtime_proven_candidates"] != ["runtime-over-provisioned"]
+        or [item["label"] for item in comparison["candidates"]] != ["runtime-over-provisioned", "exact-near-miss", "exact-unresolved"]
         or "runtime proof outranks" not in comparison["recommended_reason"]
+        or "best throughput window reached 240.0/min" not in "\n".join(comparison["candidates"][0]["lessons"])
+        or "best throughput window reached 149.0/min with deficit 1.0/min" not in "\n".join(comparison["candidates"][1]["lessons"])
     ):
         print(f"FAIL: expected stage4 comparison to prefer runtime-proven candidate over exact unresolved candidate: {comparison}")
         return 1

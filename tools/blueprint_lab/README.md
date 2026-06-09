@@ -509,10 +509,11 @@ both `metallic-asteroid-chunk` byproduct splitter outputs back to the input
 boundary instead of leaving one lane as a finite overflow buffer. That removes a
 known long-run stability problem, but it still does not finish the strict
 contract: a 2400-tick runtime probe reached
-`1500/6600/6960/7092/7140/7176/min` after startup, with
-`invalid_output_inserters=0` and a clean right boundary. A faster 60-tick input
-probe did not improve the result, so the remaining gap is a final two-belt
-compression problem rather than a simple input-feed problem.
+`0/1440/6624/6960/7092/7104/7152/min`, with `invalid_output_inserters=0`
+and a clean right boundary. The best window is still `48/min` below the strict
+two-belt target, and a faster 60-tick input probe did not improve the result, so
+the remaining gap is a final two-belt compression problem rather than a simple
+input-feed problem.
 The lane-level drain marker confirms that conclusion. In a 2400-tick strict
 3x2 diagnostic run, the steady windows removed about `592` target items per
 300 ticks instead of the `600` needed for exactly two full turbo belts, and the
@@ -709,12 +710,15 @@ Parse a Factorio validation log into a reusable runtime proof report:
 python3 -m tools.blueprint_lab.runtime_proof .codex/tests/factorio-probe-2x3-selector-fixed-write-data/factorio-current.log --target-item iron-ore --target-rate-per-minute 7200 --json-output .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-runtime-proof.json --markdown-output .codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-runtime-proof.md
 ```
 
-The proof report also parses `right_boundary_throughput_lane_summary`. For the
-current stage-4 package proof this reports six active right-boundary transport
-lines with a `458` item spread across the full 2400-tick probe. That is useful
-diagnostic evidence: the package is runtime-proven for `7200/min`, but its
-throughput is distributed across six external output lines, so it remains an
-over-provisioned boundary rather than a strict two-belt solution.
+The proof report parses each `right_boundary_throughput_window`, its matching
+lane window, and the final `right_boundary_throughput_lane_summary`. For the
+current stage-4 package proof it reports a best window of `9336/min`, a last
+window of `8556/min`, `6/7` windows at or above target, and six active
+right-boundary transport lines with a `458` item spread across the full
+2400-tick probe. That is useful diagnostic evidence: the package is
+runtime-proven for `7200/min`, but its throughput is distributed across six
+external output lines, so it remains an over-provisioned boundary rather than a
+strict two-belt solution.
 
 The stage-4 package command can also merge that proof back into the generated
 package summary with `--runtime-log`. Use the `factorio-current.log` under the
@@ -724,14 +728,17 @@ Factorio log-open marker and may not contain the validation markers.
 Compare generated candidates with offline audits and runtime proof:
 
 ```bash
-python3 -m tools.blueprint_lab.stage4_compare --candidate runtime-overprovisioned=.codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-with-lane-proof-summary.json --candidate exact-compressor-unresolved=.codex/tests/blueprint-routed-iron-ore-2x-turbo-belt-compressed-boundary-forced-c2-summary.json --json-output .codex/tests/blueprint-stage4-candidate-comparison.json --markdown-output .codex/tests/blueprint-stage4-candidate-comparison.md
+python3 -m tools.blueprint_lab.stage4_compare --candidate compact-2x3-overprovisioned=.codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-materialized-summary.json,.codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-selector-fixed-runtime-proof.json --candidate exact-3x2-near-miss=.codex/tests/blueprint-routed-iron-ore-2x-turbo-belt-forced-3x2-auto-corridor-summary.json,.codex/tests/blueprint-forced-3x2-window-diagnostics-runtime-proof.json --candidate exact-compressor-unresolved=.codex/tests/blueprint-routed-iron-ore-2x-turbo-belt-compressed-boundary-forced-c2-summary.json --json-output .codex/tests/blueprint-stage4-candidate-comparison-window-diagnostics.json --markdown-output .codex/tests/blueprint-stage4-candidate-comparison-window-diagnostics.md
 ```
 
 The comparison intentionally recommends the runtime-proven over-provisioned
-candidate over the exact but unresolved compressor candidate. That scoring is a
-guardrail for future generator work: strict two-belt output is still the target,
-but an exact-looking boundary cannot outrank a wider boundary until it has
-runtime-proven throughput, clean output, and zero invalid output inserters.
+candidate over exact candidates until strict compression is runtime-proven. It
+also ranks a measured exact near-miss ahead of a missing-proof compressor
+experiment, because its best-window deficit is actionable evidence. That
+scoring is a guardrail for future generator work: strict two-belt output is
+still the target, but an exact-looking boundary cannot outrank a wider boundary
+until it has runtime-proven throughput, clean output, and zero invalid output
+inserters.
 
 Generate the current seed blueprint:
 

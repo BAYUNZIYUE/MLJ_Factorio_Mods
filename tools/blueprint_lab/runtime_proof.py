@@ -77,6 +77,10 @@ def latest_marker(markers: list[dict[str, Any]], event: str) -> dict[str, Any] |
     return None
 
 
+def markers_for_event(markers: list[dict[str, Any]], event: str) -> list[dict[str, Any]]:
+    return [marker for marker in markers if marker.get("event") == event]
+
+
 def runtime_proof_status(
     *,
     throughput: dict[str, Any] | None,
@@ -144,6 +148,57 @@ def line_distribution_summary(
     }
 
 
+def throughput_window_diagnostics(
+    markers: list[dict[str, Any]],
+    *,
+    target_rate_per_minute: float | None,
+) -> dict[str, Any]:
+    window_markers = markers_for_event(markers, "right_boundary_throughput_window")
+    lane_markers_by_index = {
+        int(marker.get("index")): marker
+        for marker in markers_for_event(markers, "right_boundary_throughput_lane_window")
+        if isinstance(marker.get("index"), int)
+    }
+    windows: list[dict[str, Any]] = []
+    for marker in window_markers:
+        index = marker.get("index")
+        lane_marker = lane_markers_by_index.get(int(index)) if isinstance(index, int) else None
+        rate = marker.get("target_per_minute")
+        deficit = None
+        meets_target = None
+        if isinstance(rate, (int, float)) and target_rate_per_minute is not None:
+            deficit = round(max(0.0, float(target_rate_per_minute) - float(rate)), 3)
+            meets_target = float(rate) >= float(target_rate_per_minute)
+        windows.append(
+            {
+                "index": index,
+                "tick": marker.get("tick"),
+                "observed_ticks": marker.get("observed_ticks"),
+                "target_removed": marker.get("target_removed"),
+                "target_per_minute": rate,
+                "target_rate_deficit_per_minute": deficit,
+                "meets_target": meets_target,
+                "line_summary": line_distribution_summary(
+                    lane_marker,
+                    observed_ticks=marker.get("observed_ticks"),
+                ),
+                "marker": marker,
+            }
+        )
+    numeric_windows = [window for window in windows if isinstance(window.get("target_per_minute"), (int, float))]
+    best_window = max(numeric_windows, key=lambda item: float(item["target_per_minute"]), default=None)
+    worst_window = min(numeric_windows, key=lambda item: float(item["target_per_minute"]), default=None)
+    last_window = numeric_windows[-1] if numeric_windows else None
+    return {
+        "window_count": len(windows),
+        "best_window": best_window,
+        "worst_window": worst_window,
+        "last_window": last_window,
+        "windows_at_or_above_target": sum(1 for window in windows if window.get("meets_target") is True),
+        "windows": windows,
+    }
+
+
 def build_runtime_proof(
     log_path: Path,
     *,
@@ -166,6 +221,10 @@ def build_runtime_proof(
             "line_number": invalid_output_marker.get("line_number"),
         }
     success = latest_marker(markers, "success") is not None
+    window_diagnostics = throughput_window_diagnostics(
+        markers,
+        target_rate_per_minute=target_rate_per_minute,
+    )
     status, reasons = runtime_proof_status(
         throughput=throughput,
         cleanliness=cleanliness,
@@ -191,6 +250,7 @@ def build_runtime_proof(
             lane_summary_marker,
             observed_ticks=throughput.get("observed_ticks") if throughput else None,
         ),
+        "throughput_window_diagnostics": window_diagnostics,
         "right_boundary_cleanliness": cleanliness,
         "invalid_output_inserters": invalid_output_inserters,
         "recipe_machine_audit": latest_marker(markers, "recipe_machine_audit"),
@@ -202,6 +262,9 @@ def build_runtime_proof(
 def render_markdown_report(proof: dict[str, Any]) -> str:
     throughput = proof.get("throughput_summary") or {}
     lane_summary = proof.get("throughput_lane_summary") or {}
+    window_diagnostics = proof.get("throughput_window_diagnostics") or {}
+    best_window = window_diagnostics.get("best_window") or {}
+    last_window = window_diagnostics.get("last_window") or {}
     cleanliness = proof.get("right_boundary_cleanliness") or {}
     invalid_output = proof.get("invalid_output_inserters") or {}
     lines = [
@@ -215,6 +278,9 @@ def render_markdown_report(proof: dict[str, Any]) -> str:
         f"- Success marker: {proof['success_marker']}",
         f"- Throughput: {throughput.get('target_per_minute', 'unknown')}/min",
         f"- Throughput windows: {throughput.get('windows', 'unknown')}",
+        f"- Best throughput window: {best_window.get('target_per_minute', 'unknown')}/min deficit={best_window.get('target_rate_deficit_per_minute', 'unknown')}/min",
+        f"- Last throughput window: {last_window.get('target_per_minute', 'unknown')}/min deficit={last_window.get('target_rate_deficit_per_minute', 'unknown')}/min",
+        f"- Windows at or above target: {window_diagnostics.get('windows_at_or_above_target', 'unknown')}/{window_diagnostics.get('window_count', 'unknown')}",
         f"- Throughput lane count: {lane_summary.get('line_count', 'unknown')}",
         f"- Throughput lane item spread: {lane_summary.get('spread_target_items', 'unknown')}",
         f"- Right boundary cleanliness: {cleanliness.get('status', 'unknown')}",

@@ -8,9 +8,9 @@ from typing import Any
 
 RUNTIME_STATUS_RANK = {
     "runtime-proven": 0,
-    None: 1,
+    "below-target": 1,
     "runtime-incomplete": 2,
-    "below-target": 3,
+    None: 3,
     "runtime-failed": 4,
 }
 
@@ -73,13 +73,17 @@ def candidate_score(candidate: dict[str, Any]) -> list[float]:
     contract = candidate.get("output_contract") or {}
     capacity = candidate.get("output_capacity") or {}
     lane_summary = runtime.get("throughput_lane_summary") or {}
+    window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
+    best_window = window_diagnostics.get("best_window") or {}
     expected_belt_count = int(contract.get("expected_belt_count") or 0)
     route_count = int(contract.get("route_count") or 0)
     route_overage = max(0, route_count - expected_belt_count) if expected_belt_count else route_count
     lane_count = int(lane_summary.get("line_count") or 0)
     runtime_status = runtime.get("status") if runtime else None
+    best_window_deficit = float(best_window.get("target_rate_deficit_per_minute") or 0.0) if runtime else 0.0
     return [
         float(RUNTIME_STATUS_RANK.get(runtime_status, 5)),
+        best_window_deficit,
         float(CAPACITY_STATUS_RANK.get(capacity.get("status"), 5)),
         float(CONTRACT_STATUS_RANK.get(contract.get("status"), 5)),
         float(route_overage),
@@ -133,11 +137,17 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     capacity = candidate.get("output_capacity") or {}
     runtime = candidate.get("runtime_proof") or {}
     lane_summary = runtime.get("throughput_lane_summary") or {}
+    window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
+    best_window = window_diagnostics.get("best_window") or {}
     if runtime.get("status") == "runtime-proven":
         lessons.append("runtime probe proves target throughput, clean right boundary, and no invalid output inserters")
     elif runtime:
         lessons.append(f"runtime proof is not sufficient: {runtime.get('status')}")
-    else:
+    if runtime and best_window.get("target_per_minute") is not None:
+        lessons.append(
+            f"best throughput window reached {best_window.get('target_per_minute')}/min with deficit {best_window.get('target_rate_deficit_per_minute')}/min"
+        )
+    elif not runtime:
         lessons.append("runtime proof is missing; offline audits are not enough for final acceptance")
     if contract.get("status") == "over-provisioned":
         lessons.append(
@@ -199,6 +209,9 @@ def render_markdown_report(comparison: dict[str, Any]) -> str:
         runtime = candidate.get("runtime_proof") or {}
         lane_summary = runtime.get("throughput_lane_summary") or {}
         throughput = runtime.get("throughput_summary") or {}
+        window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
+        best_window = window_diagnostics.get("best_window") or {}
+        last_window = window_diagnostics.get("last_window") or {}
         lines.extend(
             [
                 f"### {candidate['label']}",
@@ -208,6 +221,9 @@ def render_markdown_report(comparison: dict[str, Any]) -> str:
                 f"- Capacity: {capacity.get('status', 'unknown')} proven={capacity.get('proven_capacity_per_minute', 'unknown')}/min required={capacity.get('required_rate_per_minute', 'unknown')}/min",
                 f"- Runtime: {runtime.get('status', 'missing')}",
                 f"- Runtime throughput: {throughput.get('target_per_minute', 'unknown')}/min",
+                f"- Runtime best window: {best_window.get('target_per_minute', 'unknown')}/min deficit={best_window.get('target_rate_deficit_per_minute', 'unknown')}/min",
+                f"- Runtime last window: {last_window.get('target_per_minute', 'unknown')}/min deficit={last_window.get('target_rate_deficit_per_minute', 'unknown')}/min",
+                f"- Runtime windows at target: {window_diagnostics.get('windows_at_or_above_target', 'unknown')}/{window_diagnostics.get('window_count', 'unknown')}",
                 f"- Runtime output lines: {lane_summary.get('line_count', 'unknown')} spread={lane_summary.get('spread_target_items', 'unknown')}",
                 f"- Bounds: {candidate.get('width'):g} x {candidate.get('height'):g}",
             ]
