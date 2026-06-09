@@ -696,6 +696,36 @@ def main() -> int:
     if dag["external_inputs"] != [{"item": "iron-ore", "rate_per_minute": 300.0, "reason": "boundary-input"}]:
         print(f"FAIL: expected iron ore to become black-box boundary input: {dag}")
         return 1
+    full_belt_overbuild_dag = build_production_plan(
+        [
+            {
+                "fingerprint": "full-belt-overbuild-template",
+                "candidate_role": "production-template",
+                "label": "full-belt-overbuild",
+                "source": "fixture",
+                "path": "/full-belt-overbuild",
+                "occurrence_count": 1,
+                "module_items": [],
+                "layout": {"width": 16, "height": 16, "entities": [], "tiles": [], "ports": [], "port_counts": []},
+                "recipe_mappings": [
+                    {
+                        "recipe": "fixture-crushing",
+                        "status": "resolved",
+                        "base_crafts_per_minute": 1.0,
+                        "base_ingredients_per_minute": [("metallic-asteroid-chunk", 52.5)],
+                        "base_products_per_minute": [("iron-ore", 1575.0)],
+                    }
+                ],
+            }
+        ],
+        target_item="iron-ore",
+        target_rate_per_minute=7200,
+        target_rate_basis={"kind": "full-belt", "belt_name": "turbo-transport-belt", "belt_count": 2, "items_per_second_per_belt": 60},
+        boundary_items={"metallic-asteroid-chunk"},
+    )
+    if full_belt_overbuild_dag["root"]["instances"] != 6 or full_belt_overbuild_dag["root"]["planned_net_output_per_minute"] != 9450:
+        print(f"FAIL: expected full-belt root planning to overbuild enough complete templates to feed each target belt: {full_belt_overbuild_dag}")
+        return 1
     layout = build_layout_plan(dag, dag_mappings, max_columns=8, spacing=1, lane_width=4)
     if layout["layout_node_count"] != 2:
         print(f"FAIL: expected two layout nodes: {layout}")
@@ -993,7 +1023,7 @@ def main() -> int:
     if (
         len(replicated_summary["output_fanins"]) != 1
         or replicated_summary["output_fanins"][0]["status"] != "connected"
-        or replicated_summary["output_fanins"][0]["existing_belts_used"] != 7
+        or replicated_summary["output_fanins"][0]["existing_belts_used"] != 8
     ):
         print(f"FAIL: expected replicated-port routing to fan in output through existing bridge-lane belts: {replicated_summary}")
         return 1
@@ -1261,17 +1291,18 @@ def main() -> int:
         key=lambda item: item["route_y"],
     )
     if (
-        selected_layout["nodes"][0]["columns"] != 3
-        or selected_layout["nodes"][0]["rows"] != 2
-        or selected_flow_counts != {"pass": 13}
+        selected_layout["nodes"][0]["columns"] != 2
+        or selected_layout["nodes"][0]["rows"] != 3
+        or selected_flow_counts != {"pass": 12}
         or selected_capacity["output:iron-ore"]["status"] != "sufficient"
-        or selected_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 7200
-        or selected_contract["output:iron-ore"]["status"] != "exact"
-        or selected_contract["output:iron-ore"]["route_count"] != 2
+        or selected_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 10800
+        or selected_contract["output:iron-ore"]["status"] != "over-provisioned"
+        or selected_contract["output:iron-ore"]["route_count"] != 3
         or selected_summary["output_fanins_added"] <= 0
-        or [item["covered_instance_count"] for item in selected_lane_loads] != [3, 2]
+        or [item["covered_instance_count"] for item in selected_lane_loads] != [2, 2, 1]
+        or any(item["status"] == "overloaded" for item in selected_lane_loads)
     ):
-        print(f"FAIL: expected post-materialize layout selection to prefer the tightest exact 2-belt proven-flow grid over unresolved or over-provisioned layouts: {selected_layout} {selected_summary}")
+        print(f"FAIL: expected post-materialize layout selection to reject overloaded exact grids before preferring a tighter over-provisioned grid: {selected_layout} {selected_summary}")
         return 1
 
     semantic_fail_mappings = [

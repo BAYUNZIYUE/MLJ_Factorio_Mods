@@ -1085,11 +1085,19 @@ def add_boundary_connectors(
             existing_name = str(existing.get("name") or "")
             if is_belt_like_entity_name(existing_name) and canonical_transport_belt_name(existing_name) == belt_name:
                 existing_is_connector = any(existing is connector for connector in connectors)
-                if (
+                is_fanin_source_route = reason.startswith("fanin-source:")
+                is_fanin_route = reason.startswith("fanin:") or is_fanin_source_route
+                is_machine_feed_route = (
                     reason.endswith("machine-output-side-load")
                     or reason.endswith("machine-input-right-feed")
-                ) and existing.get("direction") != direction:
-                    if existing_is_connector:
+                )
+                is_plain_transport_belt = canonical_transport_belt_name(existing_name) == existing_name
+                if (is_fanin_route or is_machine_feed_route) and existing.get("direction") != direction:
+                    if (
+                        existing_is_connector
+                        or not is_plain_transport_belt
+                        or (is_fanin_route and not is_fanin_source_route and existing.get("direction") is not None)
+                    ):
                         collision = {"x": key[0], "y": key[1], "reason": f"{reason}:connector-direction-conflict"}
                         route_collisions.append(collision)
                         continue
@@ -2016,7 +2024,8 @@ def add_boundary_connectors(
                         }
                     )
                     break
-                start_x = float(previous_port["x"]) + 1.0
+                source_x = round(float(previous_port["x"]), 3)
+                start_x = round(source_x + 1.0, 3)
                 end_x = float(current_port["x"]) - 1.0
                 if start_x > end_x:
                     output_fanins.append(
@@ -2040,11 +2049,60 @@ def add_boundary_connectors(
                     break
                 belt_name = connector_belt_name_for_port(previous_port)
                 reason = f"fanin:{boundary}:{previous_instance}->{current_instance}:{route_y:g}"
-                positions = horizontal_positions(start_x, end_x, route_y, reason, belt_name)
-                belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(positions)
+                source_position: RoutePosition = (
+                    source_x,
+                    route_y,
+                    f"fanin-source:{boundary}:{previous_instance}->{current_instance}:{route_y:g}",
+                    DIR_EAST,
+                    belt_name,
+                )
+                positions = [source_position]
+                positions.extend(horizontal_positions(start_x, end_x, route_y, reason, belt_name))
+                belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(positions, record_collisions=False)
+                route_kind = "output-fanin-direct"
+                if route_collisions:
+                    blocked_direct = route_collisions
+                    detour_attempts: list[dict[str, Any]] = []
+                    merge_x = round(float(current_port["x"]), 3)
+                    entry_x = round(end_x - 1.0, 3)
+                    for detour_offset in (-1.0, 1.0, -2.0, 2.0):
+                        detour_y = round(route_y + detour_offset, 3)
+                        if start_x > entry_x:
+                            continue
+                        vertical_direction = DIR_NORTH if detour_y < route_y else DIR_SOUTH
+                        merge_direction = DIR_SOUTH if detour_y < route_y else DIR_NORTH
+                        detour_positions: list[RoutePosition] = [source_position]
+                        if start_x <= round(entry_x - 1.0, 3):
+                            detour_positions.extend(horizontal_positions(start_x, round(entry_x - 1.0, 3), route_y, reason, belt_name))
+                        detour_positions.append((entry_x, route_y, reason, vertical_direction, belt_name))
+                        detour_positions.append((entry_x, detour_y, reason, DIR_EAST, belt_name))
+                        if round(entry_x + 1.0, 3) <= round(merge_x - 1.0, 3):
+                            detour_positions.extend(horizontal_positions(round(entry_x + 1.0, 3), round(merge_x - 1.0, 3), detour_y, reason, belt_name))
+                        detour_positions.append((merge_x, detour_y, reason, merge_direction, belt_name))
+                        candidate_added, candidate_collisions, candidate_existing = add_positions_reusing_existing_belts(detour_positions, record_collisions=False)
+                        if not candidate_collisions:
+                            positions = detour_positions
+                            belts_added = candidate_added
+                            route_collisions = []
+                            existing_belts_used = candidate_existing
+                            route_kind = f"output-fanin-detour-{detour_offset:g}"
+                            break
+                        detour_attempts.append({"offset": detour_offset, "collisions": candidate_collisions})
+                    if route_collisions:
+                        collisions.extend(route_collisions)
+                        route_collisions = blocked_direct
+                    else:
+                        blocked_direct = []
                 status = "connected" if not route_collisions else "blocked"
                 output_fanins.append(
-                    {
+                    (
+                        {
+                            "route_positions": positions,
+                        }
+                        if route_kind.startswith("output-fanin-detour")
+                        else {}
+                    )
+                    | {
                         "boundary": boundary,
                         "node_item": node.get("item"),
                         "node_recipe": node.get("recipe"),
@@ -2058,7 +2116,7 @@ def add_boundary_connectors(
                         "belts_added": belts_added,
                         "existing_belts_used": existing_belts_used,
                         "collisions": route_collisions,
-                        "route_kind": "output-fanin-direct",
+                        "route_kind": route_kind,
                     }
                 )
                 if route_collisions:
@@ -2994,6 +3052,15 @@ def add_boundary_connectors(
         for fanin in output_fanins:
             if fanin.get("status") != "connected" or not fanin.get("from_port") or not fanin.get("to_port"):
                 continue
+            if fanin.get("route_positions"):
+                audit.append(
+                    audit_position_belt_flow(
+                        segment_type="output-fanin",
+                        route=fanin,
+                        positions=[tuple(position) for position in fanin["route_positions"]],
+                    )
+                )
+                continue
             from_port = fanin["from_port"]
             to_port = fanin["to_port"]
             audit.append(
@@ -3396,6 +3463,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     flow_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("belt_flow_audit") or [])
     capacity_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_capacity_audit") or [])
     contract_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_contract_audit") or [])
+    lane_load_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("output_lane_load_audit") or [])
     output_capacity = [
         item
         for item in connector_summary.get("boundary_capacity_audit") or []
@@ -3420,6 +3488,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     contract_over = contract_statuses.get("over-provisioned", 0)
     bad_capacity = capacity_statuses.get("failed", 0) + capacity_statuses.get("insufficient", 0)
     unresolved_capacity = capacity_statuses.get("unresolved", 0)
+    overloaded_output_lanes = lane_load_statuses.get("overloaded", 0)
     width = float(summary.get("width") or 0.0)
     height = float(summary.get("height") or 0.0)
     area = width * height
@@ -3429,6 +3498,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         float(output_not_sufficient),
         float(output_coverage_not_met),
         float(flow_statuses.get("failed", 0)),
+        float(overloaded_output_lanes),
         float(contract_not_exact),
         float(contract_over),
         float(output_routes_without_machine_drop),

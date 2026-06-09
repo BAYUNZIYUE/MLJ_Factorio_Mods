@@ -372,53 +372,47 @@ drop belts into routeable `machine-input` / `machine-output` ports. For vertical
 pickup lanes, it can generate a left-boundary route into the real pickup belt
 instead of pretending that a horizontal edge bus reaches the machine. For output
 ports, route scoring prefers the actual drop lane over the topmost adjacent lane
-when both are structurally available. The current `iron-ore` 2x turbo full-belt
-sample selects a 4x2 copied-crusher grid with five machine-input routes and two
-right-side `turbo-transport-belt` output routes.
+when both are structurally available. Full-belt root planning now overbuilds
+complete root template instances per requested belt: for the current
+`iron-ore` 2x turbo target, six copied `metallic-asteroid-crushing` cells are
+planned because each cell contributes about `1575/min` and one turbo belt carries
+`3600/min`.
 
 Full-belt targets carry a boundary-contract audit. For a target such as `2x
 turbo-transport-belt`, the audit expects exactly two connected output routes
-using `turbo-transport-belt`; the current `iron-ore` 2x turbo sample reports
-`exact` with lanes `[8.5, 36.0]`. The same sample now also detects that
-`metallic-asteroid-crushing` can return `metallic-asteroid-chunk` as a 0.2
-probability item byproduct. The materializer inserts two target-item filter
-splitters, keeps `iron-ore` on the main output routes, and recognizes that the
-byproduct chunk is also the recipe input. The current generated geometry routes
-those side outputs back to the left input boundary with U-shaped recycle-return
-belts when a collision-free lane is available; otherwise it falls back to a
-finite non-boundary overflow lane and reports that fallback explicitly.
+using `turbo-transport-belt`. A 3x2 copied-crusher candidate can satisfy that
+boundary contract offline, but its two output lanes each collect three machines:
+the output lane load audit reports `4725/min > 3600/min` on both lanes, and a
+2400-tick Factorio probe measured `0/min` delivered to the right boundary. The
+layout selector therefore treats overloaded output lanes as a stronger rejection
+than an over-provisioned boundary contract.
 
-For the current `iron-ore` 2x turbo sample, both output separations are
-`recycle-merge-to-input-boundary`. The report shows zero overflow belts, 119
-recycle/merge belts, and per-route `recycle_flow=pass` audits over 93 and 26
-checked belt positions. The merge targets are side-loads into the existing
-left-side `metallic-asteroid-chunk` input lanes at `(0.5,23.5)` and `(0.5,38.0)`.
+The current default `iron-ore` 2x turbo sample selects a 2x3 copied-crusher grid
+with three right-side machine-output lanes. It is explicitly
+`over-provisioned` relative to the requested `2x turbo-transport-belt` boundary,
+but all three output lane load checks are `sufficient`: two lanes carry two
+instances each at `3150/min <= 3600/min`, and the last carries one instance at
+`1575/min`. The materializer now includes the source machine-output port in each
+output fan-in path and may orient that plain transport belt east, so the route no
+longer starts one tile after a vertical drop belt that Factorio would never
+side-load into the generated boundary path.
 
-Left-only runtime probes against the current recycle-merge blueprint import 717
-entities, place them through the direct-placement fallback, insert
-`metallic-asteroid-chunk` only on left-edge transport lines, and restore splitter
-filters/priorities with zero splitter-setting failures. A 2400-tick runtime audit
-reports `right_boundary_cleanliness status=clean` with `iron-ore` on the right
-boundary and no input/byproduct items there. The same probe still observes some
-`metallic-asteroid-chunk` on internal transport lines, so this proves the audited
-right output boundary is clean for the tested window, not that the internal
-recycle loop is fully drained or long-run stable. It also still does not prove
-sustained full-belt throughput or player `build_blueprint` success on a platform
-surface.
+The same sample still detects that `metallic-asteroid-crushing` can return
+`metallic-asteroid-chunk` as a 0.2 probability item byproduct. The materializer
+inserts three target-item filter splitters, keeps `iron-ore` on the main output
+routes, and routes the recyclable chunk side outputs back to the left input
+boundary with U-shaped recycle-return belts. This remains a generated diagnostic
+geometry, not a proof that the recycle loop is fully drained or long-run stable.
 
-The runtime validator can also repeat the left-boundary input injection before
-the final audit with `--sustained-input-interval-ticks`. This is a stronger
-runtime stress probe than a single initial injection because it keeps feeding
-the copied boundary during the audit window, while still remaining a diagnostic
-input source rather than a real throughput meter. In the current `iron-ore 2x
-turbo-transport-belt` recycle-merge sample, a 2400-tick probe with a 300-tick
-interval reports `sustained_input_injection interval_ticks=300 cycles=7
-inserted=308 failures=0`, five crushers at `status=full_output`, `iron-ore`
-reaching the right boundary, and `right_boundary_cleanliness status=clean`.
-Internal `metallic-asteroid-chunk` remains visible on transport lines, so the
-result should be read as "right boundary stayed clean under periodic test
-feeding for this window", not as sustained full-belt or infinite-stability
-proof.
+Runtime probes against the current 2x3 source-fan-in blueprint import 771
+entities through the direct-placement fallback, set six recipes, restore six
+splitter settings, and place all entities without manual failures. A 2400-tick
+probe with 300-tick sustained input intervals reports right-boundary windows
+around `3924/min`, `4368/min`, `4476/min`, `4476/min`, `4380/min`, and
+`4524/min`, with `right_boundary_cleanliness status=clean`. This is a clear
+improvement over the broken exact 3x2 candidate, but it is still well below
+`2x turbo = 7200/min`; the remaining bottleneck is output unloading and
+machine-output buffering, with `recipe_machine_audit status=full_output:6`.
 
 For throughput-style validation, the runtime validator can run a right-boundary
 window drain with `--throughput-window-ticks` and `--throughput-target-item`.

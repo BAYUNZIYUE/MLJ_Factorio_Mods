@@ -216,6 +216,7 @@ def plan_node(
     *,
     max_depth: int,
     boundary_items: set[str],
+    target_rate_basis: dict[str, Any] | None = None,
     depth: int = 0,
     stack: tuple[str, ...] = (),
 ) -> ProductionPlanNode | ExternalInput:
@@ -233,6 +234,13 @@ def plan_node(
     option = options[0]
     instances_exact = required_rate / option.net_target_rate_per_instance
     instances = max(1, math.ceil(instances_exact))
+    if depth == 0 and (target_rate_basis or {}).get("kind") == "full-belt":
+        belt_count = int((target_rate_basis or {}).get("belt_count") or 0)
+        items_per_second = (target_rate_basis or {}).get("items_per_second_per_belt")
+        if belt_count > 0 and isinstance(items_per_second, (int, float)):
+            per_belt_rate = float(items_per_second) * 60
+            instances_per_belt = max(1, math.ceil(per_belt_rate / option.net_target_rate_per_instance))
+            instances = max(instances, belt_count * instances_per_belt)
     planned_inputs = [(name, rate * instances) for name, rate in option.input_rates_per_instance]
     children: list[ProductionPlanNode] = []
     external_inputs: list[ExternalInput] = []
@@ -244,6 +252,7 @@ def plan_node(
             options_by_item,
             max_depth=max_depth,
             boundary_items=boundary_items,
+            target_rate_basis=None,
             depth=depth + 1,
             stack=(*stack, item),
         )
@@ -324,6 +333,7 @@ def build_production_plan(
         options_by_item,
         max_depth=max_depth,
         boundary_items=effective_boundary_items,
+        target_rate_basis=target_rate_basis,
     )
     external_inputs = collect_external_inputs(root)
     return {
