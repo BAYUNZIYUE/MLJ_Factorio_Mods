@@ -1332,6 +1332,52 @@ def main() -> int:
         print(f"FAIL: expected post-materialize layout selection to reject overloaded exact grids before preferring a tighter over-provisioned grid: {selected_layout} {selected_summary}")
         return 1
 
+    compressed_wrapper, compressed_summary, compressed_layout = select_best_materialized_layout(
+        selection_layout,
+        selection_mappings,
+        label="fixture-compressed-layout",
+        connect_boundaries=True,
+        knowledge=knowledge,
+        compress_output_boundary=True,
+    )
+    compressed_splitter_priorities = [
+        entity.get("output_priority")
+        for entity in compressed_wrapper["blueprint"].get("entities") or []
+        if entity.get("name") == "turbo-splitter" and entity.get("output_priority") == "right"
+    ]
+    compressed_contract = {item["boundary"]: item for item in compressed_summary["boundary_contract_audit"]}
+    compressed_capacity = {item["boundary"]: item for item in compressed_summary["boundary_capacity_audit"]}
+    compressed_internal_routes = [
+        route
+        for route in compressed_summary["routes"]
+        if route.get("boundary") == "output:iron-ore" and route.get("boundary_role") == "internal-output"
+    ]
+    compressed_external_routes = [
+        route
+        for route in compressed_summary["routes"]
+        if route.get("boundary") == "output:iron-ore" and route.get("boundary_role") == "external-output"
+    ]
+    compressed_lane_loads = [
+        item for item in compressed_summary["output_lane_load_audit"] if item.get("boundary") == "output:iron-ore"
+    ]
+    if (
+        compressed_layout["nodes"][0]["columns"] != 2
+        or compressed_layout["nodes"][0]["rows"] != 3
+        or compressed_summary["output_boundary_compressors"][0]["status"] != "connected"
+        or compressed_contract["output:iron-ore"]["status"] != "exact"
+        or compressed_contract["output:iron-ore"]["route_count"] != 2
+        or compressed_capacity["output:iron-ore"]["status"] != "sufficient"
+        or compressed_capacity["output:iron-ore"]["proven_capacity_per_minute"] != 7200
+        or len(compressed_internal_routes) != 3
+        or len(compressed_external_routes) != 2
+        or [route["route_kind"] for route in compressed_external_routes] != ["output-boundary-compressor-output", "output-boundary-compressor-output"]
+        or len(compressed_splitter_priorities) != 2
+        or len(compressed_lane_loads) != 3
+        or any(item["status"] == "overloaded" for item in compressed_lane_loads)
+    ):
+        print(f"FAIL: expected compressed output boundary to keep 3 internal lanes while exposing an exact 2-belt boundary: {compressed_layout} {compressed_summary}")
+        return 1
+
     _, forced_summary, forced_layout = select_best_materialized_layout(
         selection_layout,
         selection_mappings,

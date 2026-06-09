@@ -1003,6 +1003,8 @@ def add_boundary_connectors(
     occupied: set[tuple[float, float]],
     occupied_entities: dict[tuple[float, float], dict[str, Any]],
     knowledge: PrototypeKnowledge | None = None,
+    output_separation_min_distance: float = 1.0,
+    compress_output_boundary: bool = False,
 ) -> dict[str, Any]:
     connectors: list[dict[str, Any]] = []
     collisions: list[dict[str, Any]] = []
@@ -1010,6 +1012,7 @@ def add_boundary_connectors(
     bridges: list[dict[str, Any]] = []
     input_fanouts: list[dict[str, Any]] = []
     output_fanins: list[dict[str, Any]] = []
+    output_boundary_compressors: list[dict[str, Any]] = []
     if not layout_plan.get("nodes"):
         return {
             "connectors_added": 0,
@@ -1026,6 +1029,7 @@ def add_boundary_connectors(
             "input_fanouts": input_fanouts,
             "output_fanins": output_fanins,
             "output_separations": [],
+            "output_boundary_compressors": [],
             "boundary_coverage": [],
             "boundary_capacity_audit": [],
             "boundary_contract_audit": [],
@@ -2460,7 +2464,7 @@ def add_boundary_connectors(
             splitter_name = splitter_name_for_belt_name(belt_name)
             route_y = round(float(port.get("y") or 0.0), 3)
             port_x = round(float(port.get("x") or 0.0), 3)
-            min_splitter_x = round(port_x + 1.0, 3)
+            min_splitter_x = round(port_x + max(1.0, float(output_separation_min_distance)), 3)
             splitter_x: float | None = None
             probe_x = min_splitter_x
             while right_boundary_x - probe_x - 1.0 >= 1.0:
@@ -2650,8 +2654,258 @@ def add_boundary_connectors(
         output_separations,
     ) = add_output_byproduct_separation(pending_byproduct_audit)
 
+    def add_output_boundary_compressor() -> list[dict[str, Any]]:
+        target_rate_basis = layout_plan.get("target_rate_basis") or {}
+        if not compress_output_boundary or target_rate_basis.get("kind") != "full-belt":
+            return []
+        expected_belt_count = int(target_rate_basis.get("belt_count") or 0)
+        expected_belt_name = str(target_rate_basis.get("belt_name") or "")
+        target_item = str(layout_plan.get("target_item") or "")
+        boundary = f"output:{target_item}"
+        if expected_belt_count != 2 or not expected_belt_name:
+            return []
+
+        selected_routes = [
+            route
+            for route in routes
+            if route.get("status") == "connected"
+            and str(route.get("boundary") or "") == boundary
+            and route.get("port")
+            and connector_belt_name_for_port(route.get("port") or {}) == expected_belt_name
+        ]
+        selected_routes = sorted(selected_routes, key=lambda route: round(float((route.get("port") or {}).get("y") or 0.0), 3))
+        if len(selected_routes) != 3:
+            return []
+
+        right_boundary_x = round(float(layout_plan["estimated_width"]) - 0.5, 3)
+        middle_y = round(float((selected_routes[1].get("port") or {}).get("y") or 0.0), 3)
+        origin_x = round(right_boundary_x + 7.0, 3)
+        origin_y = round(middle_y - 2.0, 3)
+        input_ys = [round(origin_y + offset, 3) for offset in (1.0, 2.0, 3.0)]
+        output_ys = [round(origin_y + offset, 3) for offset in (2.0, 3.0)]
+        input_x = origin_x
+        output_x = round(origin_x + 7.0, 3)
+        final_x = round(output_x + 6.0, 3)
+        turn_x = round(right_boundary_x + 3.0, 3)
+
+        transport_name = expected_belt_name
+        splitter_name = splitter_name_for_belt_name(transport_name)
+        underground_name = transport_name.replace("transport-belt", "underground-belt")
+        template_entities = [
+            (2.0, 0.0, transport_name, DIR_SOUTH, None, None),
+            (3.0, 0.0, transport_name, DIR_WEST, None, None),
+            (4.0, 0.0, transport_name, DIR_WEST, None, None),
+            (5.0, 0.0, transport_name, DIR_WEST, None, None),
+            (6.0, 0.0, transport_name, DIR_WEST, None, None),
+            (0.0, 1.0, transport_name, DIR_EAST, None, None),
+            (1.0, 1.0, underground_name, DIR_EAST, "input", None),
+            (2.0, 1.0, transport_name, DIR_EAST, None, None),
+            (4.0, 1.0, underground_name, DIR_EAST, "output", None),
+            (6.0, 1.0, transport_name, DIR_NORTH, None, None),
+            (3.0, 1.5, splitter_name, DIR_EAST, None, None),
+            (5.0, 1.5, splitter_name, DIR_EAST, None, "right"),
+            (0.0, 2.0, transport_name, DIR_EAST, None, None),
+            (1.0, 2.0, transport_name, DIR_EAST, None, None),
+            (4.0, 2.0, transport_name, DIR_EAST, None, None),
+            (7.0, 2.0, transport_name, DIR_EAST, None, None),
+            (2.0, 2.5, splitter_name, DIR_EAST, None, "right"),
+            (6.0, 2.5, splitter_name, DIR_EAST, None, None),
+            (0.0, 3.0, transport_name, DIR_EAST, None, None),
+            (1.0, 3.0, transport_name, DIR_EAST, None, None),
+            (3.0, 3.0, transport_name, DIR_EAST, None, None),
+            (4.0, 3.0, transport_name, DIR_EAST, None, None),
+            (5.0, 3.0, transport_name, DIR_EAST, None, None),
+            (7.0, 3.0, transport_name, DIR_EAST, None, None),
+        ]
+
+        proposed_entities: list[dict[str, Any]] = []
+        proposed_positions: set[tuple[float, float]] = set()
+        route_records: list[dict[str, Any]] = []
+
+        def compressor_route_positions(route: dict[str, Any], target_y: float) -> list[RoutePosition]:
+            port = route.get("port") or {}
+            source_y = round(float(port.get("y") or 0.0), 3)
+            positions: list[RoutePosition] = []
+            if source_y == target_y:
+                positions.extend(directional_horizontal_positions(round(right_boundary_x + 1.0, 3), round(input_x - 1.0, 3), source_y, f"{boundary}:compressor-input", DIR_EAST, transport_name))
+                return positions
+            positions.extend(directional_horizontal_positions(round(right_boundary_x + 1.0, 3), round(turn_x - 1.0, 3), source_y, f"{boundary}:compressor-input", DIR_EAST, transport_name))
+            vertical_direction = DIR_SOUTH if target_y > source_y else DIR_NORTH
+            positions.extend(vertical_positions(turn_x, source_y, target_y, f"{boundary}:compressor-input", vertical_direction, transport_name))
+            positions.extend(directional_horizontal_positions(round(turn_x + 1.0, 3), round(input_x - 1.0, 3), target_y, f"{boundary}:compressor-input", DIR_EAST, transport_name))
+            return positions
+
+        for route, target_y in zip(selected_routes, input_ys, strict=True):
+            positions = compressor_route_positions(route, target_y)
+            route_records.append(
+                {
+                    "route": route,
+                    "target_y": target_y,
+                    "positions": positions,
+                }
+            )
+            for x, y, _reason, _direction, _belt_name in visible_route_positions(positions):
+                key = (round(float(x), 3), round(float(y), 3))
+                if key in proposed_positions:
+                    return [
+                        {
+                            "status": "blocked",
+                            "reason": "duplicate-compressor-input-route-position",
+                            "x": key[0],
+                            "y": key[1],
+                        }
+                    ]
+                proposed_positions.add(key)
+
+        for rel_x, rel_y, name, direction, entity_type, output_priority in template_entities:
+            entity = connector_belt(
+                len(entities) + len(connectors) + len(proposed_entities) + 1,
+                round(origin_x + rel_x, 3),
+                round(origin_y + rel_y, 3),
+                direction=direction,
+                name=name,
+            )
+            if entity_type:
+                entity["type"] = entity_type
+            if output_priority:
+                entity["output_priority"] = output_priority
+            key = entity_position_key(entity)
+            if key in proposed_positions:
+                return [{"status": "blocked", "reason": "compressor-template-overlaps-input-route", "x": key[0], "y": key[1], "entity_name": name}]
+            proposed_entities.append(entity)
+            proposed_positions.add(key)
+
+        output_positions: list[RoutePosition] = []
+        for output_y in output_ys:
+            output_positions.extend(
+                directional_horizontal_positions(round(output_x + 1.0, 3), final_x, output_y, f"{boundary}:compressor-output", DIR_EAST, transport_name)
+            )
+
+        all_positions = [position for record in route_records for position in record["positions"]]
+        all_positions.extend(output_positions)
+        _added, route_collisions, _existing = add_positions_reusing_existing_belts(all_positions, record_collisions=False)
+        entity_collisions: list[dict[str, Any]] = []
+        if not route_collisions:
+            for proposed in proposed_entities:
+                key = entity_position_key(proposed)
+                if key in occupied_entities:
+                    entity_collisions.append({"x": key[0], "y": key[1], "reason": "compressor-template-collision", "entity_name": str(occupied_entities[key].get("name") or "")})
+                    continue
+                connectors.append(proposed)
+                occupied.add(key)
+                occupied_entities[key] = proposed
+
+        if route_collisions or entity_collisions:
+            collisions.extend(route_collisions + entity_collisions)
+            return [
+                {
+                    "boundary": boundary,
+                    "status": "blocked",
+                    "reason": "compressor-collision",
+                    "route_collisions": route_collisions,
+                    "entity_collisions": entity_collisions,
+                }
+            ]
+
+        for route_record in route_records:
+            route = route_record["route"]
+            route["boundary_role"] = "internal-output"
+            route["compressor_input_y"] = route_record["target_y"]
+
+        node_fingerprint = str(((selected_routes[0].get("port") or {}).get("node_fingerprint")) or "")
+        for index, output_y in enumerate(output_ys):
+            output_route_positions = directional_horizontal_positions(output_x, final_x, output_y, f"{boundary}:compressor-output-boundary", DIR_EAST, transport_name)
+            routes.append(
+                {
+                    "boundary": boundary,
+                    "boundary_role": "external-output",
+                    "status": "connected",
+                    "belts_added": len(output_route_positions),
+                    "collisions": [],
+                    "port": {
+                        "node_item": target_item,
+                        "node_recipe": "output-boundary-compressor",
+                        "node_fingerprint": node_fingerprint,
+                        "node_instance": index,
+                        "side": "right",
+                        "role": "boundary-compressor-output",
+                        "entity_name": transport_name,
+                        "entity_type": None,
+                        "direction": DIR_EAST,
+                        "source": "output-boundary-compressor",
+                        "x": output_x,
+                        "y": output_y,
+                    },
+                    "route_kind": "output-boundary-compressor-output",
+                    "route_positions": output_route_positions,
+                }
+            )
+
+        return [
+            {
+                "boundary": boundary,
+                "status": "connected",
+                "strategy": "corpus-3-to-2-throughput-balancer",
+                "source": "raynquist-fall-2024-3_2_tu_balancer-rotated",
+                "input_route_ys": [round(float((route.get("port") or {}).get("y") or 0.0), 3) for route in selected_routes],
+                "compressor_input_ys": input_ys,
+                "compressor_output_ys": output_ys,
+                "expected_belt_name": expected_belt_name,
+                "internal_route_count": len(selected_routes),
+                "external_route_count": expected_belt_count,
+                "origin_x": origin_x,
+                "origin_y": origin_y,
+                "output_x": output_x,
+                "final_x": final_x,
+            }
+        ]
+
+    output_boundary_compressors = add_output_boundary_compressor()
+
     def route_boundary_rate(route: dict[str, Any]) -> float | None:
         return boundary_required_rate(str(route.get("boundary") or ""))
+
+    def routes_for_boundary_audit(boundary: str) -> list[dict[str, Any]]:
+        connected_routes = [
+            route
+            for route in routes
+            if route.get("status") == "connected"
+            and str(route.get("boundary") or "") == boundary
+            and route.get("port")
+        ]
+        external_routes = [
+            route
+            for route in connected_routes
+            if route.get("boundary_role") == "external-output"
+        ]
+        if external_routes:
+            return external_routes
+        return [
+            route
+            for route in connected_routes
+            if route.get("boundary_role") != "internal-output"
+        ]
+
+    def routes_for_production_audit(boundary: str) -> list[dict[str, Any]]:
+        connected_routes = [
+            route
+            for route in routes
+            if route.get("status") == "connected"
+            and str(route.get("boundary") or "") == boundary
+            and route.get("port")
+        ]
+        internal_routes = [
+            route
+            for route in connected_routes
+            if route.get("boundary_role") == "internal-output"
+        ]
+        if internal_routes:
+            return internal_routes
+        return [
+            route
+            for route in connected_routes
+            if route.get("boundary_role") != "external-output"
+        ]
 
     def target_output_splitter_for_route(x: float, y: float, boundary: str | None) -> dict[str, Any] | None:
         if not boundary or not boundary.startswith("output:"):
@@ -2685,61 +2939,59 @@ def add_boundary_connectors(
             if item.get("segment_type") == "boundary-route"
         }
         grouped: dict[tuple[str, str], dict[str, Any]] = {}
-        for route in routes:
-            if route.get("status") != "connected" or not route.get("port"):
-                continue
-            boundary = str(route.get("boundary") or "")
-            port = route["port"]
-            fingerprint = str(port.get("node_fingerprint") or "")
-            instance = int(port.get("node_instance") or 0)
-            route_y = round(float(port.get("y") or 0.0), 3)
-            flow_status = flow_status_by_route.get((boundary, fingerprint, instance, route_y), "unknown")
-            belt_name = connector_belt_name_for_port(port)
-            belt = knowledge.belt(belt_name)
-            key = (boundary, fingerprint)
-            item = grouped.setdefault(
-                key,
-                {
-                    "boundary": boundary,
-                    "node_fingerprint": fingerprint,
-                    "status": "unknown",
-                    "route_count": 0,
-                    "belt_capacities": [],
-                    "capacity_per_minute": 0.0,
-                    "proven_capacity_per_minute": 0.0,
-                    "unresolved_capacity_per_minute": 0.0,
-                    "failed_capacity_per_minute": 0.0,
-                },
-            )
-            item["route_count"] += 1
-            if belt is None:
+        for boundary in sorted({str(route.get("boundary") or "") for route in routes if route.get("status") == "connected" and route.get("port")}):
+            for route in routes_for_boundary_audit(boundary):
+                port = route["port"]
+                fingerprint = str(port.get("node_fingerprint") or "")
+                instance = int(port.get("node_instance") or 0)
+                route_y = round(float(port.get("y") or 0.0), 3)
+                flow_status = flow_status_by_route.get((boundary, fingerprint, instance, route_y), "unknown")
+                belt_name = connector_belt_name_for_port(port)
+                belt = knowledge.belt(belt_name)
+                key = (boundary, fingerprint)
+                item = grouped.setdefault(
+                    key,
+                    {
+                        "boundary": boundary,
+                        "node_fingerprint": fingerprint,
+                        "status": "unknown",
+                        "route_count": 0,
+                        "belt_capacities": [],
+                        "capacity_per_minute": 0.0,
+                        "proven_capacity_per_minute": 0.0,
+                        "unresolved_capacity_per_minute": 0.0,
+                        "failed_capacity_per_minute": 0.0,
+                    },
+                )
+                item["route_count"] += 1
+                if belt is None:
+                    item["belt_capacities"].append(
+                        {
+                            "belt_name": belt_name,
+                            "flow_status": flow_status,
+                            "capacity_per_minute": None,
+                            "reason": "unknown-belt-prototype",
+                        }
+                    )
+                    continue
+                capacity = float(belt.items_per_minute)
+                item["capacity_per_minute"] += capacity
+                if flow_status == "pass":
+                    item["proven_capacity_per_minute"] += capacity
+                elif flow_status == "failed":
+                    item["failed_capacity_per_minute"] += capacity
+                else:
+                    item["unresolved_capacity_per_minute"] += capacity
                 item["belt_capacities"].append(
                     {
                         "belt_name": belt_name,
                         "flow_status": flow_status,
-                        "capacity_per_minute": None,
-                        "reason": "unknown-belt-prototype",
+                        "capacity_per_minute": capacity,
                     }
                 )
-                continue
-            capacity = float(belt.items_per_minute)
-            item["capacity_per_minute"] += capacity
-            if flow_status == "pass":
-                item["proven_capacity_per_minute"] += capacity
-            elif flow_status == "failed":
-                item["failed_capacity_per_minute"] += capacity
-            else:
-                item["unresolved_capacity_per_minute"] += capacity
-            item["belt_capacities"].append(
-                {
-                    "belt_name": belt_name,
-                    "flow_status": flow_status,
-                    "capacity_per_minute": capacity,
-                }
-            )
-            required_rate = route_boundary_rate(route)
-            if required_rate is not None:
-                item["required_rate_per_minute"] = required_rate
+                required_rate = route_boundary_rate(route)
+                if required_rate is not None:
+                    item["required_rate_per_minute"] = required_rate
 
         audits = list(grouped.values())
         for item in audits:
@@ -2773,13 +3025,7 @@ def add_boundary_connectors(
         if expected_belt_count <= 0 or not expected_belt_name:
             return []
 
-        connected_routes = [
-            route
-            for route in routes
-            if route.get("status") == "connected"
-            and str(route.get("boundary") or "") == expected_boundary
-            and route.get("port")
-        ]
+        connected_routes = routes_for_boundary_audit(expected_boundary)
         belt_names = [connector_belt_name_for_port(route["port"]) for route in connected_routes]
         route_ys = sorted({round(float((route.get("port") or {}).get("y") or 0.0), 3) for route in connected_routes})
         wrong_belts = sorted({name for name in belt_names if name != expected_belt_name})
@@ -3180,11 +3426,27 @@ def add_boundary_connectors(
         }
         grouped: dict[tuple[str, str], dict[str, Any]] = {}
         uncovered: list[dict[str, Any]] = []
+        coverage_routes: list[dict[str, Any]] = []
+        for boundary in sorted({str(route.get("boundary") or "") for route in routes if route.get("boundary")}):
+            coverage_routes.extend(routes_for_production_audit(boundary))
+        coverage_route_ids = {id(route) for route in coverage_routes}
         for route in routes:
+            if id(route) in coverage_route_ids or route.get("boundary_role") == "external-output":
+                continue
+            if route.get("status") == "connected":
+                continue
+            uncovered.append(
+                {
+                    "boundary": route.get("boundary"),
+                    "status": "uncovered",
+                    "reason": "route-not-connected-or-node-missing",
+                }
+            )
+        for route in coverage_routes:
             port = route.get("port") or {}
             fingerprint = str(port.get("node_fingerprint") or "")
             node = node_index.get(fingerprint)
-            if route.get("status") != "connected" or not node:
+            if not node:
                 uncovered.append(
                     {
                         "boundary": route.get("boundary"),
@@ -3257,9 +3519,10 @@ def add_boundary_connectors(
             if node.get("fingerprint") is not None
         }
         audits: list[dict[str, Any]] = []
-        for route in routes:
-            if route.get("status") != "connected" or not route.get("port"):
-                continue
+        load_routes: list[dict[str, Any]] = []
+        for boundary in sorted({str(route.get("boundary") or "") for route in routes if str(route.get("boundary") or "").startswith("output:")}):
+            load_routes.extend(routes_for_production_audit(boundary))
+        for route in load_routes:
             boundary = str(route.get("boundary") or "")
             if not boundary.startswith("output:"):
                 continue
@@ -3327,6 +3590,7 @@ def add_boundary_connectors(
         "input_fanouts": input_fanouts,
         "output_fanins": output_fanins,
         "output_separations": output_separations,
+        "output_boundary_compressors": output_boundary_compressors,
         "boundary_coverage": coverage,
         "boundary_capacity_audit": capacity_audit,
         "boundary_contract_audit": contract_audit,
@@ -3345,6 +3609,8 @@ def materialize_layout_with_summary(
     knowledge: PrototypeKnowledge | None = None,
     allow_new_drop_belts: bool = False,
     max_output_expansions_per_machine: int = 4,
+    output_separation_min_distance: float = 1.0,
+    compress_output_boundary: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     mapping_index = mapping_by_fingerprint(mappings)
     working_layout = copy.deepcopy(layout_plan)
@@ -3452,6 +3718,7 @@ def materialize_layout_with_summary(
         "input_fanouts": [],
         "output_fanins": [],
         "output_separations": [],
+        "output_boundary_compressors": [],
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
@@ -3470,6 +3737,8 @@ def materialize_layout_with_summary(
             occupied=occupied,
             occupied_entities=occupied_entities,
             knowledge=knowledge,
+            output_separation_min_distance=output_separation_min_distance,
+            compress_output_boundary=compress_output_boundary,
         )
         connector_result["output_inserter_upgrades"] = output_inserter_upgrades
 
@@ -3558,6 +3827,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     contract_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("boundary_contract_audit") or [])
     lane_load_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("output_lane_load_audit") or [])
     output_separations = connector_summary.get("output_separations") or []
+    output_boundary_compressors = connector_summary.get("output_boundary_compressors") or []
     output_capacity = [
         item
         for item in connector_summary.get("boundary_capacity_audit") or []
@@ -3574,6 +3844,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         if str(item.get("boundary") or "").startswith("output:")
         and item.get("status") == "connected"
         and item.get("port")
+        and item.get("boundary_role") != "external-output"
     ]
     output_not_sufficient = sum(1 for item in output_capacity if item.get("status") != "sufficient")
     output_coverage_not_met = sum(1 for item in output_coverage if not item.get("meets_required_rate", item.get("status") == "covered"))
@@ -3588,12 +3859,18 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         for item in output_separations
         if item.get("status") != "connected" or item.get("current_handling") == "finite-overflow-buffer"
     )
+    blocked_output_boundary_compressors = sum(
+        1
+        for item in output_boundary_compressors
+        if item.get("status") != "connected"
+    )
     width = float(summary.get("width") or 0.0)
     height = float(summary.get("height") or 0.0)
     area = width * height
     horizontal_penalty = max(0.0, height - width)
     return (
         float(len(connector_summary.get("collisions") or [])),
+        float(blocked_output_boundary_compressors),
         float(output_not_sufficient),
         float(output_coverage_not_met),
         float(flow_statuses.get("failed", 0)),
@@ -3622,6 +3899,8 @@ def select_best_materialized_layout(
     allow_new_drop_belts: bool = False,
     max_output_expansions_per_machine: int = 4,
     force_columns: int | None = None,
+    output_separation_min_distance: float = 1.0,
+    compress_output_boundary: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if not connect_boundaries or knowledge is None or len(layout_plan.get("nodes") or []) != 1:
         wrapper, connector_summary = materialize_layout_with_summary(
@@ -3632,6 +3911,8 @@ def select_best_materialized_layout(
             knowledge=knowledge,
             allow_new_drop_belts=allow_new_drop_belts,
             max_output_expansions_per_machine=max_output_expansions_per_machine,
+            output_separation_min_distance=output_separation_min_distance,
+            compress_output_boundary=compress_output_boundary,
         )
         return wrapper, connector_summary, layout_plan
 
@@ -3653,6 +3934,8 @@ def select_best_materialized_layout(
             knowledge=knowledge,
             allow_new_drop_belts=allow_new_drop_belts,
             max_output_expansions_per_machine=max_output_expansions_per_machine,
+            output_separation_min_distance=output_separation_min_distance,
+            compress_output_boundary=compress_output_boundary,
         )
         summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
         return materialized_layout_score(summary), wrapper, connector_summary, candidate_layout
@@ -3756,6 +4039,7 @@ def render_summary(
         "input_fanouts": [],
         "output_fanins": [],
         "output_separations": [],
+        "output_boundary_compressors": [],
         "boundary_coverage": [],
         "boundary_capacity_audit": [],
         "boundary_contract_audit": [],
@@ -3837,6 +4121,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         f"- Output separation overflow belts: {summary['connector_summary'].get('output_separation_overflow_belts', 0)}",
         f"- Output separation recycle belts: {summary['connector_summary'].get('output_separation_recycle_belts', 0)}",
         f"- Output separation merge belts: {summary['connector_summary'].get('output_separation_merge_belts', 0)}",
+        f"- Output boundary compressors: {len(summary['connector_summary'].get('output_boundary_compressors') or [])}",
         f"- Output inserter upgrades: {sum(int(item.get('materialized_count') or 0) for item in summary['connector_summary'].get('output_inserter_upgrades') or [])}",
         f"- Machine output expansion inserters: {int((summary['connector_summary'].get('machine_output_expansions') or {}).get('inserters_added') or 0)}",
         f"- Connector collisions: {len(summary['connector_summary']['collisions'])}",
@@ -4034,6 +4319,21 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             if item.get("reason"):
                 line += f" reason={item['reason']}"
             lines.append(line)
+    if summary["connector_summary"].get("output_boundary_compressors"):
+        lines.extend(["", "## Output Boundary Compressors", ""])
+        for item in summary["connector_summary"]["output_boundary_compressors"]:
+            line = (
+                f"- {item.get('boundary')}: status={item.get('status')} "
+                f"strategy={item.get('strategy')} internal={item.get('internal_route_count')} "
+                f"external={item.get('external_route_count')}"
+            )
+            if item.get("compressor_input_ys") is not None:
+                line += f" input_ys={item.get('compressor_input_ys')}"
+            if item.get("compressor_output_ys") is not None:
+                line += f" output_ys={item.get('compressor_output_ys')}"
+            if item.get("reason"):
+                line += f" reason={item.get('reason')}"
+            lines.append(line)
     if summary["connector_summary"].get("belt_flow_audit"):
         lines.extend(["", "## Belt Flow Audit", ""])
         for item in summary["connector_summary"]["belt_flow_audit"]:
@@ -4155,6 +4455,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-new-drop-belts", action="store_true", help="Experimental: allow generated machine-output expansion inserters to create new drop belts. Default keeps only runtime-proven existing drop belts.")
     parser.add_argument("--max-output-expansions-per-machine", type=int, default=4)
     parser.add_argument("--force-columns", type=int, help="Experimental: force the single-node repeated grid to this column count instead of running post-materialization column search.")
+    parser.add_argument("--output-separation-min-distance", type=float, default=1.0, help="Experimental: require this many tiles between the selected machine-output port and the target-item filter splitter.")
+    parser.add_argument("--compress-output-boundary", action="store_true", help="Experimental: keep over-provisioned internal output lanes and add a corpus-derived 3-to-2 compressor so the external boundary matches a 2-belt full-belt target.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)
@@ -4203,6 +4505,8 @@ def main(argv: list[str] | None = None) -> int:
         allow_new_drop_belts=args.allow_new_drop_belts,
         max_output_expansions_per_machine=args.max_output_expansions_per_machine,
         force_columns=args.force_columns,
+        output_separation_min_distance=args.output_separation_min_distance,
+        compress_output_boundary=args.compress_output_boundary,
     )
     save_blueprint_file(args.output, wrapper)
     summary = render_summary(wrapper, layout, connector_summary, knowledge=knowledge)
