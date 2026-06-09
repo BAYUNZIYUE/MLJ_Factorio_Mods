@@ -1500,6 +1500,7 @@ def main() -> int:
         or exposure_audit[0]["fanin_segment_count"] != 1
         or exposure_audit[0]["byproducts"] != ["metallic-asteroid-chunk"]
         or exposure_audit[0]["lane_load_status"] != "sufficient"
+        or exposure_audit[0]["max_safe_instances_before_separation"] != 2
         or exposure_audit[0]["recommendation"] != "mixed-route-is-within-lane-capacity-but-still-needs-runtime-proof"
     ):
         print(f"FAIL: expected byproduct fan-in exposure audit to flag mixed output before the target splitter: {byproduct_replicated_summary}")
@@ -1521,6 +1522,7 @@ def main() -> int:
         or overloaded_exposure[0]["status"] != "mixed-overloaded-before-separation"
         or overloaded_exposure[0]["lane_load_status"] != "overloaded"
         or overloaded_exposure[0]["lane_overload_per_minute"] != 3600
+        or overloaded_exposure[0]["max_safe_instances_before_separation"] != 1
         or overloaded_exposure[0]["recommendation"] != "split-target-and-byproduct-before-output-fanin-or-use-runtime-proven-lane-aware-compression"
     ):
         print(f"FAIL: expected byproduct pre-separation exposure audit to escalate mixed overloaded routes: {byproduct_overloaded_summary}")

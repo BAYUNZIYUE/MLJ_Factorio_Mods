@@ -170,7 +170,8 @@ def render_package_markdown(package: dict[str, Any], *, blueprint_output: Path |
             lines.append(
                 f"- {item.get('boundary')} y={item.get('route_y')}: status={item.get('status')} "
                 f"instances={item.get('covered_instances')} fanins={item.get('fanin_segment_count')} "
-                f"separator_x={item.get('separator_x')} lane_load={item.get('lane_load_status')}"
+                f"separator_x={item.get('separator_x')} lane_load={item.get('lane_load_status')} "
+                f"max_safe_instances={item.get('max_safe_instances_before_separation')}"
             )
     lines.extend(["", "## Module Library", ""])
     module_library = summary.get("module_library") or {}

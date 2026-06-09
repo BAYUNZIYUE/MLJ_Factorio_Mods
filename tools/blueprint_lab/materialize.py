@@ -3644,6 +3644,11 @@ def add_boundary_connectors(
                 ]
                 separator = separator_by_route.get((output_boundary, route_y))
                 lane_load = lane_load_by_route.get((output_boundary, route_y)) or {}
+                lane_capacity = lane_load.get("lane_capacity_per_minute")
+                per_instance_rate = lane_load.get("per_instance_net_output_per_minute")
+                max_safe_instances = None
+                if isinstance(lane_capacity, (int, float)) and isinstance(per_instance_rate, (int, float)) and per_instance_rate > 0:
+                    max_safe_instances = max(1, int(math.floor(float(lane_capacity) / float(per_instance_rate))))
                 status = (
                     "mixed-overloaded-before-separation"
                     if len(covered_instances) > 1 and separator is not None and lane_load.get("status") == "overloaded"
@@ -3675,8 +3680,10 @@ def add_boundary_connectors(
                         "byproducts": byproducts_by_target[boundary],
                         "lane_load_status": lane_load.get("status"),
                         "lane_load_rate_per_minute": lane_load.get("load_rate_per_minute"),
+                        "per_instance_net_output_per_minute": per_instance_rate,
                         "lane_capacity_per_minute": lane_load.get("lane_capacity_per_minute"),
                         "lane_overload_per_minute": lane_load.get("overload_per_minute"),
+                        "max_safe_instances_before_separation": max_safe_instances,
                         "separator_x": separator.get("splitter_x") if separator else None,
                         "separator_handling": separator.get("current_handling") if separator else None,
                         "recommendation": recommendation,
@@ -4438,7 +4445,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"- {item.get('boundary')} y={item.get('route_y')}: status={item.get('status')} "
                 f"instances={item.get('covered_instances')} fanins={item.get('fanin_segment_count')} "
                 f"separator_x={item.get('separator_x')} byproducts={byproducts} "
-                f"lane_load={item.get('lane_load_status')} "
+                f"lane_load={item.get('lane_load_status')} max_safe_instances={item.get('max_safe_instances_before_separation')} "
                 f"next={item.get('recommendation')}"
             )
     if summary["connector_summary"].get("output_byproduct_audit"):

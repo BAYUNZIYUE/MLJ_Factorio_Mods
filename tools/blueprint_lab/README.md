@@ -541,13 +541,16 @@ candidate, both final output routes are reported as
 `mixed-overloaded-before-separation`: the top route covers instances `[0, 1, 2]`
 and the bottom route covers `[3, 4, 5]`, each with two fan-in segments before
 the target-item filter splitter at `x=47.5`, and each route is already
-`4725/min > 3600/min` before separation. The default 2x3 over-provisioned
-candidate also has mixed pre-separation routes, but each route covers only two
-instances and stays within one turbo belt, so it remains the selected
-runtime-proven path. This explains why the forced exact contract can look
-correct offline while runtime still misses a few items per window. The next
-strict generator attempt should either split target/byproduct output before
-fan-in or replace this row fan-in with a runtime-proven lane-aware compressor.
+`4725/min > 3600/min` before separation. The audit now reports
+`max_safe_instances_before_separation`: for this learned crusher template,
+`floor(3600 / 1575) = 2`, so three instances on one pre-separation turbo line
+is structurally over the safe limit. The default 2x3 over-provisioned candidate
+also has mixed pre-separation routes, but each route covers exactly two
+instances, stays within the safe limit, and remains the selected runtime-proven
+path. This explains why the forced exact contract can look correct offline
+while runtime still misses a few items per window. The next strict generator
+attempt should either split target/byproduct output before fan-in or replace
+this row fan-in with a runtime-proven lane-aware compressor.
 
 Two follow-up probes narrowed the next design space. First, routing experimental
 new drop belts back into the main output lane made the extra inserters visible
