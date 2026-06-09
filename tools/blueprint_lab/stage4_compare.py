@@ -307,6 +307,7 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     pre_fanin_finite_overflow = output_separation_handling_counts.get("pre-fanin-finite-overflow-buffer", 0)
     finite_overflow = output_separation_handling_counts.get("finite-overflow-buffer", 0)
     pre_fanin_sideload = output_separation_handling_counts.get("pre-fanin-recycle-sideload-to-input-lane", 0)
+    pre_fanin_underground = output_separation_handling_counts.get("pre-fanin-recycle-underground-corridor-to-input-boundary", 0)
     if pre_fanin_finite_overflow:
         lessons.append(
             f"{pre_fanin_finite_overflow} pre-fanin byproduct separator(s) still use finite overflow buffers; recycle stability is unresolved"
@@ -318,6 +319,10 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     if pre_fanin_sideload:
         lessons.append(
             f"{pre_fanin_sideload} pre-fanin byproduct separator(s) side-load into input lanes; this is experimental negative evidence until runtime proves the input lane stays uncongested"
+        )
+    if pre_fanin_underground:
+        lessons.append(
+            f"{pre_fanin_underground} pre-fanin byproduct separator(s) use a dedicated underground recycle corridor back to the input boundary"
         )
     if mixed_overloaded_exposure:
         lessons.append(

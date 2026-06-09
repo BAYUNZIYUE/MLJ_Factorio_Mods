@@ -23,6 +23,7 @@ from .template_knowledge import map_template_library
 
 
 RoutePosition = tuple[float, float, str, int, str]
+RouteEntitySpec = dict[str, Any]
 
 
 def materialized_entity(raw: dict[str, Any], entity_number: int, *, x: float, y: float) -> dict[str, Any]:
@@ -65,6 +66,19 @@ def connector_belt(entity_number: int, x: float, y: float, *, direction: int = D
         "position": {"x": round(x, 3), "y": round(y, 3)},
         "direction": direction,
     }
+
+
+def connector_belt_from_spec(entity_number: int, spec: RouteEntitySpec) -> dict[str, Any]:
+    entity = connector_belt(
+        entity_number,
+        float(spec["x"]),
+        float(spec["y"]),
+        direction=int(spec.get("direction", DIR_EAST)),
+        name=str(spec.get("name") or "transport-belt"),
+    )
+    if spec.get("entity_type"):
+        entity["type"] = str(spec["entity_type"])
+    return entity
 
 
 def connector_belt_name_for_port(port: dict[str, Any] | None) -> str:
@@ -1215,6 +1229,61 @@ def add_boundary_connectors(
             connectors.append(belt)
             occupied.add(key)
             occupied_entities[key] = belt
+        return len(connectors) - before, route_collisions, existing_belts_used
+
+    def add_entity_specs_reusing_existing_belts(
+        specs: list[RouteEntitySpec],
+        *,
+        record_collisions: bool = True,
+        reuse_existing_plain_belts_only: bool = False,
+    ) -> tuple[int, list[dict[str, Any]], int]:
+        route_collisions: list[dict[str, Any]] = []
+        seen: set[tuple[float, float]] = set()
+        existing_belts_used = 0
+        for spec in specs:
+            key = (round(float(spec["x"]), 3), round(float(spec["y"]), 3))
+            reason = str(spec.get("reason") or "connector")
+            name = str(spec.get("name") or "transport-belt")
+            direction = int(spec.get("direction", DIR_EAST))
+            entity_type = spec.get("entity_type")
+            if key in seen:
+                route_collisions.append({"x": key[0], "y": key[1], "reason": f"{reason}:duplicate-route-position"})
+                continue
+            seen.add(key)
+            existing = occupied_entities.get(key)
+            if existing is None:
+                continue
+            existing_name = str(existing.get("name") or "")
+            if reuse_existing_plain_belts_only and not entity_type:
+                if is_plain_transport_belt_entity_name(existing_name) and existing_name == name and existing.get("direction") == direction:
+                    existing_belts_used += 1
+                    continue
+                route_collisions.append(
+                    {
+                        "x": key[0],
+                        "y": key[1],
+                        "reason": f"{reason}:existing-belt-not-reusable",
+                        "entity_name": existing_name,
+                        "direction": existing.get("direction"),
+                        "expected_direction": direction,
+                    }
+                )
+                continue
+            route_collisions.append({"x": key[0], "y": key[1], "reason": reason, "entity_name": existing_name})
+        if route_collisions:
+            if record_collisions:
+                collisions.extend(route_collisions)
+            return 0, route_collisions, existing_belts_used
+
+        before = len(connectors)
+        for spec in specs:
+            key = (round(float(spec["x"]), 3), round(float(spec["y"]), 3))
+            if key in occupied_entities:
+                continue
+            entity = connector_belt_from_spec(len(entities) + len(connectors) + 1, spec)
+            connectors.append(entity)
+            occupied.add(key)
+            occupied_entities[key] = entity
         return len(connectors) - before, route_collisions, existing_belts_used
 
     def horizontal_positions(start_x: float, end_x: float, y: float, reason: str, belt_name: str) -> list[RoutePosition]:
@@ -2505,6 +2574,85 @@ def add_boundary_connectors(
                     )
             return None
 
+        def specs_to_route_positions(specs: list[RouteEntitySpec], belt_name: str) -> list[RoutePosition]:
+            return [
+                (
+                    round(float(spec["x"]), 3),
+                    round(float(spec["y"]), 3),
+                    str(spec.get("reason") or "connector"),
+                    int(spec.get("direction", DIR_EAST)),
+                    belt_name,
+                )
+                for spec in specs
+            ]
+
+        def pre_fanin_underground_corridor_candidates(
+            splitter_x: float,
+            overflow_y: float,
+            belt_name: str,
+            boundary: str,
+            recyclable_byproducts: list[str],
+        ) -> list[tuple[dict[str, Any], list[RouteEntitySpec], list[RoutePosition]]]:
+            underground_name = belt_name.replace("transport-belt", "underground-belt")
+            if underground_name == belt_name:
+                return []
+            candidates: list[tuple[dict[str, Any], list[RouteEntitySpec], list[RoutePosition]]] = []
+            targets = [
+                target
+                for target in input_merge_targets(recyclable_byproducts, belt_name)
+                if float(target["merge_y"]) > overflow_y
+                and float(target["merge_y"]) - overflow_y <= 8.0
+            ]
+            for target in targets:
+                merge_y = round(float(target["merge_y"]), 3)
+                corridor_y = round(merge_y + 1.0, 3)
+                underground_input_y = round(overflow_y + 1.0, 3)
+                underground_output_y = round(corridor_y - 1.0, 3)
+                if corridor_y > max_y or underground_output_y <= underground_input_y:
+                    continue
+                for offset in range(2, 36):
+                    turn_x = round(splitter_x + float(offset), 3)
+                    if turn_x >= right_boundary_x:
+                        break
+                    reason = f"{boundary}:pre-fanin-output-byproduct-recycle-underground-corridor"
+                    specs: list[RouteEntitySpec] = []
+                    for x, y, _route_reason, direction, _route_belt in directional_horizontal_positions(
+                        round(splitter_x + 1.0, 3),
+                        round(turn_x - 1.0, 3),
+                        overflow_y,
+                        reason,
+                        DIR_EAST,
+                        belt_name,
+                    ):
+                        specs.append({"x": x, "y": y, "reason": reason, "direction": direction, "name": belt_name})
+                    specs.append({"x": turn_x, "y": overflow_y, "reason": reason, "direction": DIR_SOUTH, "name": belt_name})
+                    specs.append({"x": turn_x, "y": underground_input_y, "reason": reason, "direction": DIR_SOUTH, "name": underground_name, "entity_type": "input"})
+                    specs.append({"x": turn_x, "y": underground_output_y, "reason": reason, "direction": DIR_SOUTH, "name": underground_name, "entity_type": "output"})
+                    for x, y, _route_reason, direction, _route_belt in directional_horizontal_positions(
+                        turn_x,
+                        1.5,
+                        corridor_y,
+                        reason,
+                        DIR_WEST,
+                        belt_name,
+                    ):
+                        specs.append({"x": x, "y": y, "reason": reason, "direction": direction, "name": belt_name})
+                    for x, y, _route_reason, direction, _route_belt in vertical_positions(
+                        0.5,
+                        corridor_y,
+                        merge_y,
+                        reason,
+                        DIR_NORTH,
+                        belt_name,
+                    ):
+                        specs.append({"x": x, "y": y, "reason": reason, "direction": direction, "name": belt_name})
+                    merge_target = dict(target)
+                    merge_target["corridor_y"] = corridor_y
+                    merge_target["underground_x"] = turn_x
+                    route_positions = specs_to_route_positions(specs, belt_name)
+                    candidates.append((merge_target, specs, route_positions))
+            return candidates
+
         def blocked_recycle_attempt(
             route_kind: str,
             collisions: list[dict[str, Any]],
@@ -2745,6 +2893,42 @@ def add_boundary_connectors(
                                 )
                             )
                     if current_handling != "pre-fanin-recycle-sideload-to-input-lane":
+                        for merge_target, recycle_specs, recycle_positions in pre_fanin_underground_corridor_candidates(
+                            splitter_x,
+                            overflow_y,
+                            belt_name,
+                            boundary,
+                            recyclable_byproducts,
+                        ):
+                            (
+                                candidate_belts_added,
+                                candidate_collisions,
+                                candidate_existing_belts_used,
+                            ) = add_entity_specs_reusing_existing_belts(
+                                recycle_specs,
+                                record_collisions=False,
+                                reuse_existing_plain_belts_only=True,
+                            )
+                            if not candidate_collisions:
+                                belts_added = candidate_belts_added
+                                existing_belts_used = candidate_existing_belts_used
+                                recycle_belts_added += candidate_belts_added
+                                merge_belts_added += candidate_belts_added
+                                current_handling = "pre-fanin-recycle-underground-corridor-to-input-boundary"
+                                route_kind = "pre-fanin-output-byproduct-filter-splitter-recycle-underground-corridor"
+                                last = recycle_positions[-1] if recycle_positions else (left_boundary_x, overflow_y, "", DIR_WEST, belt_name)
+                                recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "input-bus"}
+                                recycle_merge_target = merge_target
+                                recycle_flow_audit = audit_exact_route_positions("pre-fanin-output-byproduct-recycle-underground-corridor", recycle_positions)
+                                break
+                            blocked_recycle_attempts.append(
+                                blocked_recycle_attempt(
+                                    "pre-fanin-output-byproduct-filter-splitter-recycle-underground-corridor",
+                                    candidate_collisions,
+                                    merge_target,
+                                )
+                            )
+                    if current_handling not in {"pre-fanin-recycle-sideload-to-input-lane", "pre-fanin-recycle-underground-corridor-to-input-boundary"}:
                         for merge_target, recycle_positions in recycle_merge_candidates(
                             splitter_x,
                             overflow_y,
@@ -2780,7 +2964,7 @@ def add_boundary_connectors(
                                     merge_target,
                                 )
                             )
-                    if current_handling not in {"pre-fanin-recycle-sideload-to-input-lane", "pre-fanin-recycle-merge-to-input-boundary"}:
+                    if current_handling not in {"pre-fanin-recycle-sideload-to-input-lane", "pre-fanin-recycle-underground-corridor-to-input-boundary", "pre-fanin-recycle-merge-to-input-boundary"}:
                         for recycle_positions in recycle_return_candidates(splitter_x, overflow_y, belt_name, boundary):
                             candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
                             if not candidate_collisions:
@@ -2836,7 +3020,7 @@ def add_boundary_connectors(
                         "overflow_belts_added": belts_added if current_handling == "pre-fanin-finite-overflow-buffer" else 0,
                         "recycle_belts_added": belts_added if current_handling == "pre-fanin-recycle-return-to-input-boundary" else 0,
                         "merge_belts_added": belts_added
-                        if current_handling in {"pre-fanin-recycle-merge-to-input-boundary", "pre-fanin-recycle-sideload-to-input-lane"}
+                        if current_handling in {"pre-fanin-recycle-merge-to-input-boundary", "pre-fanin-recycle-sideload-to-input-lane", "pre-fanin-recycle-underground-corridor-to-input-boundary"}
                         else 0,
                         "recycle_exit": recycle_exit,
                         "recycle_merge_target": recycle_merge_target,

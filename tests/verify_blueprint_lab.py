@@ -517,6 +517,11 @@ def main() -> int:
     ):
         print("FAIL: expected below-target pre-fanin sideload candidate to rank as experimental negative evidence")
         return 1
+    underground_candidate = deepcopy(comparison["candidates"][1])
+    underground_candidate["output_separation_handling_counts"] = {"pre-fanin-recycle-underground-corridor-to-input-boundary": 2}
+    if "dedicated underground recycle corridor" not in "\n".join(candidate_lessons(underground_candidate)):
+        print("FAIL: expected pre-fanin underground corridor candidates to explain byproduct recycle progress")
+        return 1
     io_audit = audit_machine_io(
         {
             "blueprint": {
@@ -1593,6 +1598,46 @@ def main() -> int:
         or pre_fanin_exposure[0]["recommendation"] != "pre-fanin-separation-removes-mixed-byproducts-but-still-needs-runtime-proof"
     ):
         print(f"FAIL: expected pre-fanin separation to mark fan-in sources as separated before mixed output merge: {byproduct_preseparated_summary}")
+        return 1
+    byproduct_preseparated_underground_wrapper, byproduct_preseparated_underground_summary = materialize_layout_with_summary(
+        byproduct_merge_reuse_layout,
+        byproduct_merge_reuse_mappings,
+        label="fixture-byproduct-preseparate-underground-corridor",
+        connect_boundaries=True,
+        knowledge=knowledge,
+        preseparate_output_before_fanin=True,
+    )
+    underground_pre_fanin_separations = [
+        item
+        for item in byproduct_preseparated_underground_summary["output_separations"]
+        if item.get("scope") == "output-fanin"
+    ]
+    underground_pre_fanin = underground_pre_fanin_separations[0] if underground_pre_fanin_separations else {}
+    underground_merge_target = underground_pre_fanin.get("recycle_merge_target") or {}
+    underground_entities = [
+        entity
+        for entity in byproduct_preseparated_underground_wrapper["blueprint"]["entities"]
+        if entity.get("name") == "turbo-underground-belt"
+    ]
+    underground_types = Counter(entity.get("type") for entity in underground_entities)
+    if (
+        len(underground_pre_fanin_separations) != 1
+        or underground_pre_fanin.get("status") != "connected"
+        or underground_pre_fanin.get("current_handling") != "pre-fanin-recycle-underground-corridor-to-input-boundary"
+        or underground_pre_fanin.get("overflow_belts_added") != 0
+        or underground_pre_fanin.get("merge_belts_added", 0) <= 0
+        or underground_pre_fanin.get("recycle_flow_audit", {}).get("status") != "pass"
+        or underground_pre_fanin.get("recycle_exit", {}).get("side") != "input-bus"
+        or underground_merge_target.get("corridor_y") != 9.0
+        or underground_merge_target.get("underground_x") != 12.0
+        or underground_types != {"input": 1, "output": 1}
+        or {entity.get("direction") for entity in underground_entities} != {DIR_SOUTH}
+        or byproduct_preseparated_underground_summary["collisions"]
+        or byproduct_preseparated_underground_summary["output_separation_overflow_belts"] != 0
+        or byproduct_preseparated_underground_summary["output_preseparation_exposure_audit"][0]["status"] != "preseparated-before-fanin"
+        or byproduct_preseparated_underground_summary["output_preseparation_exposure_audit"][0]["separator_handling"] != "recycle-return-to-input-boundary"
+    ):
+        print(f"FAIL: expected pre-fanin byproduct separation to prefer an underground recycle corridor when surface merge lanes are blocked: {byproduct_preseparated_underground_summary}")
         return 1
     score_fixture = {
         "width": 10,
