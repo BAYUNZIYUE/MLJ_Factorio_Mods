@@ -31,6 +31,7 @@ CONTRACT_STATUS_RANK = {
 
 
 NEAR_MISS_DEFICIT_RATIO = 0.02
+DECAY_DEFICIT_RATIO = 0.05
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -85,6 +86,7 @@ def candidate_score(candidate: dict[str, Any]) -> list[float]:
     lane_summary = runtime.get("throughput_lane_summary") or {}
     window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
     best_window = window_diagnostics.get("best_window") or {}
+    last_window = window_diagnostics.get("last_window") or {}
     exposure_counts = candidate.get("output_preseparation_exposure_status_counts") or {}
     expected_belt_count = int(contract.get("expected_belt_count") or 0)
     route_count = int(contract.get("route_count") or 0)
@@ -92,11 +94,16 @@ def candidate_score(candidate: dict[str, Any]) -> list[float]:
     lane_count = int(lane_summary.get("line_count") or 0)
     runtime_status = runtime.get("status") if runtime else None
     best_window_deficit = float(best_window.get("target_rate_deficit_per_minute") or 0.0) if runtime else 0.0
+    target_rate = float(candidate.get("target_rate_per_minute") or 0.0)
+    last_window_deficit = float(last_window.get("target_rate_deficit_per_minute") or 0.0) if runtime else 0.0
+    decay_penalty = 1.0 if target_rate > 0 and last_window_deficit > max(1.0, target_rate * DECAY_DEFICIT_RATIO) else 0.0
     mixed_overloaded_exposure = int(exposure_counts.get("mixed-overloaded-before-separation") or 0)
     target_overloaded_after_preseparation = int(exposure_counts.get("target-overloaded-after-pre-fanin-separation") or 0)
     return [
         float(RUNTIME_STATUS_RANK.get(runtime_status, 5)),
+        decay_penalty,
         best_window_deficit,
+        last_window_deficit,
         float(CAPACITY_STATUS_RANK.get(capacity.get("status"), 5)),
         float(mixed_overloaded_exposure),
         float(target_overloaded_after_preseparation),
@@ -115,12 +122,15 @@ def runtime_gap_analysis(candidate: dict[str, Any]) -> dict[str, Any]:
     lane_summary = runtime.get("throughput_lane_summary") or {}
     window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
     best_window = window_diagnostics.get("best_window") or {}
+    last_window = window_diagnostics.get("last_window") or {}
     cleanliness = runtime.get("right_boundary_cleanliness") or {}
     invalid_output = runtime.get("invalid_output_inserters") or {}
     exposure_counts = candidate.get("output_preseparation_exposure_status_counts") or {}
     target_rate = candidate.get("target_rate_per_minute")
     best_deficit = best_window.get("target_rate_deficit_per_minute")
     best_rate = best_window.get("target_per_minute")
+    last_deficit = last_window.get("target_rate_deficit_per_minute")
+    last_rate = last_window.get("target_per_minute")
     expected_belt_count = int(contract.get("expected_belt_count") or 0)
     expected_transport_lines = expected_belt_count * 2 if expected_belt_count else None
     observed_lines = lane_summary.get("line_count")
@@ -128,6 +138,7 @@ def runtime_gap_analysis(candidate: dict[str, Any]) -> dict[str, Any]:
     clean_boundary = cleanliness.get("status") in {"clean", "empty"}
     invalid_count = int(invalid_output.get("count") or 0) if invalid_output else None
     near_miss = False
+    throughput_decays = False
     if (
         exact_contract
         and runtime.get("status") == "below-target"
@@ -138,6 +149,10 @@ def runtime_gap_analysis(candidate: dict[str, Any]) -> dict[str, Any]:
         and isinstance(target_rate, (int, float))
     ):
         near_miss = float(best_deficit) <= max(1.0, float(target_rate) * NEAR_MISS_DEFICIT_RATIO)
+        if near_miss and isinstance(last_deficit, (int, float)):
+            throughput_decays = float(last_deficit) > max(1.0, float(target_rate) * DECAY_DEFICIT_RATIO)
+            if throughput_decays:
+                near_miss = False
     if runtime.get("status") == "runtime-proven":
         category = "runtime-proven"
         next_action = "preserve-runtime-proof-and-reduce-over-provisioning" if contract.get("status") == "over-provisioned" else "accept-strict-runtime-proven-candidate"
@@ -148,6 +163,9 @@ def runtime_gap_analysis(candidate: dict[str, Any]) -> dict[str, Any]:
             if exposure_counts.get("target-overloaded-after-pre-fanin-separation")
             else "tune-final-two-belt-compression-geometry"
         )
+    elif throughput_decays:
+        category = "throughput-decays"
+        next_action = "fix-byproduct-recycle-stability-before-target-compression"
     elif runtime.get("status") == "below-target":
         category = "below-target"
         next_action = "fix-runtime-throughput-before-ranking-as-solved"
@@ -160,8 +178,11 @@ def runtime_gap_analysis(candidate: dict[str, Any]) -> dict[str, Any]:
     return {
         "category": category,
         "near_miss": near_miss,
+        "throughput_decays": throughput_decays,
         "best_window_rate_per_minute": best_rate,
         "best_window_deficit_per_minute": best_deficit,
+        "last_window_rate_per_minute": last_rate,
+        "last_window_deficit_per_minute": last_deficit,
         "target_rate_per_minute": target_rate,
         "windows_at_or_above_target": window_diagnostics.get("windows_at_or_above_target"),
         "window_count": window_diagnostics.get("window_count"),
@@ -251,6 +272,10 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
         lessons.append(
             f"strict near-miss: exact boundary is clean, invalid output inserters are zero, and best window is short by {gap.get('best_window_deficit_per_minute')}/min"
         )
+    if gap.get("throughput_decays"):
+        lessons.append(
+            f"throughput decays after a near-full window: last window deficit is {gap.get('last_window_deficit_per_minute')}/min, so recycle/output stability must be fixed before compression tuning"
+        )
     exposure_counts = candidate.get("output_preseparation_exposure_status_counts") or {}
     mixed_exposure = exposure_counts.get("mixed-before-separation", 0)
     mixed_overloaded_exposure = exposure_counts.get("mixed-overloaded-before-separation", 0)
@@ -309,6 +334,7 @@ def build_comparison(candidates: list[dict[str, Any]]) -> dict[str, Any]:
             "right boundary must remain clean and invalid_output_inserters must stay zero",
             "strict near-miss candidates should tune final two-belt compression geometry before changing machine count",
             "if pre-fanin byproduct separation is already present and target lanes remain overloaded, add lane-aware target-output compression instead of more byproduct splitters",
+            "if throughput decays after near-full windows, fix byproduct recycle and full-output backpressure before target compression tuning",
         ],
     }
 

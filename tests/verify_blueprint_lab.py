@@ -1522,6 +1522,8 @@ def main() -> int:
     if (
         len(pre_fanin_separations) != 1
         or pre_fanin_separations[0]["status"] != "connected"
+        or pre_fanin_separations[0]["current_handling"] != "pre-fanin-recycle-return-to-input-boundary"
+        or pre_fanin_separations[0]["recycle_flow_audit"]["status"] != "pass"
         or pre_fanin_separations[0]["from_instance"] != 0
         or pre_fanin_separations[0]["to_instance"] != 1
         or len(pre_fanin_exposure) != 1

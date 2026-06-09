@@ -2443,7 +2443,7 @@ def add_boundary_connectors(
             ]
 
         def add_pre_fanin_separations() -> None:
-            nonlocal splitters_added, overflow_belts_added
+            nonlocal splitters_added, overflow_belts_added, recycle_belts_added, merge_belts_added
             if not preseparate_output_before_fanin:
                 return
             for fanin in output_fanins:
@@ -2568,22 +2568,82 @@ def add_boundary_connectors(
                 splitters_added += 1
 
                 overflow_y = round(route_y + 1.0, 3)
-                max_overflow_x = round(min(float((fanin.get("to_port") or {}).get("x") or splitter_x + 4.0) - 1.0, splitter_x + 4.0), 3)
-                overflow_positions: list[RoutePosition] = []
-                overflow_x = round(splitter_x + 1.0, 3)
-                while overflow_x <= max_overflow_x:
-                    overflow_positions.append(
-                        (
-                            overflow_x,
-                            overflow_y,
-                            f"{boundary}:pre-fanin-output-byproduct-overflow",
-                            DIR_EAST,
-                            belt_name,
+                current_handling = "pre-fanin-finite-overflow-buffer"
+                route_kind = "pre-fanin-output-byproduct-filter-splitter-overflow"
+                route_collisions: list[dict[str, Any]] = []
+                existing_belts_used = 0
+                belts_added = 0
+                recycle_exit: dict[str, Any] | None = None
+                recycle_flow_audit: dict[str, Any] | None = None
+                recycle_merge_target: dict[str, Any] | None = None
+                recyclable_byproducts = sorted(
+                    {
+                        str(byproduct)
+                        for audit in matching_audits
+                        for byproduct in audit.get("recyclable_byproducts") or []
+                    }
+                )
+                recommended_handling = (
+                    str(matching_audits[0].get("recommended_handling") or "separate-or-export")
+                    if matching_audits
+                    else "separate-or-export"
+                )
+                input_sides = recyclable_input_sides(matching_audits)
+                if recommended_handling == "recycle-to-input-boundary" and "left" in input_sides:
+                    blocked_recycle_attempts = []
+                    for merge_target, recycle_positions in recycle_merge_candidates(
+                        splitter_x,
+                        overflow_y,
+                        belt_name,
+                        boundary,
+                        recyclable_byproducts,
+                    ):
+                        candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
+                        if not candidate_collisions:
+                            belts_added = candidate_belts_added
+                            recycle_belts_added += candidate_belts_added
+                            merge_belts_added += candidate_belts_added
+                            current_handling = "pre-fanin-recycle-merge-to-input-boundary"
+                            route_kind = "pre-fanin-output-byproduct-filter-splitter-recycle-merge"
+                            last = recycle_positions[-1] if recycle_positions else (left_boundary_x, overflow_y, "", DIR_WEST, belt_name)
+                            recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "input-bus"}
+                            recycle_merge_target = merge_target
+                            recycle_flow_audit = audit_exact_route_positions("pre-fanin-output-byproduct-recycle-merge", recycle_positions)
+                            break
+                        blocked_recycle_attempts.append({"collisions": candidate_collisions})
+                    if current_handling != "pre-fanin-recycle-merge-to-input-boundary":
+                        for recycle_positions in recycle_return_candidates(splitter_x, overflow_y, belt_name, boundary):
+                            candidate_belts_added, candidate_collisions = add_positions_without_reuse(recycle_positions, record_collisions=False)
+                            if not candidate_collisions:
+                                belts_added = candidate_belts_added
+                                recycle_belts_added += candidate_belts_added
+                                current_handling = "pre-fanin-recycle-return-to-input-boundary"
+                                route_kind = "pre-fanin-output-byproduct-filter-splitter-recycle-return"
+                                last = recycle_positions[-1] if recycle_positions else (left_boundary_x, overflow_y, "", DIR_WEST, belt_name)
+                                recycle_exit = {"x": round(float(last[0]), 3), "y": round(float(last[1]), 3), "side": "left"}
+                                recycle_flow_audit = audit_exact_route_positions("pre-fanin-output-byproduct-recycle-return", recycle_positions)
+                                break
+                            blocked_recycle_attempts.append({"collisions": candidate_collisions})
+                        if current_handling == "pre-fanin-finite-overflow-buffer" and blocked_recycle_attempts:
+                            route_collisions = blocked_recycle_attempts[-1]["collisions"]
+                if current_handling == "pre-fanin-finite-overflow-buffer":
+                    fanin_target_x = float((fanin.get("to_port") or {}).get("x") or splitter_x + 5.0)
+                    max_overflow_x = round(min(fanin_target_x - 1.0, splitter_x + 4.0), 3)
+                    overflow_positions: list[RoutePosition] = []
+                    overflow_x = round(splitter_x + 1.0, 3)
+                    while overflow_x <= max_overflow_x:
+                        overflow_positions.append(
+                            (
+                                overflow_x,
+                                overflow_y,
+                                f"{boundary}:pre-fanin-output-byproduct-overflow",
+                                DIR_EAST,
+                                belt_name,
+                            )
                         )
-                    )
-                    overflow_x = round(overflow_x + 1.0, 3)
-                belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(overflow_positions)
-                overflow_belts_added += belts_added
+                        overflow_x = round(overflow_x + 1.0, 3)
+                    belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(overflow_positions)
+                    overflow_belts_added += belts_added
                 separations.append(
                     {
                         "boundary": boundary,
@@ -2594,24 +2654,21 @@ def add_boundary_connectors(
                         "splitter_x": splitter_x,
                         "splitter_y": splitter_y,
                         "recommended_handling": "pre-fanin-separate-before-output-merge",
-                        "current_handling": "pre-fanin-finite-overflow-buffer",
-                        "recyclable_byproducts": sorted(
-                            {
-                                str(byproduct)
-                                for audit in matching_audits
-                                for byproduct in audit.get("recyclable_byproducts") or []
-                            }
-                        ),
+                        "current_handling": current_handling,
+                        "recyclable_byproducts": recyclable_byproducts,
                         "route_y": route_y,
                         "overflow_y": overflow_y,
-                        "overflow_belts_added": belts_added,
-                        "recycle_belts_added": 0,
-                        "merge_belts_added": 0,
+                        "overflow_belts_added": belts_added if current_handling == "pre-fanin-finite-overflow-buffer" else 0,
+                        "recycle_belts_added": belts_added if current_handling == "pre-fanin-recycle-return-to-input-boundary" else 0,
+                        "merge_belts_added": belts_added if current_handling == "pre-fanin-recycle-merge-to-input-boundary" else 0,
+                        "recycle_exit": recycle_exit,
+                        "recycle_merge_target": recycle_merge_target,
+                        "recycle_flow_audit": recycle_flow_audit,
                         "from_instance": fanin.get("from_instance"),
                         "to_instance": fanin.get("to_instance"),
                         "existing_belts_used": existing_belts_used,
                         "collisions": route_collisions,
-                        "route_kind": "pre-fanin-output-byproduct-filter-splitter-overflow",
+                        "route_kind": route_kind,
                     }
                 )
 
