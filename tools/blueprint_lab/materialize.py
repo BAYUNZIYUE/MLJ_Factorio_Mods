@@ -164,6 +164,8 @@ def placement_collisions(
     candidate: dict[str, Any],
     entities: list[dict[str, Any]],
     knowledge: PrototypeKnowledge,
+    *,
+    tolerance: float = 0.001,
 ) -> list[dict[str, Any]]:
     candidate_box = entity_collision_box(candidate, knowledge)
     if candidate_box is None:
@@ -174,7 +176,7 @@ def placement_collisions(
         entity_box = entity_collision_box(entity, knowledge)
         if entity_box is None:
             continue
-        if not boxes_overlap(candidate_box, entity_box):
+        if not boxes_overlap(candidate_box, entity_box, tolerance=tolerance):
             continue
         collisions.append(
             {
@@ -1014,6 +1016,11 @@ def materialized_tile(raw: dict[str, Any], *, x: float, y: float) -> dict[str, A
     }
 
 
+def entity_foundation_tile_key(entity: dict[str, Any]) -> tuple[float, float]:
+    x, y = entity_position(entity)
+    return (float(math.floor(x)), float(math.floor(y)))
+
+
 def add_boundary_connectors(
     entities: list[dict[str, Any]],
     layout_plan: dict[str, Any],
@@ -1099,6 +1106,35 @@ def add_boundary_connectors(
 
     output_pickup_blockers = machine_output_pickup_blockers()
 
+    def connector_placement_collisions(
+        candidate: dict[str, Any],
+        reason: str,
+        proposed_entities: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if knowledge is None:
+            return []
+        candidate_box = knowledge.entity_box(str(candidate.get("name") or ""))
+        if candidate_box is None or candidate_box.collision_box is None:
+            return []
+        route_collisions: list[dict[str, Any]] = []
+        comparable_entities = [
+            entity
+            for entity in [*entities, *connectors, *proposed_entities]
+            if (box := knowledge.entity_box(str(entity.get("name") or ""))) is not None and box.collision_box is not None
+        ]
+        for collision in placement_collisions(candidate, comparable_entities, knowledge, tolerance=0.0):
+            route_collisions.append(
+                {
+                    "x": round(entity_position(candidate)[0], 3),
+                    "y": round(entity_position(candidate)[1], 3),
+                    "reason": f"{reason}:placement-collision",
+                    "entity_name": collision.get("entity_name"),
+                    "collision_x": collision.get("collision_x"),
+                    "collision_y": collision.get("collision_y"),
+                }
+            )
+        return route_collisions
+
     def add_positions(
         positions: list[RoutePosition],
         *,
@@ -1107,6 +1143,7 @@ def add_boundary_connectors(
         positions = visible_route_positions(positions)
         route_collisions: list[dict[str, Any]] = []
         seen: set[tuple[float, float]] = set()
+        proposed_entities: list[dict[str, Any]] = []
         for x, belt_y, reason, direction, belt_name in positions:
             key = (round(x, 3), round(belt_y, 3))
             is_fanin_source_route = reason.startswith("fanin-source:")
@@ -1123,6 +1160,13 @@ def add_boundary_connectors(
             if key in occupied:
                 collision = {"x": key[0], "y": key[1], "reason": reason}
                 route_collisions.append(collision)
+                continue
+            candidate = connector_belt(-1, x, belt_y, direction=direction, name=belt_name)
+            placement = connector_placement_collisions(candidate, reason, proposed_entities)
+            if placement:
+                route_collisions.extend(placement)
+                continue
+            proposed_entities.append(candidate)
         if route_collisions:
             if record_collisions:
                 collisions.extend(route_collisions)
@@ -1153,6 +1197,7 @@ def add_boundary_connectors(
         route_collisions: list[dict[str, Any]] = []
         seen: set[tuple[float, float]] = set()
         existing_belts_used = 0
+        proposed_entities: list[dict[str, Any]] = []
         for x, belt_y, reason, direction, belt_name in positions:
             key = (round(x, 3), round(belt_y, 3))
             is_fanin_source_route = reason.startswith("fanin-source:")
@@ -1168,6 +1213,12 @@ def add_boundary_connectors(
             seen.add(key)
             existing = occupied_entities.get(key)
             if existing is None:
+                candidate = connector_belt(-1, x, belt_y, direction=direction, name=belt_name)
+                placement = connector_placement_collisions(candidate, reason, proposed_entities)
+                if placement:
+                    route_collisions.extend(placement)
+                    continue
+                proposed_entities.append(candidate)
                 continue
             existing_name = str(existing.get("name") or "")
             if reuse_existing_plain_belts_only:
@@ -1240,6 +1291,7 @@ def add_boundary_connectors(
         route_collisions: list[dict[str, Any]] = []
         seen: set[tuple[float, float]] = set()
         existing_belts_used = 0
+        proposed_entities: list[dict[str, Any]] = []
         for spec in specs:
             key = (round(float(spec["x"]), 3), round(float(spec["y"]), 3))
             reason = str(spec.get("reason") or "connector")
@@ -1252,6 +1304,12 @@ def add_boundary_connectors(
             seen.add(key)
             existing = occupied_entities.get(key)
             if existing is None:
+                candidate = connector_belt_from_spec(-1, spec)
+                placement = connector_placement_collisions(candidate, reason, proposed_entities)
+                if placement:
+                    route_collisions.extend(placement)
+                    continue
+                proposed_entities.append(candidate)
                 continue
             existing_name = str(existing.get("name") or "")
             if reuse_existing_plain_belts_only and not entity_type:
@@ -1398,7 +1456,8 @@ def add_boundary_connectors(
     ) -> tuple[int, list[dict[str, Any]]]:
         route_collisions: list[dict[str, Any]] = []
         seen: set[tuple[float, float]] = set()
-        for x, belt_y, reason, _direction, _belt_name in positions:
+        proposed_entities: list[dict[str, Any]] = []
+        for x, belt_y, reason, direction, belt_name in positions:
             key = (round(x, 3), round(belt_y, 3))
             if key in seen:
                 route_collisions.append({"x": key[0], "y": key[1], "reason": f"{reason}:duplicate-route-position"})
@@ -1413,6 +1472,13 @@ def add_boundary_connectors(
                         "entity_name": str(occupied_entities[key].get("name") or ""),
                     }
                 )
+                continue
+            candidate = connector_belt(-1, x, belt_y, direction=direction, name=belt_name)
+            placement = connector_placement_collisions(candidate, reason, proposed_entities)
+            if placement:
+                route_collisions.extend(placement)
+                continue
+            proposed_entities.append(candidate)
         if route_collisions:
             if record_collisions:
                 collisions.extend(route_collisions)
@@ -1807,11 +1873,14 @@ def add_boundary_connectors(
         row_y = min(float(port["y"]) for port in row_ports)
         ports = ports_by_distance(row_ports, row_y, side)
         candidates: list[tuple[dict[str, Any], str, list[RoutePosition]]] = []
+        def left_boundary_start_x(target_x: float) -> float:
+            return round(target_x - math.floor(target_x), 3)
+
         for port in ports:
             belt_name = connector_belt_name_for_port(port)
             if side == "left":
-                start_x = 0.5
-                end_x = float(port["x"]) - 0.5
+                start_x = left_boundary_start_x(float(port["x"]))
+                end_x = float(port["x"]) - 1.0
                 if port.get("role") == "machine-input" and port.get("direction") in {DIR_NORTH, DIR_SOUTH}:
                     if port.get("direction") == DIR_SOUTH:
                         for offset in range(1, 13):
@@ -2406,14 +2475,20 @@ def add_boundary_connectors(
             if turn_x <= splitter_x or target_x >= turn_x:
                 return []
             vertical_direction = DIR_SOUTH if target_y > overflow_y else DIR_NORTH
-            positions: list[RoutePosition] = directional_horizontal_positions(
-                round(splitter_x + 1.0, 3),
-                round(turn_x - 1.0, 3),
-                overflow_y,
-                f"{boundary}:{route_reason}",
-                DIR_EAST,
-                belt_name,
-            )
+            horizontal_start_x = round(splitter_x + 2.0, 3)
+            horizontal_end_x = round(turn_x - 1.0, 3)
+            positions: list[RoutePosition] = []
+            if horizontal_start_x <= horizontal_end_x:
+                positions.extend(
+                    directional_horizontal_positions(
+                        horizontal_start_x,
+                        horizontal_end_x,
+                        overflow_y,
+                        f"{boundary}:{route_reason}",
+                        DIR_EAST,
+                        belt_name,
+                    )
+                )
             positions.extend(
                 vertical_positions(
                     turn_x,
@@ -2610,14 +2685,14 @@ def add_boundary_connectors(
                 underground_output_y = round(corridor_y - 1.0, 3)
                 if corridor_y > max_y or underground_output_y <= underground_input_y:
                     continue
-                for offset in range(2, 36):
+                for offset in range(3, 36):
                     turn_x = round(splitter_x + float(offset), 3)
                     if turn_x >= right_boundary_x:
                         break
                     reason = f"{boundary}:pre-fanin-output-byproduct-recycle-underground-corridor"
                     specs: list[RouteEntitySpec] = []
                     for x, y, _route_reason, direction, _route_belt in directional_horizontal_positions(
-                        round(splitter_x + 1.0, 3),
+                        round(splitter_x + 2.0, 3),
                         round(turn_x - 1.0, 3),
                         overflow_y,
                         reason,
@@ -2988,7 +3063,7 @@ def add_boundary_connectors(
                     fanin_target_x = float((fanin.get("to_port") or {}).get("x") or splitter_x + 5.0)
                     max_overflow_x = round(min(fanin_target_x - 1.0, splitter_x + 4.0), 3)
                     overflow_positions: list[RoutePosition] = []
-                    overflow_x = round(splitter_x + 1.0, 3)
+                    overflow_x = round(splitter_x + 2.0, 3)
                     while overflow_x <= max_overflow_x:
                         overflow_positions.append(
                             (
@@ -3234,7 +3309,7 @@ def add_boundary_connectors(
                         DIR_EAST,
                         belt_name,
                     )
-                    for offset in range(1, overflow_length + 1)
+                    for offset in range(2, overflow_length + 1)
                 ]
                 belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(overflow_positions)
                 overflow_belts_added += belts_added
@@ -4483,6 +4558,7 @@ def materialize_layout_with_summary(
 
     connector_result = {
         "connectors_added": 0,
+        "connector_foundation_tiles_added": 0,
         "bridges_added": 0,
         "input_fanouts_added": 0,
         "output_fanins_added": 0,
@@ -4522,6 +4598,18 @@ def materialize_layout_with_summary(
             experimental_prefanin_input_sideload=experimental_prefanin_input_sideload,
         )
         connector_result["output_inserter_upgrades"] = output_inserter_upgrades
+    connector_result.setdefault("connector_foundation_tiles_added", 0)
+
+    foundation_tile_name = next((tile["name"] for tile in tiles if tile.get("name") == "space-platform-foundation"), None)
+    if foundation_tile_name:
+        for entity in entities:
+            tile_x, tile_y = entity_foundation_tile_key(entity)
+            key = (foundation_tile_name, tile_x, tile_y)
+            if key in tile_positions:
+                continue
+            tile_positions.add(key)
+            tiles.append({"name": foundation_tile_name, "position": {"x": tile_x, "y": tile_y}})
+            connector_result["connector_foundation_tiles_added"] = int(connector_result.get("connector_foundation_tiles_added") or 0) + 1
 
     connector_result["machine_output_expansions"] = materialize_machine_output_expansions(
         entities,

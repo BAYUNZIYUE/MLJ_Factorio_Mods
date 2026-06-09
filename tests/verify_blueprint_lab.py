@@ -73,6 +73,9 @@ def main() -> int:
         "stack.build_blueprint",
         "manual_fallback=start",
         "surface.create_entity",
+        "manual_create_failed ",
+        " can_place=",
+        " error=",
         "manual_underground_types=",
         "manual_modules_inserted=",
         "manual_splitter_settings=",
@@ -270,14 +273,14 @@ def main() -> int:
     "legendary": {"level": 5}
   },
 	  "transport-belt": {
-	    "transport-belt": {"speed": 0.03125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]},
-	    "turbo-transport-belt": {"speed": 0.125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]}
+	    "transport-belt": {"speed": 0.03125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]], "collision_box": [[-0.4, -0.4], [0.4, 0.4]]},
+	    "turbo-transport-belt": {"speed": 0.125, "selection_box": [[-0.5, -0.5], [0.5, 0.5]], "collision_box": [[-0.4, -0.4], [0.4, 0.4]]}
 	  },
 	  "splitter": {
-	    "turbo-splitter": {"speed": 0.125, "selection_box": [[-1, -0.5], [1, 0.5]]}
+	    "turbo-splitter": {"speed": 0.125, "selection_box": [[-1, -0.5], [1, 0.5]], "collision_box": [[-0.9, -0.4], [0.9, 0.4]]}
 	  },
 	  "underground-belt": {
-    "turbo-underground-belt": {"speed": 0.125, "max_distance": 11, "selection_box": [[-0.5, -0.5], [0.5, 0.5]]}
+    "turbo-underground-belt": {"speed": 0.125, "max_distance": 11, "selection_box": [[-0.5, -0.5], [0.5, 0.5]], "collision_box": [[-0.4, -0.4], [0.4, 0.4]]}
   }
 }
 """,
@@ -554,7 +557,7 @@ def main() -> int:
     pickup_port_layout = {
         "target_item": "iron-gear-wheel",
         "target_rate_per_minute": 150,
-        "spacing": 1,
+        "spacing": 2,
         "estimated_width": 13,
         "estimated_height": 10,
         "boundary_inputs": [{"item": "iron-plate", "rate_per_minute": 300, "side": "left", "reason": "boundary-input"}],
@@ -571,7 +574,7 @@ def main() -> int:
                 "source_tile_count": 0,
                 "columns": 2,
                 "rows": 1,
-                "planned_width": 7,
+                "planned_width": 8,
                 "planned_height": 3,
                 "planned_net_output_per_minute": 150,
                 "x": 4,
@@ -588,9 +591,9 @@ def main() -> int:
             "fingerprint": "pickup-port-template",
             "layout": {
                 "entities": [
-                    {"name": "transport-belt", "x": 0, "y": 0, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
-                    {"name": "fast-inserter", "x": 0, "y": 1, "direction": 0, "recipe": None, "recipe_quality": None, "quality": None},
-                    {"name": "assembling-machine-3", "x": 0, "y": 2, "direction": None, "recipe": "iron-gear-wheel", "recipe_quality": None, "quality": None},
+                    {"name": "transport-belt", "x": 0.5, "y": 0, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "fast-inserter", "x": 0.5, "y": 1, "direction": 0, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "assembling-machine-3", "x": 0.5, "y": 2, "direction": None, "recipe": "iron-gear-wheel", "recipe_quality": None, "quality": None},
                 ],
                 "tiles": [],
             },
@@ -1171,6 +1174,9 @@ def main() -> int:
     if len(connected["blueprint"]["entities"]) != 76:
         print(f"FAIL: expected connected blueprint to add connector belts: {connected}")
         return 1
+    if connector_summary.get("connector_foundation_tiles_added") != 0:
+        print(f"FAIL: expected ordinary ground connectors not to add platform foundation tiles: {connector_summary}")
+        return 1
     if any(entity["name"] == "transport-belt" and entity.get("direction") != DIR_EAST for entity in connected["blueprint"]["entities"]):
         print(f"FAIL: expected generated connector belts to use Factorio 2.x east direction {DIR_EAST}: {connected}")
         return 1
@@ -1179,6 +1185,27 @@ def main() -> int:
         return 1
     if decode_blueprint_string(encode_blueprint_string(connected)) != connected:
         print("FAIL: connected blueprint did not round-trip through Factorio string encoding")
+        return 1
+    platform_dag_mappings = deepcopy(dag_mappings)
+    platform_dag_mappings[1]["layout"]["tiles"] = [{"name": "space-platform-foundation", "x": 0, "y": 1}]
+    platform_connected, platform_connector_summary = materialize_layout_with_summary(
+        layout,
+        platform_dag_mappings,
+        label="fixture-connected-platform-foundation",
+        connect_boundaries=True,
+    )
+    platform_tiles = platform_connected["blueprint"].get("tiles") or []
+    platform_tile_keys = {
+        (tile["name"], float(tile["position"]["x"]), float(tile["position"]["y"]))
+        for tile in platform_tiles
+    }
+    if (
+        platform_connector_summary.get("connector_foundation_tiles_added", 0) <= 0
+        or ("space-platform-foundation", 0.0, 8.0) not in platform_tile_keys
+        or ("space-platform-foundation", 13.0, 11.0) not in platform_tile_keys
+        or len(platform_tiles) <= len(connected["blueprint"].get("tiles") or [])
+    ):
+        print(f"FAIL: expected generated connector belts on a platform blueprint to receive foundation tiles: {platform_connector_summary} {platform_connected}")
         return 1
 
     detour_layout = {
@@ -1639,6 +1666,48 @@ def main() -> int:
     ):
         print(f"FAIL: expected pre-fanin byproduct separation to prefer an underground recycle corridor when surface merge lanes are blocked: {byproduct_preseparated_underground_summary}")
         return 1
+    placement_block_layout = deepcopy(byproduct_merge_reuse_layout)
+    placement_block_layout["estimated_width"] = 18
+    placement_block_layout["estimated_height"] = 3.5
+    placement_block_layout["nodes"][0]["instances"] = 1
+    placement_block_layout["nodes"][0]["columns"] = 1
+    placement_block_layout["nodes"][0]["rows"] = 1
+    placement_block_layout["nodes"][0]["planned_width"] = 10
+    placement_block_layout["nodes"][0]["planned_height"] = 4
+    placement_block_layout["nodes"][0]["source_height"] = 4
+    placement_block_layout["nodes"][0]["y"] = 0.5
+    placement_block_layout["nodes"][0]["ports"] = [
+        {"side": "right", "role": "output", "entity_name": "turbo-transport-belt", "x": 2, "y": 0.5},
+    ]
+    placement_block_layout["nodes"][0]["port_counts"] = [("right:output", 1)]
+    placement_block_mappings = [
+        {
+            "fingerprint": "byproduct-template",
+            "layout": {
+                "entities": [
+                    {"name": "turbo-transport-belt", "x": 2, "y": 0.5, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                    {"name": "turbo-transport-belt", "x": 6, "y": 2.0, "direction": DIR_EAST, "recipe": None, "recipe_quality": None, "quality": None},
+                ],
+                "tiles": [],
+            },
+        }
+    ]
+    _, placement_block_summary = materialize_layout_with_summary(
+        placement_block_layout,
+        placement_block_mappings,
+        label="fixture-byproduct-placement-aware-overflow",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    placement_block_separation = placement_block_summary["output_separations"][0]
+    if (
+        placement_block_separation["status"] != "blocked"
+        or placement_block_separation["current_handling"] != "finite-overflow-buffer"
+        or placement_block_separation["overflow_belts_added"] != 0
+        or "placement-collision" not in str(placement_block_summary.get("collisions") or placement_block_separation.get("blocked_recycle_attempts") or [])
+    ):
+        print(f"FAIL: expected connector placement collision audit to block half-tile overflow belts between existing belts: {placement_block_summary}")
+        return 1
     score_fixture = {
         "width": 10,
         "height": 10,
@@ -1803,15 +1872,18 @@ def main() -> int:
     )
     unresolved_lane_capacity = {item["boundary"]: item for item in capacity_unresolved_lane_summary["boundary_capacity_audit"]}
     unresolved_output = unresolved_lane_capacity["output:iron-ore"]
+    unresolved_output_routes = [route for route in capacity_unresolved_lane_summary["routes"] if route["boundary"] == "output:iron-ore"]
     if (
-        unresolved_output["status"] != "unresolved"
-        or unresolved_output["capacity_per_minute"] != 7200
+        unresolved_output["status"] != "insufficient"
+        or unresolved_output["capacity_per_minute"] != 3600
         or unresolved_output["proven_capacity_per_minute"] != 3600
-        or unresolved_output["unresolved_capacity_per_minute"] != 3600
-        or not unresolved_output["structural_meets_required_rate"]
+        or unresolved_output["unresolved_capacity_per_minute"] != 0
+        or unresolved_output["structural_meets_required_rate"]
         or unresolved_output["meets_required_rate"]
+        or not any(route.get("status") == "blocked" for route in unresolved_output_routes)
+        or "placement-collision" not in str(capacity_unresolved_lane_summary.get("collisions") or [])
     ):
-        print(f"FAIL: expected structural 2x capacity with one unresolved lane to stay unresolved, not sufficient: {capacity_unresolved_lane_summary}")
+        print(f"FAIL: expected placement-aware routing to block the splitter-adjacent output lane instead of counting it as unresolved capacity: {capacity_unresolved_lane_summary}")
         return 1
     selection_layout = {
         "target_item": "iron-ore",

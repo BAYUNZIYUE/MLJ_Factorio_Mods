@@ -1181,7 +1181,17 @@ local function run_validation()
       if not ok_create or created == nil then
         manual_failures = manual_failures + 1
         if manual_failures <= 8 then
-          log("BLUEPRINT_LAB_VALIDATION manual_create_failed " .. entity.name .. "=" .. tostring(created))
+          local fail_x = entity.position.x + build_position.x
+          local fail_y = entity.position.y + build_position.y
+          local can_place_after_failure = surface.can_place_entity{{
+            name = entity.name,
+            position = {{x = fail_x, y = fail_y}},
+            direction = entity_direction,
+            force = game.forces.player,
+            build_check_type = defines.build_check_type.blueprint_ghost,
+            forced = true,
+          }}
+          log("BLUEPRINT_LAB_VALIDATION manual_create_failed " .. entity.name .. "=" .. tostring(created) .. " x=" .. tostring(fail_x) .. " y=" .. tostring(fail_y) .. " direction=" .. tostring(entity_direction) .. " type=" .. tostring(entity.type) .. " quality=" .. tostring(entity.quality) .. " can_place=" .. tostring(can_place_after_failure) .. " error=" .. tostring(ok_create and "nil" or created))
         end
       else
         manual_count = manual_count + 1
