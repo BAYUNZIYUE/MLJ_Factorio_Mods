@@ -25,7 +25,7 @@ from tools.blueprint_lab.prototypes import load_data_raw, target_rate_basis_from
 from tools.blueprint_lab.template_knowledge import map_template
 from tools.blueprint_lab.production_dag import build_production_plan
 from tools.blueprint_lab.layout_plan import build_layout_plan
-from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, materialize_machine_output_expansions, materialized_layout_score, prune_template_entities_for_recipe, select_best_materialized_layout
+from tools.blueprint_lab.materialize import audit_machine_io, audit_machine_output_expansion, build_materialized_blueprint, materialize_layout_with_summary, materialize_machine_output_expansions, materialized_layout_score, prune_template_entities_for_recipe, render_markdown_report as render_materialize_markdown_report, select_best_materialized_layout
 from tools.blueprint_lab.factorio_validate import (
     effective_runtime_audit_wait_ticks,
     render_control_lua,
@@ -1620,13 +1620,45 @@ def main() -> int:
     ]
     finite_score_fixture = deepcopy(score_fixture)
     finite_score_fixture["connector_summary"]["output_separations"] = [
-        {"status": "connected", "current_handling": "pre-fanin-finite-overflow-buffer"},
+        {
+            "boundary": "output:iron-ore",
+            "status": "connected",
+            "current_handling": "pre-fanin-finite-overflow-buffer",
+            "recycle_corridor_probe": {
+                "status": "surface-corridor-blocked",
+                "recommendation": "reserve-dedicated-recycle-corridor-or-underground-crossing",
+            },
+        },
     ]
     if materialized_layout_score(sideload_score_fixture) <= materialized_layout_score(score_fixture):
         print("FAIL: expected materialized layout score to penalize experimental pre-fanin input-lane sideload")
         return 1
     if materialized_layout_score(finite_score_fixture) <= materialized_layout_score(sideload_score_fixture):
         print("FAIL: expected materialized layout score to penalize pre-fanin finite overflow buffers")
+        return 1
+    finite_markdown = render_materialize_markdown_report(
+        {
+            "label": "fixture-finite",
+            "target_item": "iron-ore",
+            "target_rate_per_minute": 60,
+            "target_rate_basis": {"kind": "explicit"},
+            "entity_count": 1,
+            "tile_count": 0,
+            "connector_summary": finite_score_fixture["connector_summary"],
+            "route_status_counts": {},
+            "width": 1,
+            "height": 1,
+            "density": 1,
+            "layout_estimated_width": 1,
+            "layout_estimated_height": 1,
+            "boundary_inputs": [],
+            "boundary_outputs": [],
+            "layout_nodes": [],
+            "lessons": [],
+        }
+    )
+    if "corridor_probe=surface-corridor-blocked" not in finite_markdown or "reserve-dedicated-recycle-corridor-or-underground-crossing" not in finite_markdown:
+        print(f"FAIL: expected materialize markdown to include recycle corridor probe: {finite_markdown}")
         return 1
     byproduct_overloaded_layout = deepcopy(byproduct_replicated_layout)
     byproduct_overloaded_layout["target_rate_per_minute"] = 7200

@@ -2519,6 +2519,40 @@ def add_boundary_connectors(
                 attempt["recycle_merge_target"] = merge_target
             return attempt
 
+        def recycle_corridor_probe(blocked_attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
+            if not blocked_attempts:
+                return None
+            reason_counts: Counter[str] = Counter()
+            entity_counts: Counter[str] = Counter()
+            direction_conflicts = 0
+            duplicate_positions = 0
+            for attempt in blocked_attempts:
+                for collision in attempt.get("collisions") or []:
+                    reason = str(collision.get("reason") or "unknown")
+                    reason_tail = reason.rsplit(":", 1)[-1]
+                    reason_counts[reason_tail] += 1
+                    entity_name = str(collision.get("entity_name") or "")
+                    if entity_name:
+                        entity_counts[entity_name] += 1
+                    if reason_tail in {"existing-belt-not-reusable", "connector-direction-conflict"}:
+                        direction_conflicts += 1
+                    if reason_tail == "duplicate-route-position":
+                        duplicate_positions += 1
+            recommendation = "inspect-blocked-recycle-attempts"
+            if direction_conflicts:
+                recommendation = "reserve-dedicated-recycle-corridor-or-underground-crossing"
+            elif duplicate_positions:
+                recommendation = "separate-recycle-route-from-current-overflow-lane"
+            return {
+                "status": "surface-corridor-blocked",
+                "attempt_count": len(blocked_attempts),
+                "top_collision_reasons": reason_counts.most_common(5),
+                "top_collision_entities": entity_counts.most_common(5),
+                "direction_conflict_count": direction_conflicts,
+                "duplicate_position_count": duplicate_positions,
+                "recommendation": recommendation,
+            }
+
         def matching_audits_for_target(target_item: str) -> list[dict[str, Any]]:
             return [
                 item
@@ -2807,6 +2841,9 @@ def add_boundary_connectors(
                         "recycle_exit": recycle_exit,
                         "recycle_merge_target": recycle_merge_target,
                         "recycle_flow_audit": recycle_flow_audit,
+                        "recycle_corridor_probe": recycle_corridor_probe(blocked_recycle_attempts)
+                        if current_handling == "pre-fanin-finite-overflow-buffer"
+                        else None,
                         "blocked_recycle_attempt_count": len(blocked_recycle_attempts),
                         "blocked_recycle_attempts": blocked_recycle_attempts[:3],
                         "from_instance": fanin.get("from_instance"),
@@ -5014,6 +5051,9 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                         f" first_block=({first_collision.get('x')},{first_collision.get('y')})"
                         f"/{first_collision.get('reason')}"
                     )
+            if item.get("recycle_corridor_probe"):
+                probe = item["recycle_corridor_probe"]
+                line += f" corridor_probe={probe.get('status')} next={probe.get('recommendation')}"
             if item.get("existing_belts_used"):
                 line += f" existing_belts={item['existing_belts_used']}"
             if item.get("reason"):
