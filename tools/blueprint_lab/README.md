@@ -522,6 +522,18 @@ starved line. The next generator change should therefore target the final
 two-belt compression geometry itself, not only input rate or a single boundary
 lane.
 
+Small geometry sweeps did not close that gap. Moving the target/byproduct
+separation splitter farther from the machine-output port with
+`--output-separation-min-distance 3` or `4` preserved the exact two-belt
+contract and clean runtime boundary, but the best 300-tick windows stayed at
+`7128/min`. Changing the forced 3x2 row spacing to `2.5`, `3.0`, or `4.0`
+also preserved the offline contract while leaving each final output route
+responsible for three crushers, an offline lane load of `4725/min > 3600/min`.
+A 2400-tick runtime probe of `--row-spacing 3.0` reached only `7092/min` in its
+best window. The current evidence says spacing and separator position are
+secondary parameters; strict two-belt output needs a different merge/compression
+topology or earlier target/byproduct split, not a larger spacing sweep.
+
 Two follow-up probes narrowed the next design space. First, routing experimental
 new drop belts back into the main output lane made the extra inserters visible
 to the runtime audit, but the route crossed output-inserter pickup semantics:
