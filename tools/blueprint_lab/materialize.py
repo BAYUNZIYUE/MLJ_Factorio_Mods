@@ -1005,6 +1005,7 @@ def add_boundary_connectors(
     knowledge: PrototypeKnowledge | None = None,
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
+    preseparate_output_before_fanin: bool = False,
 ) -> dict[str, Any]:
     connectors: list[dict[str, Any]] = []
     collisions: list[dict[str, Any]] = []
@@ -2434,6 +2435,188 @@ def add_boundary_connectors(
                     candidates.append(positions)
             return candidates
 
+        def matching_audits_for_target(target_item: str) -> list[dict[str, Any]]:
+            return [
+                item
+                for item in byproduct_audit
+                if str(item.get("target_item") or "") == target_item
+            ]
+
+        def add_pre_fanin_separations() -> None:
+            nonlocal splitters_added, overflow_belts_added
+            if not preseparate_output_before_fanin:
+                return
+            for fanin in output_fanins:
+                if fanin.get("status") != "connected":
+                    continue
+                boundary = str(fanin.get("boundary") or "")
+                if not boundary.startswith("output:"):
+                    continue
+                target_item = boundary.split(":", 1)[1]
+                if target_item not in target_items:
+                    continue
+                matching_audits = matching_audits_for_target(target_item)
+                if not matching_audits:
+                    continue
+                route_positions = [tuple(position) for position in fanin.get("route_positions") or []]
+                if len(route_positions) < 2:
+                    separations.append(
+                        {
+                            "boundary": boundary,
+                            "scope": "output-fanin",
+                            "status": "blocked",
+                            "reason": "fanin-route-has-no-removable-segment",
+                            "current_handling": "none",
+                            "route_y": fanin.get("fanin_y"),
+                            "from_instance": fanin.get("from_instance"),
+                            "to_instance": fanin.get("to_instance"),
+                        }
+                    )
+                    continue
+                port = fanin.get("from_port") or {}
+                belt_name = connector_belt_name_for_port(port)
+                splitter_name = splitter_name_for_belt_name(belt_name)
+                route_y = round(float(fanin.get("fanin_y") or 0.0), 3)
+                splitter_x: float | None = None
+                for x, y, _reason, direction, route_belt_name in route_positions[1:]:
+                    candidate_x = round(float(x), 3)
+                    candidate_y = round(float(y), 3)
+                    if candidate_y != route_y or direction != DIR_EAST or route_belt_name != belt_name:
+                        continue
+                    existing = occupied_entities.get((candidate_x, candidate_y))
+                    existing_name = str((existing or {}).get("name") or "")
+                    if (
+                        existing is not None
+                        and any(existing is connector for connector in connectors)
+                        and existing_name.endswith("transport-belt")
+                        and canonical_transport_belt_name(existing_name) == belt_name
+                        and existing.get("direction") == DIR_EAST
+                    ):
+                        splitter_x = candidate_x
+                        break
+                if splitter_x is None:
+                    separations.append(
+                        {
+                            "boundary": boundary,
+                            "scope": "output-fanin",
+                            "status": "blocked",
+                            "reason": "no-removable-east-connector-belt-before-fanin",
+                            "current_handling": "none",
+                            "route_y": route_y,
+                            "from_instance": fanin.get("from_instance"),
+                            "to_instance": fanin.get("to_instance"),
+                        }
+                    )
+                    continue
+
+                route_key = (splitter_x, route_y)
+                existing = occupied_entities.get(route_key)
+                if existing is None:
+                    separations.append(
+                        {
+                            "boundary": boundary,
+                            "scope": "output-fanin",
+                            "status": "blocked",
+                            "reason": "pre-fanin-splitter-input-missing",
+                            "current_handling": "none",
+                            "route_y": route_y,
+                            "splitter_x": splitter_x,
+                            "from_instance": fanin.get("from_instance"),
+                            "to_instance": fanin.get("to_instance"),
+                        }
+                    )
+                    continue
+                connectors.remove(existing)
+                occupied.discard(route_key)
+                occupied_entities.pop(route_key, None)
+
+                splitter_y = round(route_y + 0.5, 3)
+                splitter_key = (splitter_x, splitter_y)
+                if splitter_key in occupied_entities:
+                    connectors.append(existing)
+                    occupied.add(route_key)
+                    occupied_entities[route_key] = existing
+                    separations.append(
+                        {
+                            "boundary": boundary,
+                            "scope": "output-fanin",
+                            "status": "blocked",
+                            "reason": "pre-fanin-splitter-center-position-occupied",
+                            "current_handling": "none",
+                            "route_y": route_y,
+                            "splitter_x": splitter_x,
+                            "splitter_y": splitter_y,
+                            "from_instance": fanin.get("from_instance"),
+                            "to_instance": fanin.get("to_instance"),
+                            "entity_name": str(occupied_entities[splitter_key].get("name") or ""),
+                        }
+                    )
+                    continue
+
+                splitter = connector_belt(
+                    len(entities) + len(connectors) + 1,
+                    splitter_x,
+                    splitter_y,
+                    direction=DIR_EAST,
+                    name=splitter_name,
+                )
+                splitter["filter"] = {"name": target_item, "quality": "normal", "comparator": "="}
+                splitter["output_priority"] = "left"
+                connectors.append(splitter)
+                occupied.add(splitter_key)
+                occupied_entities[splitter_key] = splitter
+                splitters_added += 1
+
+                overflow_y = round(route_y + 1.0, 3)
+                max_overflow_x = round(min(float((fanin.get("to_port") or {}).get("x") or splitter_x + 4.0) - 1.0, splitter_x + 4.0), 3)
+                overflow_positions: list[RoutePosition] = []
+                overflow_x = round(splitter_x + 1.0, 3)
+                while overflow_x <= max_overflow_x:
+                    overflow_positions.append(
+                        (
+                            overflow_x,
+                            overflow_y,
+                            f"{boundary}:pre-fanin-output-byproduct-overflow",
+                            DIR_EAST,
+                            belt_name,
+                        )
+                    )
+                    overflow_x = round(overflow_x + 1.0, 3)
+                belts_added, route_collisions, existing_belts_used = add_positions_reusing_existing_belts(overflow_positions)
+                overflow_belts_added += belts_added
+                separations.append(
+                    {
+                        "boundary": boundary,
+                        "scope": "output-fanin",
+                        "status": "connected" if not route_collisions else "blocked",
+                        "target_item": target_item,
+                        "splitter_name": splitter_name,
+                        "splitter_x": splitter_x,
+                        "splitter_y": splitter_y,
+                        "recommended_handling": "pre-fanin-separate-before-output-merge",
+                        "current_handling": "pre-fanin-finite-overflow-buffer",
+                        "recyclable_byproducts": sorted(
+                            {
+                                str(byproduct)
+                                for audit in matching_audits
+                                for byproduct in audit.get("recyclable_byproducts") or []
+                            }
+                        ),
+                        "route_y": route_y,
+                        "overflow_y": overflow_y,
+                        "overflow_belts_added": belts_added,
+                        "recycle_belts_added": 0,
+                        "merge_belts_added": 0,
+                        "from_instance": fanin.get("from_instance"),
+                        "to_instance": fanin.get("to_instance"),
+                        "existing_belts_used": existing_belts_used,
+                        "collisions": route_collisions,
+                        "route_kind": "pre-fanin-output-byproduct-filter-splitter-overflow",
+                    }
+                )
+
+        add_pre_fanin_separations()
+
         for route in routes:
             if route.get("status") != "connected":
                 continue
@@ -2443,11 +2626,7 @@ def add_boundary_connectors(
             target_item = boundary.split(":", 1)[1]
             if target_item not in target_items:
                 continue
-            matching_audits = [
-                item
-                for item in byproduct_audit
-                if str(item.get("target_item") or "") == target_item
-            ]
+            matching_audits = matching_audits_for_target(target_item)
             recommended_handling = (
                 str(matching_audits[0].get("recommended_handling") or "separate-or-export")
                 if matching_audits
@@ -3613,6 +3792,16 @@ def add_boundary_connectors(
             for item in lane_load_audit
             if item.get("boundary") and item.get("route_y") is not None
         }
+        preseparator_instances_by_route: dict[tuple[str, float], set[int]] = {}
+        for separation in output_separations:
+            if separation.get("scope") != "output-fanin" or separation.get("status") != "connected":
+                continue
+            boundary = str(separation.get("boundary") or "")
+            route_y = separation.get("route_y")
+            from_instance = separation.get("from_instance")
+            if not boundary or route_y is None or from_instance is None:
+                continue
+            preseparator_instances_by_route.setdefault((boundary, round(float(route_y), 3)), set()).add(int(from_instance))
 
         audits: list[dict[str, Any]] = []
         for boundary in sorted(byproducts_by_target):
@@ -3649,7 +3838,15 @@ def add_boundary_connectors(
                 max_safe_instances = None
                 if isinstance(lane_capacity, (int, float)) and isinstance(per_instance_rate, (int, float)) and per_instance_rate > 0:
                     max_safe_instances = max(1, int(math.floor(float(lane_capacity) / float(per_instance_rate))))
+                preseparator_instances = sorted(preseparator_instances_by_route.get((output_boundary, route_y), set()))
+                fanin_source_instances = sorted(set(covered_instances) - {start_instance})
+                fanin_preseparated = bool(fanin_source_instances) and set(fanin_source_instances).issubset(set(preseparator_instances))
                 status = (
+                    "target-overloaded-after-pre-fanin-separation"
+                    if len(covered_instances) > 1 and separator is not None and fanin_preseparated and lane_load.get("status") == "overloaded"
+                    else "preseparated-before-fanin"
+                    if len(covered_instances) > 1 and separator is not None and fanin_preseparated
+                    else
                     "mixed-overloaded-before-separation"
                     if len(covered_instances) > 1 and separator is not None and lane_load.get("status") == "overloaded"
                     else "mixed-before-separation"
@@ -3659,6 +3856,11 @@ def add_boundary_connectors(
                     else "no-target-separator"
                 )
                 recommendation = (
+                    "target-output-still-exceeds-one-lane-after-preseparation-use-lane-aware-target-compression"
+                    if len(covered_instances) > 1 and fanin_preseparated and lane_load.get("status") == "overloaded"
+                    else "pre-fanin-separation-removes-mixed-byproducts-but-still-needs-runtime-proof"
+                    if len(covered_instances) > 1 and fanin_preseparated
+                    else
                     "split-target-and-byproduct-before-output-fanin-or-use-runtime-proven-lane-aware-compression"
                     if len(covered_instances) > 1 and lane_load.get("status") == "overloaded"
                     else "mixed-route-is-within-lane-capacity-but-still-needs-runtime-proof"
@@ -3676,6 +3878,9 @@ def add_boundary_connectors(
                         "start_instance": start_instance,
                         "covered_instances": covered_instances,
                         "covered_instance_count": len(covered_instances),
+                        "fanin_source_instances": fanin_source_instances,
+                        "preseparator_instances": preseparator_instances,
+                        "fanin_preseparated": fanin_preseparated,
                         "fanin_segment_count": len(fanin_segments),
                         "byproducts": byproducts_by_target[boundary],
                         "lane_load_status": lane_load.get("status"),
@@ -3736,6 +3941,7 @@ def materialize_layout_with_summary(
     max_output_expansions_per_machine: int = 4,
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
+    preseparate_output_before_fanin: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     mapping_index = mapping_by_fingerprint(mappings)
     working_layout = copy.deepcopy(layout_plan)
@@ -3866,6 +4072,7 @@ def materialize_layout_with_summary(
             knowledge=knowledge,
             output_separation_min_distance=output_separation_min_distance,
             compress_output_boundary=compress_output_boundary,
+            preseparate_output_before_fanin=preseparate_output_before_fanin,
         )
         connector_result["output_inserter_upgrades"] = output_inserter_upgrades
 
@@ -4100,6 +4307,7 @@ def select_best_materialized_layout(
     force_columns: int | None = None,
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
+    preseparate_output_before_fanin: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if not connect_boundaries or knowledge is None or len(layout_plan.get("nodes") or []) != 1:
         wrapper, connector_summary = materialize_layout_with_summary(
@@ -4112,6 +4320,7 @@ def select_best_materialized_layout(
             max_output_expansions_per_machine=max_output_expansions_per_machine,
             output_separation_min_distance=output_separation_min_distance,
             compress_output_boundary=compress_output_boundary,
+            preseparate_output_before_fanin=preseparate_output_before_fanin,
         )
         return wrapper, connector_summary, layout_plan
 
@@ -4143,6 +4352,7 @@ def select_best_materialized_layout(
             max_output_expansions_per_machine=max_output_expansions_per_machine,
             output_separation_min_distance=output_separation_min_distance,
             compress_output_boundary=candidate_compress_output_boundary,
+            preseparate_output_before_fanin=preseparate_output_before_fanin,
         )
         summary = render_summary(wrapper, candidate_layout, connector_summary, knowledge=knowledge)
         return materialized_layout_score(summary), wrapper, connector_summary, candidate_layout, candidate_compress_output_boundary
@@ -4542,10 +4752,13 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
         for item in summary["connector_summary"]["output_separations"]:
             line = (
                 f"- {item.get('boundary')}: status={item.get('status')} "
+                f"scope={item.get('scope', 'boundary-route')} "
                 f"splitter={item.get('splitter_name')} at=({item.get('splitter_x')},{item.get('splitter_y')}) "
                 f"current={item.get('current_handling')} recommended={item.get('recommended_handling')} "
                 f"overflow_y={item.get('overflow_y')} overflow_belts={item.get('overflow_belts_added', 0)}"
             )
+            if item.get("from_instance") is not None:
+                line += f" from={item.get('from_instance')} to={item.get('to_instance')}"
             if item.get("recyclable_byproducts"):
                 line += f" recyclable={','.join(item['recyclable_byproducts'])}"
             if item.get("recycle_merge_target"):
@@ -4706,6 +4919,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-output-expansions-per-machine", type=int, default=4)
     parser.add_argument("--force-columns", type=int, help="Experimental: force the single-node repeated grid to this column count instead of running post-materialization column search.")
     parser.add_argument("--output-separation-min-distance", type=float, default=1.0, help="Experimental: require this many tiles between the selected machine-output port and the target-item filter splitter.")
+    parser.add_argument("--preseparate-output-before-fanin", action="store_true", help="Experimental: insert target/byproduct filter splitters on output fan-in source segments before multiple production instances merge.")
     parser.add_argument("--compress-output-boundary", action="store_true", help="Experimental: try to keep over-provisioned internal output lanes and add a corpus-derived 3-to-2 compressor for a 2-belt full-belt target; generic compressors with known runtime shortfall are reported as unresolved capacity and may be rejected by layout selection.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
@@ -4758,6 +4972,7 @@ def main(argv: list[str] | None = None) -> int:
         force_columns=args.force_columns,
         output_separation_min_distance=args.output_separation_min_distance,
         compress_output_boundary=args.compress_output_boundary,
+        preseparate_output_before_fanin=args.preseparate_output_before_fanin,
     )
     save_blueprint_file(args.output, wrapper)
     summary = render_summary(wrapper, layout, connector_summary, knowledge=knowledge)

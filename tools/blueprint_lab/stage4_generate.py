@@ -42,6 +42,7 @@ def build_stage4_generation_package(
     force_columns: int | None = None,
     output_separation_min_distance: float = 1.0,
     compress_output_boundary: bool = False,
+    preseparate_output_before_fanin: bool = False,
     runtime_log: Path | None = None,
 ) -> dict[str, Any]:
     knowledge = load_data_raw(data_raw_json)
@@ -91,6 +92,7 @@ def build_stage4_generation_package(
         force_columns=force_columns,
         output_separation_min_distance=output_separation_min_distance,
         compress_output_boundary=compress_output_boundary,
+        preseparate_output_before_fanin=preseparate_output_before_fanin,
     )
     materialized_summary = render_summary(wrapper, selected_layout, connector_summary, knowledge=knowledge)
     materialized_summary["template_mapping_status_counts"] = template_summary["status_counts"]
@@ -128,6 +130,7 @@ def package_summary(package: dict[str, Any], *, blueprint_output: Path | None = 
         "boundary_capacity_audit": materialized["connector_summary"].get("boundary_capacity_audit") or [],
         "output_lane_load_audit": materialized["connector_summary"].get("output_lane_load_audit") or [],
         "output_preseparation_exposure_audit": materialized["connector_summary"].get("output_preseparation_exposure_audit") or [],
+        "output_separations": materialized["connector_summary"].get("output_separations") or [],
         "module_library": stage4.get("module_library"),
         "runtime_proof": package.get("runtime_proof"),
         "stage4_design_decisions": stage4.get("design_decisions") or [],
@@ -171,7 +174,17 @@ def render_package_markdown(package: dict[str, Any], *, blueprint_output: Path |
                 f"- {item.get('boundary')} y={item.get('route_y')}: status={item.get('status')} "
                 f"instances={item.get('covered_instances')} fanins={item.get('fanin_segment_count')} "
                 f"separator_x={item.get('separator_x')} lane_load={item.get('lane_load_status')} "
-                f"max_safe_instances={item.get('max_safe_instances_before_separation')}"
+                f"max_safe_instances={item.get('max_safe_instances_before_separation')} "
+                f"fanin_preseparated={item.get('fanin_preseparated')}"
+            )
+    if summary["output_separations"]:
+        lines.extend(["", "## Output Separations", ""])
+        for item in summary["output_separations"]:
+            lines.append(
+                f"- {item.get('boundary')}: scope={item.get('scope', 'boundary-route')} "
+                f"status={item.get('status')} current={item.get('current_handling')} "
+                f"from={item.get('from_instance')} to={item.get('to_instance')} "
+                f"splitter=({item.get('splitter_x')},{item.get('splitter_y')})"
             )
     lines.extend(["", "## Module Library", ""])
     module_library = summary.get("module_library") or {}
@@ -233,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-output-expansions-per-machine", type=int, default=4)
     parser.add_argument("--force-columns", type=int)
     parser.add_argument("--output-separation-min-distance", type=float, default=1.0)
+    parser.add_argument("--preseparate-output-before-fanin", action="store_true")
     parser.add_argument("--compress-output-boundary", action="store_true")
     parser.add_argument("--blueprint-output", type=Path, required=True)
     parser.add_argument("--summary-output", type=Path)
@@ -275,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
             force_columns=args.force_columns,
             output_separation_min_distance=args.output_separation_min_distance,
             compress_output_boundary=args.compress_output_boundary,
+            preseparate_output_before_fanin=args.preseparate_output_before_fanin,
             runtime_log=args.runtime_log,
         )
     except ValueError as error:

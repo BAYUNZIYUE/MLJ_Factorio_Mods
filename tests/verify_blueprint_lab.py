@@ -1505,6 +1505,33 @@ def main() -> int:
     ):
         print(f"FAIL: expected byproduct fan-in exposure audit to flag mixed output before the target splitter: {byproduct_replicated_summary}")
         return 1
+    _, byproduct_preseparated_summary = materialize_layout_with_summary(
+        byproduct_replicated_layout,
+        byproduct_mappings,
+        label="fixture-byproduct-preseparate-before-fanin",
+        connect_boundaries=True,
+        knowledge=knowledge,
+        preseparate_output_before_fanin=True,
+    )
+    pre_fanin_separations = [
+        item
+        for item in byproduct_preseparated_summary["output_separations"]
+        if item.get("scope") == "output-fanin"
+    ]
+    pre_fanin_exposure = byproduct_preseparated_summary["output_preseparation_exposure_audit"]
+    if (
+        len(pre_fanin_separations) != 1
+        or pre_fanin_separations[0]["status"] != "connected"
+        or pre_fanin_separations[0]["from_instance"] != 0
+        or pre_fanin_separations[0]["to_instance"] != 1
+        or len(pre_fanin_exposure) != 1
+        or pre_fanin_exposure[0]["status"] != "preseparated-before-fanin"
+        or pre_fanin_exposure[0]["fanin_preseparated"] is not True
+        or pre_fanin_exposure[0]["preseparator_instances"] != [0]
+        or pre_fanin_exposure[0]["recommendation"] != "pre-fanin-separation-removes-mixed-byproducts-but-still-needs-runtime-proof"
+    ):
+        print(f"FAIL: expected pre-fanin separation to mark fan-in sources as separated before mixed output merge: {byproduct_preseparated_summary}")
+        return 1
     byproduct_overloaded_layout = deepcopy(byproduct_replicated_layout)
     byproduct_overloaded_layout["target_rate_per_minute"] = 7200
     byproduct_overloaded_layout["boundary_outputs"] = [{"item": "iron-ore", "rate_per_minute": 7200, "side": "right"}]

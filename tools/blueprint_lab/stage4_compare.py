@@ -93,11 +93,13 @@ def candidate_score(candidate: dict[str, Any]) -> list[float]:
     runtime_status = runtime.get("status") if runtime else None
     best_window_deficit = float(best_window.get("target_rate_deficit_per_minute") or 0.0) if runtime else 0.0
     mixed_overloaded_exposure = int(exposure_counts.get("mixed-overloaded-before-separation") or 0)
+    target_overloaded_after_preseparation = int(exposure_counts.get("target-overloaded-after-pre-fanin-separation") or 0)
     return [
         float(RUNTIME_STATUS_RANK.get(runtime_status, 5)),
         best_window_deficit,
         float(CAPACITY_STATUS_RANK.get(capacity.get("status"), 5)),
         float(mixed_overloaded_exposure),
+        float(target_overloaded_after_preseparation),
         float(CONTRACT_STATUS_RANK.get(contract.get("status"), 5)),
         float(route_overage),
         float(lane_count),
@@ -115,6 +117,7 @@ def runtime_gap_analysis(candidate: dict[str, Any]) -> dict[str, Any]:
     best_window = window_diagnostics.get("best_window") or {}
     cleanliness = runtime.get("right_boundary_cleanliness") or {}
     invalid_output = runtime.get("invalid_output_inserters") or {}
+    exposure_counts = candidate.get("output_preseparation_exposure_status_counts") or {}
     target_rate = candidate.get("target_rate_per_minute")
     best_deficit = best_window.get("target_rate_deficit_per_minute")
     best_rate = best_window.get("target_per_minute")
@@ -140,7 +143,11 @@ def runtime_gap_analysis(candidate: dict[str, Any]) -> dict[str, Any]:
         next_action = "preserve-runtime-proof-and-reduce-over-provisioning" if contract.get("status") == "over-provisioned" else "accept-strict-runtime-proven-candidate"
     elif near_miss:
         category = "strict-near-miss"
-        next_action = "tune-final-two-belt-compression-geometry"
+        next_action = (
+            "add-lane-aware-target-output-compression-after-prefanin-separation"
+            if exposure_counts.get("target-overloaded-after-pre-fanin-separation")
+            else "tune-final-two-belt-compression-geometry"
+        )
     elif runtime.get("status") == "below-target":
         category = "below-target"
         next_action = "fix-runtime-throughput-before-ranking-as-solved"
@@ -247,9 +254,19 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
     exposure_counts = candidate.get("output_preseparation_exposure_status_counts") or {}
     mixed_exposure = exposure_counts.get("mixed-before-separation", 0)
     mixed_overloaded_exposure = exposure_counts.get("mixed-overloaded-before-separation", 0)
+    target_overloaded_after_preseparation = exposure_counts.get("target-overloaded-after-pre-fanin-separation", 0)
+    preseparated_exposure = exposure_counts.get("preseparated-before-fanin", 0)
     if mixed_overloaded_exposure:
         lessons.append(
             f"{mixed_overloaded_exposure} output route(s) are overloaded and merge multiple production instances before target/byproduct separation"
+        )
+    if target_overloaded_after_preseparation:
+        lessons.append(
+            f"{target_overloaded_after_preseparation} output route(s) separate byproducts before fan-in, but target output still exceeds one belt before the final boundary"
+        )
+    if preseparated_exposure:
+        lessons.append(
+            f"{preseparated_exposure} output route(s) remove mixed byproducts before fan-in and still need runtime proof"
         )
     if mixed_exposure:
         lessons.append(
@@ -291,6 +308,7 @@ def build_comparison(candidates: list[dict[str, Any]]) -> dict[str, Any]:
             "runtime lane summary must collapse external output to the expected final transport lines without falling below target",
             "right boundary must remain clean and invalid_output_inserters must stay zero",
             "strict near-miss candidates should tune final two-belt compression geometry before changing machine count",
+            "if pre-fanin byproduct separation is already present and target lanes remain overloaded, add lane-aware target-output compression instead of more byproduct splitters",
         ],
     }
 
