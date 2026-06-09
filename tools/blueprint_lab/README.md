@@ -538,14 +538,16 @@ topology or earlier target/byproduct split, not a larger spacing sweep.
 The materialized reports now include an Output Pre-separation Exposure audit to
 make that topology problem explicit. On the forced 3x2 exact `iron-ore`
 candidate, both final output routes are reported as
-`mixed-before-separation`: the top route covers instances `[0, 1, 2]` and the
-bottom route covers `[3, 4, 5]`, each with two fan-in segments before the
-target-item filter splitter at `x=47.5`. This explains why the offline contract
-can look exact while runtime still misses a few items per window: target and
-recyclable byproduct traffic are merged across several crushers before the
-first separation point. The next generator attempt should either split
-target/byproduct output before fan-in or replace this row fan-in with a
-runtime-proven lane-aware compressor.
+`mixed-overloaded-before-separation`: the top route covers instances `[0, 1, 2]`
+and the bottom route covers `[3, 4, 5]`, each with two fan-in segments before
+the target-item filter splitter at `x=47.5`, and each route is already
+`4725/min > 3600/min` before separation. The default 2x3 over-provisioned
+candidate also has mixed pre-separation routes, but each route covers only two
+instances and stays within one turbo belt, so it remains the selected
+runtime-proven path. This explains why the forced exact contract can look
+correct offline while runtime still misses a few items per window. The next
+strict generator attempt should either split target/byproduct output before
+fan-in or replace this row fan-in with a runtime-proven lane-aware compressor.
 
 Two follow-up probes narrowed the next design space. First, routing experimental
 new drop belts back into the main output lane made the extra inserters visible

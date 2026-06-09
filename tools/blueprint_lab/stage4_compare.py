@@ -85,16 +85,19 @@ def candidate_score(candidate: dict[str, Any]) -> list[float]:
     lane_summary = runtime.get("throughput_lane_summary") or {}
     window_diagnostics = runtime.get("throughput_window_diagnostics") or {}
     best_window = window_diagnostics.get("best_window") or {}
+    exposure_counts = candidate.get("output_preseparation_exposure_status_counts") or {}
     expected_belt_count = int(contract.get("expected_belt_count") or 0)
     route_count = int(contract.get("route_count") or 0)
     route_overage = max(0, route_count - expected_belt_count) if expected_belt_count else route_count
     lane_count = int(lane_summary.get("line_count") or 0)
     runtime_status = runtime.get("status") if runtime else None
     best_window_deficit = float(best_window.get("target_rate_deficit_per_minute") or 0.0) if runtime else 0.0
+    mixed_overloaded_exposure = int(exposure_counts.get("mixed-overloaded-before-separation") or 0)
     return [
         float(RUNTIME_STATUS_RANK.get(runtime_status, 5)),
         best_window_deficit,
         float(CAPACITY_STATUS_RANK.get(capacity.get("status"), 5)),
+        float(mixed_overloaded_exposure),
         float(CONTRACT_STATUS_RANK.get(contract.get("status"), 5)),
         float(route_overage),
         float(lane_count),
@@ -241,7 +244,13 @@ def candidate_lessons(candidate: dict[str, Any]) -> list[str]:
         lessons.append(
             f"strict near-miss: exact boundary is clean, invalid output inserters are zero, and best window is short by {gap.get('best_window_deficit_per_minute')}/min"
         )
-    mixed_exposure = (candidate.get("output_preseparation_exposure_status_counts") or {}).get("mixed-before-separation", 0)
+    exposure_counts = candidate.get("output_preseparation_exposure_status_counts") or {}
+    mixed_exposure = exposure_counts.get("mixed-before-separation", 0)
+    mixed_overloaded_exposure = exposure_counts.get("mixed-overloaded-before-separation", 0)
+    if mixed_overloaded_exposure:
+        lessons.append(
+            f"{mixed_overloaded_exposure} output route(s) are overloaded and merge multiple production instances before target/byproduct separation"
+        )
     if mixed_exposure:
         lessons.append(
             f"{mixed_exposure} output route(s) merge multiple production instances before target/byproduct separation"

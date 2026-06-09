@@ -3584,7 +3584,7 @@ def add_boundary_connectors(
             )
         return audits
 
-    def output_preseparation_exposure_audit() -> list[dict[str, Any]]:
+    def output_preseparation_exposure_audit(lane_load_audit: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if knowledge is None or not pending_byproduct_audit:
             return []
         node_index = {
@@ -3608,6 +3608,11 @@ def add_boundary_connectors(
             if not boundary or route_y is None:
                 continue
             separator_by_route[(boundary, round(float(route_y), 3))] = separation
+        lane_load_by_route = {
+            (str(item.get("boundary") or ""), round(float(item.get("route_y") or 0.0), 3)): item
+            for item in lane_load_audit
+            if item.get("boundary") and item.get("route_y") is not None
+        }
 
         audits: list[dict[str, Any]] = []
         for boundary in sorted(byproducts_by_target):
@@ -3638,12 +3643,22 @@ def add_boundary_connectors(
                     and round(float(item.get("fanin_y") or 0.0), 3) == route_y
                 ]
                 separator = separator_by_route.get((output_boundary, route_y))
+                lane_load = lane_load_by_route.get((output_boundary, route_y)) or {}
                 status = (
-                    "mixed-before-separation"
+                    "mixed-overloaded-before-separation"
+                    if len(covered_instances) > 1 and separator is not None and lane_load.get("status") == "overloaded"
+                    else "mixed-before-separation"
                     if len(covered_instances) > 1 and separator is not None
                     else "single-source-before-separation"
                     if separator is not None
                     else "no-target-separator"
+                )
+                recommendation = (
+                    "split-target-and-byproduct-before-output-fanin-or-use-runtime-proven-lane-aware-compression"
+                    if len(covered_instances) > 1 and lane_load.get("status") == "overloaded"
+                    else "mixed-route-is-within-lane-capacity-but-still-needs-runtime-proof"
+                    if len(covered_instances) > 1
+                    else "current-separator-is-after-a-single-source-output-route"
                 )
                 audits.append(
                     {
@@ -3658,13 +3673,13 @@ def add_boundary_connectors(
                         "covered_instance_count": len(covered_instances),
                         "fanin_segment_count": len(fanin_segments),
                         "byproducts": byproducts_by_target[boundary],
+                        "lane_load_status": lane_load.get("status"),
+                        "lane_load_rate_per_minute": lane_load.get("load_rate_per_minute"),
+                        "lane_capacity_per_minute": lane_load.get("lane_capacity_per_minute"),
+                        "lane_overload_per_minute": lane_load.get("overload_per_minute"),
                         "separator_x": separator.get("splitter_x") if separator else None,
                         "separator_handling": separator.get("current_handling") if separator else None,
-                        "recommendation": (
-                            "split-target-and-byproduct-before-output-fanin-or-use-runtime-proven-lane-aware-compression"
-                            if len(covered_instances) > 1
-                            else "current-separator-is-after-a-single-source-output-route"
-                        ),
+                        "recommendation": recommendation,
                     }
                 )
         return audits
@@ -3674,7 +3689,7 @@ def add_boundary_connectors(
     capacity_audit = boundary_capacity_audit(flow_audit)
     contract_audit = boundary_contract_audit()
     lane_load_audit = output_lane_load_audit()
-    preseparation_exposure_audit = output_preseparation_exposure_audit()
+    preseparation_exposure_audit = output_preseparation_exposure_audit(lane_load_audit)
     byproduct_audit = output_byproduct_audit()
     entities.extend(connectors)
     return {
@@ -3935,6 +3950,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     lane_load_statuses = Counter(item.get("status", "unknown") for item in connector_summary.get("output_lane_load_audit") or [])
     output_separations = connector_summary.get("output_separations") or []
     output_boundary_compressors = connector_summary.get("output_boundary_compressors") or []
+    preseparation_exposure = connector_summary.get("output_preseparation_exposure_audit") or []
     output_capacity = [
         item
         for item in connector_summary.get("boundary_capacity_audit") or []
@@ -3961,6 +3977,11 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
     bad_capacity = capacity_statuses.get("failed", 0) + capacity_statuses.get("insufficient", 0)
     unresolved_capacity = capacity_statuses.get("unresolved", 0)
     overloaded_output_lanes = lane_load_statuses.get("overloaded", 0)
+    mixed_overloaded_preseparation = sum(
+        1
+        for item in preseparation_exposure
+        if item.get("status") == "mixed-overloaded-before-separation"
+    )
     finite_or_blocked_output_separations = sum(
         1
         for item in output_separations
@@ -3982,6 +4003,7 @@ def materialized_layout_score(summary: dict[str, Any]) -> tuple[float, ...]:
         float(output_coverage_not_met),
         float(flow_statuses.get("failed", 0)),
         float(finite_or_blocked_output_separations),
+        float(mixed_overloaded_preseparation),
         float(overloaded_output_lanes),
         float(contract_not_exact),
         float(contract_over),
@@ -4416,6 +4438,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
                 f"- {item.get('boundary')} y={item.get('route_y')}: status={item.get('status')} "
                 f"instances={item.get('covered_instances')} fanins={item.get('fanin_segment_count')} "
                 f"separator_x={item.get('separator_x')} byproducts={byproducts} "
+                f"lane_load={item.get('lane_load_status')} "
                 f"next={item.get('recommendation')}"
             )
     if summary["connector_summary"].get("output_byproduct_audit"):

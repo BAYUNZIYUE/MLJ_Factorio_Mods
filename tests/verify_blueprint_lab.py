@@ -1499,9 +1499,31 @@ def main() -> int:
         or exposure_audit[0]["covered_instances"] != [0, 1]
         or exposure_audit[0]["fanin_segment_count"] != 1
         or exposure_audit[0]["byproducts"] != ["metallic-asteroid-chunk"]
-        or exposure_audit[0]["recommendation"] != "split-target-and-byproduct-before-output-fanin-or-use-runtime-proven-lane-aware-compression"
+        or exposure_audit[0]["lane_load_status"] != "sufficient"
+        or exposure_audit[0]["recommendation"] != "mixed-route-is-within-lane-capacity-but-still-needs-runtime-proof"
     ):
         print(f"FAIL: expected byproduct fan-in exposure audit to flag mixed output before the target splitter: {byproduct_replicated_summary}")
+        return 1
+    byproduct_overloaded_layout = deepcopy(byproduct_replicated_layout)
+    byproduct_overloaded_layout["target_rate_per_minute"] = 7200
+    byproduct_overloaded_layout["boundary_outputs"] = [{"item": "iron-ore", "rate_per_minute": 7200, "side": "right"}]
+    byproduct_overloaded_layout["nodes"][0]["planned_net_output_per_minute"] = 7200
+    _, byproduct_overloaded_summary = materialize_layout_with_summary(
+        byproduct_overloaded_layout,
+        byproduct_mappings,
+        label="fixture-byproduct-preseparation-overload",
+        connect_boundaries=True,
+        knowledge=knowledge,
+    )
+    overloaded_exposure = byproduct_overloaded_summary["output_preseparation_exposure_audit"]
+    if (
+        len(overloaded_exposure) != 1
+        or overloaded_exposure[0]["status"] != "mixed-overloaded-before-separation"
+        or overloaded_exposure[0]["lane_load_status"] != "overloaded"
+        or overloaded_exposure[0]["lane_overload_per_minute"] != 3600
+        or overloaded_exposure[0]["recommendation"] != "split-target-and-byproduct-before-output-fanin-or-use-runtime-proven-lane-aware-compression"
+    ):
+        print(f"FAIL: expected byproduct pre-separation exposure audit to escalate mixed overloaded routes: {byproduct_overloaded_summary}")
         return 1
     capacity_unresolved_lane_mappings = deepcopy(capacity_multi_lane_mappings)
     capacity_unresolved_lane_mappings[0]["layout"]["entities"][-1] = {
