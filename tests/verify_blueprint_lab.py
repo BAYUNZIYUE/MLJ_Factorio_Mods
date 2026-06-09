@@ -17,6 +17,7 @@ from tools.blueprint_lab.directions import DIR_EAST, DIR_SOUTH, DIR_WEST
 from tools.blueprint_lab.generate import generate_iron_plate_blackbox_seed
 from tools.blueprint_lab.learn import learn_library
 from tools.blueprint_lab.runtime_proof import build_runtime_proof, render_markdown_report as render_runtime_proof_markdown_report
+from tools.blueprint_lab.stage4_compare import build_comparison, summarize_candidate
 from tools.blueprint_lab.stage4_report import build_stage4_report, render_markdown_report as render_stage4_markdown_report
 from tools.blueprint_lab.stage4_generate import build_stage4_generation_package, package_summary, render_package_markdown
 from tools.blueprint_lab.templates import extract_templates_from_blueprint
@@ -389,6 +390,60 @@ def main() -> int:
         or "Blueprint Lab Stage 4 Generation Package" not in stage4_package_markdown
     ):
         print(f"FAIL: expected stage4 generation package to combine report, module library, summary, and blueprint: {stage4_package_summary}")
+        return 1
+    candidate_a_path = ROOT / ".codex" / "tests" / "blueprint_lab_candidate_a.json"
+    candidate_b_path = ROOT / ".codex" / "tests" / "blueprint_lab_candidate_b.json"
+    runtime_proof_path = ROOT / ".codex" / "tests" / "blueprint_lab_runtime_proof_fixture.json"
+    candidate_a_path.write_text(
+        json.dumps(
+            {
+                "target_item": "iron-gear-wheel",
+                "target_rate_per_minute": 150,
+                "entity_count": 10,
+                "tile_count": 0,
+                "width": 10,
+                "height": 10,
+                "route_status_counts": {"connected": 3},
+                "boundary_contract_audit": [{"boundary": "output:iron-gear-wheel", "status": "over-provisioned", "expected_belt_count": 1, "route_count": 3}],
+                "boundary_capacity_audit": [{"boundary": "output:iron-gear-wheel", "status": "sufficient", "proven_capacity_per_minute": 300, "required_rate_per_minute": 150}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    candidate_b_path.write_text(
+        json.dumps(
+            {
+                "target_item": "iron-gear-wheel",
+                "target_rate_per_minute": 150,
+                "entity_count": 8,
+                "tile_count": 0,
+                "width": 8,
+                "height": 8,
+                "route_status_counts": {"connected": 1},
+                "connector_summary": {
+                    "boundary_contract_audit": [{"boundary": "output:iron-gear-wheel", "status": "exact", "expected_belt_count": 1, "route_count": 1}],
+                    "boundary_capacity_audit": [{"boundary": "output:iron-gear-wheel", "status": "unresolved", "proven_capacity_per_minute": 0, "required_rate_per_minute": 150}],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    runtime_proof_path.write_text(json.dumps(runtime_proof, ensure_ascii=False), encoding="utf-8")
+    comparison = build_comparison(
+        [
+            summarize_candidate(label="runtime-over-provisioned", summary_path=candidate_a_path, runtime_proof_path=runtime_proof_path),
+            summarize_candidate(label="exact-unresolved", summary_path=candidate_b_path),
+        ]
+    )
+    if (
+        comparison["recommended_label"] != "runtime-over-provisioned"
+        or comparison["strict_boundary_candidates"] != ["exact-unresolved"]
+        or comparison["runtime_proven_candidates"] != ["runtime-over-provisioned"]
+        or "runtime proof outranks" not in comparison["recommended_reason"]
+    ):
+        print(f"FAIL: expected stage4 comparison to prefer runtime-proven candidate over exact unresolved candidate: {comparison}")
         return 1
     io_audit = audit_machine_io(
         {

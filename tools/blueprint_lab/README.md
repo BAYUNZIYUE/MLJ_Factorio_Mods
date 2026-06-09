@@ -716,6 +716,18 @@ package summary with `--runtime-log`. Use the `factorio-current.log` under the
 isolated `--user-data-dir` when parsing markers; the `--console-log` path is a
 Factorio log-open marker and may not contain the validation markers.
 
+Compare generated candidates with offline audits and runtime proof:
+
+```bash
+python3 -m tools.blueprint_lab.stage4_compare --candidate runtime-overprovisioned=.codex/tests/blueprint-stage4-generate-iron-ore-2x-turbo-with-lane-proof-summary.json --candidate exact-compressor-unresolved=.codex/tests/blueprint-routed-iron-ore-2x-turbo-belt-compressed-boundary-forced-c2-summary.json --json-output .codex/tests/blueprint-stage4-candidate-comparison.json --markdown-output .codex/tests/blueprint-stage4-candidate-comparison.md
+```
+
+The comparison intentionally recommends the runtime-proven over-provisioned
+candidate over the exact but unresolved compressor candidate. That scoring is a
+guardrail for future generator work: strict two-belt output is still the target,
+but an exact-looking boundary cannot outrank a wider boundary until it has
+runtime-proven throughput, clean output, and zero invalid output inserters.
+
 Generate the current seed blueprint:
 
 ```bash
