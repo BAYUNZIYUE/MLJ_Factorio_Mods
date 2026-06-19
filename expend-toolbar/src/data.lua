@@ -99,6 +99,24 @@ styles.expend_toolbar_slot_box = {
   type = "empty_widget_style",
   size = 40,
 }
+local function transparent_graphical_set(graphical_set)
+  local copy = table.deepcopy(graphical_set)
+  if copy and copy.base then
+    copy.base.opacity = 0
+  end
+  return copy
+end
+
+styles.expend_toolbar_preview_button = {
+  type = "button_style",
+  parent = "slot_button",
+  padding = 0,
+  size = 16,
+  default_graphical_set = transparent_graphical_set(styles.slot_button.default_graphical_set),
+  hovered_graphical_set = transparent_graphical_set(styles.slot_button.hovered_graphical_set),
+  clicked_graphical_set = transparent_graphical_set(styles.slot_button.clicked_graphical_set),
+  disabled_graphical_set = transparent_graphical_set(styles.slot_button.disabled_graphical_set),
+}
 styles.expend_toolbar_quality_box = {
   type = "horizontal_flow_style",
   width = 36,

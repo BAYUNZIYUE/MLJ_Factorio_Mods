@@ -5,6 +5,8 @@ local M = {}
 local SLOT_SIZE = 40
 local PAGE_TITLE_MIN_WIDTH = 72
 local SNAP_QUIET_TICKS = 20
+local BLUEPRINT_ICON_SIZE = 16
+local BOOK_BLUEPRINT_ICON_SIZE = 11
 
 local function setting(player, key)
   return settings.get_player_settings(player)[key].value
@@ -44,6 +46,10 @@ local function slot_name(bar_id, position)
   return names.gui.pick .. "_" .. tostring(bar_id) .. "_" .. tostring(position)
 end
 
+local function slot_quality_name(bar_id, position)
+  return slot_name(bar_id, position) .. "_quality"
+end
+
 local function rename_name(bar_id)
   return names.gui.rename .. "_" .. tostring(bar_id)
 end
@@ -52,10 +58,19 @@ local function delete_name(bar_id)
   return names.gui.confirm .. "_delete_" .. tostring(bar_id)
 end
 
-local function normalize_grade(grade)
-  if type(grade) == "table" then
-    grade = grade.name
+local function quality_name(quality)
+  if type(quality) == "string" then
+    return quality
   end
+  local ok, name = pcall(function() return quality.name end)
+  if ok then
+    return name
+  end
+  return nil
+end
+
+local function normalize_grade(grade)
+  grade = quality_name(grade)
   if not grade or grade == "" or grade == "quality-unknown" or not prototypes.quality[grade] then
     return "normal"
   end
@@ -86,6 +101,138 @@ local function record_item_name(record_type)
   return nil
 end
 
+local function tool_item_name(slot)
+  if not slot then
+    return nil
+  end
+  return record_item_name(slot.record_type) or slot.name
+end
+
+local blueprint_tools = {
+  ["blueprint"] = true,
+  ["blueprint-book"] = true,
+  ["deconstruction-planner"] = true,
+  ["upgrade-planner"] = true,
+}
+
+local function is_blueprint_tool(slot)
+  return slot and blueprint_tools[tool_item_name(slot) or slot.name] == true
+end
+
+local function has_inventory_count(slot)
+  return not is_blueprint_tool(slot)
+end
+
+local function blueprint_icon_quality_by_name(source)
+  local costs = safe_value(function() return source.cost_to_build end)
+  if type(costs) ~= "table" then
+    return nil
+  end
+
+  local qualities = {}
+  for _, cost in pairs(costs) do
+    local name = cost and cost.name
+    local grade = normalize_grade(cost and cost.quality)
+    if name and grade ~= "normal" and not qualities[name] then
+      qualities[name] = grade
+    end
+  end
+  return next(qualities) and qualities or nil
+end
+
+local function copy_signal_icon(icon, quality_by_name)
+  local signal = icon and icon.signal
+  local name = signal and signal.name
+  if not name then
+    return nil
+  end
+  local signal_type = signal.type
+  if signal_type ~= "item" and signal_type ~= "fluid" and signal_type ~= "virtual" and signal_type ~= "virtual-signal" then
+    signal_type = prototypes.fluid[name] and "fluid" or (prototypes.item[name] and "item" or "virtual")
+  end
+  local quality = normalize_grade(signal.quality)
+  if quality == "normal" and signal_type == "item" and quality_by_name then
+    quality = quality_by_name[name] or quality
+  end
+  return {
+    index = tonumber(icon.index) or 0,
+    signal = {
+      type = signal_type,
+      name = name,
+      quality = quality,
+    },
+  }
+end
+
+local function copy_blueprint_icons(icons, quality_by_name)
+  if type(icons) ~= "table" then
+    return nil
+  end
+  local out = {}
+  for _, icon in pairs(icons) do
+    local copied = copy_signal_icon(icon, quality_by_name)
+    if copied then
+      out[#out + 1] = copied
+    end
+  end
+  if #out == 0 then
+    return nil
+  end
+  table.sort(out, function(a, b)
+    return (a.index or 0) < (b.index or 0)
+  end)
+  return out
+end
+
+local function blueprint_icons(source)
+  if not source then
+    return nil
+  end
+  local quality_by_name = blueprint_icon_quality_by_name(source)
+  local icons = copy_blueprint_icons(safe_value(function() return source.preview_icons end), quality_by_name)
+  if icons then
+    return icons
+  end
+  return copy_blueprint_icons(safe_value(function() return source.default_icons end), quality_by_name)
+end
+
+local function clone_icons(icons)
+  if type(icons) ~= "table" then
+    return nil
+  end
+  local out = {}
+  for _, icon in ipairs(icons) do
+    local signal = icon.signal
+    out[#out + 1] = {
+      index = icon.index,
+      signal = signal and { type = signal.type, name = signal.name, quality = normalize_grade(signal.quality) } or nil,
+    }
+  end
+  return #out > 0 and out or nil
+end
+
+local function icons_key(icons)
+  if type(icons) ~= "table" then
+    return ""
+  end
+  local parts = {}
+  for _, icon in ipairs(icons) do
+    local signal = icon.signal
+    if signal and signal.name then
+      parts[#parts + 1] = table.concat({
+        tostring(icon.index or ""),
+        ":",
+        tostring(signal.type or ""),
+        "/",
+        signal.name,
+        "@",
+        tostring(normalize_grade(signal.quality)),
+      })
+    end
+  end
+  return table.concat(parts, ",")
+end
+
 local function record_label(record)
   return safe_value(function() return record.blueprint_description end)
 end
@@ -102,8 +249,99 @@ local function record_contents_size(record)
   return safe_value(function() return record.contents_size end)
 end
 
-local function record_export(record)
-  return safe_value(function() return record.export_record() end)
+local function same_record(a, b)
+  return a and b and a.valid ~= false and b.valid ~= false and a == b
+end
+
+local function find_record_path(records, needle, path)
+  if not records or not needle then
+    return nil
+  end
+  for index, record in pairs(records) do
+    if record and record.valid ~= false then
+      local next_path = {}
+      for _, part in ipairs(path or {}) do
+        next_path[#next_path + 1] = part
+      end
+      next_path[#next_path + 1] = index
+      if same_record(record, needle) then
+        return next_path
+      end
+      if safe_value(function() return record.type end) == "blueprint-book" then
+        local found = find_record_path(safe_value(function() return record.contents end), needle, next_path)
+        if found then
+          return found
+        end
+      end
+    end
+  end
+  return nil
+end
+
+local function record_link(player, record)
+  local path = find_record_path(safe_value(function() return player.blueprints end), record, {})
+  if path then
+    return { source = "player", path = path }
+  end
+  path = find_record_path(safe_value(function() return game.blueprints end), record, {})
+  if path then
+    return { source = "game", path = path }
+  end
+  return nil
+end
+
+local function record_from_link(player, link)
+  if not link or type(link.path) ~= "table" then
+    return nil
+  end
+  local records
+  if link.source == "player" then
+    records = safe_value(function() return player.blueprints end)
+  elseif link.source == "game" then
+    records = safe_value(function() return game.blueprints end)
+  end
+  local record
+  for _, index in ipairs(link.path) do
+    record = records and records[index]
+    if not record or record.valid == false then
+      return nil
+    end
+    records = safe_value(function() return record.contents end)
+  end
+  return record
+end
+
+local function record_link_key(link)
+  if not link or type(link.path) ~= "table" then
+    return ""
+  end
+  local parts = { link.source or "" }
+  for _, index in ipairs(link.path) do
+    parts[#parts + 1] = tostring(index)
+  end
+  return table.concat(parts, "/")
+end
+
+local function record_matches_slot(player, record, slot)
+  if not record or record.valid == false then
+    return false
+  end
+  if safe_value(function() return record.type end) ~= slot.record_type then
+    return false
+  end
+  if (record_label(record) or "") ~= (slot.label or "") then
+    return false
+  end
+  if tostring(record_entity_count(record) or "") ~= tostring(slot.entity_count or "") then
+    return false
+  end
+  if tostring(record_active_index(player, record) or "") ~= tostring(slot.active_index or "") then
+    return false
+  end
+  if tostring(record_contents_size(record) or "") ~= tostring(slot.contents_size or "") then
+    return false
+  end
+  return true
 end
 
 local function nth_bar(state, id)
@@ -243,23 +481,106 @@ local function short_count(count)
     index = index + 1
   end
   if index == 1 then
-    return string.format("%4.3g", count)
+    return string.format("%.3g", count)
   end
   if count < 10 then
-    return string.format("%3.1f%s", math.floor(count * 10) / 10, suffixes[index])
+    return string.format("%.1f%s", math.floor(count * 10) / 10, suffixes[index])
   end
-  return string.format("%3d%s", math.floor(count), suffixes[index])
+  return tostring(math.floor(count)) .. suffixes[index]
 end
 
 local function dim_text(value)
   return "[color=0.7,0.7,0.7]" .. value .. "[/color]"
 end
 
-local function rich_icon(name)
-  if prototypes.fluid[name] then
-    return "[fluid=" .. name .. "]"
+local function quality_control_hint(player)
+  return ui_text(player, "Alt + 鼠标滚轮调整品质", "Alt + mouse wheel adjusts quality")
+end
+
+local function surface_count_label(player)
+  local surface = player and player.surface or nil
+  local name = surface and safe_value(function() return surface.name end) or nil
+  if name and name ~= "" then
+    return name
   end
-  return "[item=" .. name .. "]"
+  return ui_text(player, "未知位置", "Unknown location")
+end
+
+local function count_part(label, count, tight)
+  count = tonumber(count) or 0
+  if count <= 0 then
+    return nil
+  end
+  return label .. (tight and "" or " ") .. short_count(count)
+end
+
+local function player_count_text(player, count)
+  local locale = player and player.locale or ""
+  return count_part(ui_text(player, "玩家", "Player"), count, string.sub(locale, 1, 2) == "zh")
+end
+
+local function surface_count_text(player, count)
+  return count_part(surface_count_label(player), count, false)
+end
+
+local function quality_count_text(player, remote_view, direct, nearby, grade)
+  direct = tonumber(direct) or 0
+  nearby = tonumber(nearby) or 0
+  if remote_view and direct <= 0 then
+    return nil
+  end
+  if not remote_view and direct <= 0 and nearby <= 0 then
+    return nil
+  end
+
+  local parts = { quality_icon(grade) }
+  if remote_view then
+    parts[#parts + 1] = surface_count_text(player, direct)
+  else
+    local direct_part = player_count_text(player, direct)
+    local nearby_part = surface_count_text(player, nearby)
+    if direct_part then
+      parts[#parts + 1] = direct_part
+    end
+    if nearby_part then
+      parts[#parts + 1] = nearby_part
+    end
+  end
+  return table.concat(parts, "  ")
+end
+
+local function count_cache_key(main, side, item)
+  local parts = {}
+  for _, grade in ipairs(stock.grade_list(main or {}, side or {}, item)) do
+    parts[#parts + 1] = grade
+    parts[#parts + 1] = tostring(stock.amount(main or {}, item, grade))
+    parts[#parts + 1] = tostring(stock.amount(side or {}, item, grade))
+  end
+  return table.concat(parts, "\31")
+end
+
+local function slot_count_text(main, slot)
+  if not has_inventory_count(slot) then
+    return ""
+  end
+  return cell_text(main, slot.name, normalize_grade(slot.grade))
+end
+
+local function slot_elem_tooltip(slot)
+  if not slot or not slot.name then
+    return nil
+  end
+  local tool_name = tool_item_name(slot)
+  if is_blueprint_tool(slot) and tool_name and prototypes.item[tool_name] then
+    return { type = "item", name = tool_name }
+  end
+  if prototypes.item[slot.name] then
+    return { type = "item-with-quality", name = slot.name, quality = normalize_grade(slot.grade) }
+  end
+  if prototypes.fluid[slot.name] then
+    return { type = "fluid", name = slot.name }
+  end
+  return nil
 end
 
 local function wanted_items(state, player)
@@ -268,7 +589,7 @@ local function wanted_items(state, player)
     clamp_page(player, bar)
     for _, page in ipairs(bar.pages) do
       for _, slot in pairs(page.slots) do
-        if slot and slot.name and stock.item_known(slot.name) then
+        if slot and slot.name and has_inventory_count(slot) and stock.item_known(slot.name) then
           wanted[slot.name] = true
         end
       end
@@ -277,33 +598,44 @@ local function wanted_items(state, player)
   return next(wanted) and wanted or nil
 end
 
-local function add_detail_line(lines, label, value)
-  if value == nil or value == "" then
-    return
-  end
-  lines[#lines + 1] = "\n"
-  lines[#lines + 1] = dim_text(label .. ": " .. tostring(value))
+local function remember_snapshot(state, wanted, main, side)
+  state.inventory_cache = {
+    wanted = wanted or {},
+    main = main or {},
+    side = side or {},
+  }
 end
 
-local function add_item_details(lines, slot)
-  local prototype = prototypes.item[slot.name] or prototypes.fluid[slot.name]
-  add_detail_line(lines, "name", slot.name)
-  add_detail_line(lines, "kind", slot.kind or "item")
-  if prototype then
-    add_detail_line(lines, "type", safe_value(function() return prototype.type end))
-    add_detail_line(lines, "stack", safe_value(function() return prototype.stack_size end))
-    local place_result = safe_value(function() return prototype.place_result and prototype.place_result.name end)
-    local place_tile = safe_value(function() return prototype.place_as_tile and prototype.place_as_tile.result and prototype.place_as_tile.result.name end)
-    add_detail_line(lines, "place", place_result or place_tile)
-    add_detail_line(lines, "fuel", safe_value(function() return prototype.fuel_category end))
-    add_detail_line(lines, "module", safe_value(function() return prototype.category end))
+local function cached_snapshot(state)
+  local cache = state and state.inventory_cache or nil
+  if cache then
+    return cache.main or {}, cache.side or {}, true
   end
-  add_detail_line(lines, "label", slot.label)
-  add_detail_line(lines, "record", slot.record_type)
-  add_detail_line(lines, "entities", slot.entity_count)
-  add_detail_line(lines, "book index", slot.active_index)
-  add_detail_line(lines, "book size", slot.contents_size)
-  add_detail_line(lines, "export", slot.data and "saved" or nil)
+  return {}, {}, false
+end
+
+local function fresh_snapshot(player, state)
+  local wanted = wanted_items(state, player)
+  local main, side = {}, {}
+  if wanted then
+    main, side = stock.snapshot(player, wanted)
+  end
+  remember_snapshot(state, wanted, main, side)
+  return main, side
+end
+
+local function snapshot_for_paint(player, state, reuse)
+  if reuse then
+    local main, side, ok = cached_snapshot(state)
+    if ok then
+      return main, side
+    end
+  end
+  return fresh_snapshot(player, state)
+end
+
+local function slot_custom_tooltip_enabled(slot)
+  return slot and not is_blueprint_tool(slot)
 end
 
 local function stack_label(stack)
@@ -341,11 +673,12 @@ local function slot_from_stack(stack)
     slot.label = stack_label(stack)
     slot.entity_count = stack_entity_count(stack)
     slot.active_index = stack_active_index(stack)
+    slot.icons = blueprint_icons(stack)
   end
   return slot
 end
 
-local function slot_from_record(player, record, include_data)
+local function slot_from_record(player, record)
   if not record or record.valid == false then
     return nil
   end
@@ -363,10 +696,9 @@ local function slot_from_record(player, record, include_data)
     entity_count = record_entity_count(record),
     active_index = record_active_index(player, record),
     contents_size = record_contents_size(record),
+    record_link = record_link(player, record),
+    icons = blueprint_icons(record),
   }
-  if include_data then
-    slot.data = record_export(record)
-  end
   return slot
 end
 
@@ -375,40 +707,47 @@ local function hint_text(player, main, side, slot, cache)
     return nil
   end
   slot.grade = normalize_grade(slot.grade)
+  local show_controls = setting(player, names.setting.hint_keys)
+  local remote_view = player.controller_type == defines.controllers.remote
+  if not slot_custom_tooltip_enabled(slot) then
+    return nil
+  end
+
+  local counts_key = has_inventory_count(slot) and count_cache_key(main, side, slot.name) or ""
   local key = table.concat({
     slot.name,
     slot.grade,
-    slot.kind or "",
-    slot.data or "",
-    slot.record_type or "",
-    slot.label or "",
-    tostring(slot.entity_count or ""),
-    tostring(slot.active_index or ""),
-    tostring(slot.contents_size or ""),
+    counts_key,
+    tostring(remote_view),
+    tostring(show_controls),
+    player.locale or "",
   }, "\t")
   if cache and cache[key] then
     return cache[key]
   end
 
-  local lines = { rich_icon(slot.name) .. " " .. slot.name .. " " .. quality_icon(slot.grade) }
+  local lines = {}
   local grades = stock.grade_list(main, side, slot.name)
-  for index = #grades, 1, -1 do
-    local grade = grades[index]
+  for _, grade in ipairs(grades) do
     local direct = stock.amount(main, slot.name, grade)
     local nearby = stock.amount(side, slot.name, grade)
-    local direct_text = short_count(direct) .. quality_icon(grade)
-    if grade ~= slot.grade then
-      direct_text = dim_text(direct_text)
-    end
-    lines[#lines + 1] = "\n" .. direct_text
-    if nearby > 0 then
-      lines[#lines] = lines[#lines] .. " " .. dim_text("+" .. short_count(nearby) .. quality_icon(grade))
+    local text = quality_count_text(player, remote_view, direct, nearby, grade)
+    if text then
+      if #lines > 0 then
+        lines[#lines + 1] = "\n"
+      end
+      lines[#lines + 1] = text
     end
   end
-  add_item_details(lines, slot)
 
-  if setting(player, names.setting.hint_keys) then
-    lines[#lines + 1] = "\n" .. dim_text("cycle-quality-up / cycle-quality-down")
+  if show_controls then
+    if #lines > 0 then
+      lines[#lines + 1] = "\n"
+    end
+    lines[#lines + 1] = dim_text(quality_control_hint(player))
+  end
+  if #lines == 0 then
+    return nil
   end
   local text = table.concat(lines)
   if cache then
@@ -435,6 +774,133 @@ local function quality_sprite(grade)
   return names.mod .. "_quality_" .. quality.name
 end
 
+local function signal_sprite(icon)
+  local signal = icon and icon.signal
+  if not signal or not signal.name then
+    return nil
+  end
+  if signal.type == "fluid" then
+    return "fluid/" .. signal.name
+  end
+  if signal.type == "virtual" or signal.type == "virtual-signal" then
+    return "virtual-signal/" .. signal.name
+  end
+  return "item/" .. signal.name
+end
+
+local function collect_blueprint_icon_entries(slot)
+  local entries = {}
+  if type(slot.icons) ~= "table" then
+    return entries
+  end
+  for _, icon in ipairs(slot.icons) do
+    local sprite = signal_sprite(icon)
+    if sprite then
+      entries[#entries + 1] = {
+        sprite = sprite,
+        quality = normalize_grade(icon.signal and icon.signal.quality),
+      }
+      if #entries >= 4 then
+        break
+      end
+    end
+  end
+  return entries
+end
+
+local function blueprint_icon_layout(slot, count)
+  local tool_name = tool_item_name(slot)
+  local icon_size = BLUEPRINT_ICON_SIZE
+  local positions
+  if tool_name == "blueprint-book" then
+    icon_size = BOOK_BLUEPRINT_ICON_SIZE
+    if count == 1 then
+      positions = { { x = 14, y = 14 } }
+    elseif count == 2 then
+      positions = { { x = 8, y = 14 }, { x = 19, y = 14 } }
+    else
+      positions = { { x = 8, y = 8 }, { x = 19, y = 8 }, { x = 8, y = 19 }, { x = 19, y = 19 } }
+    end
+  elseif count == 1 then
+    positions = { { x = 12, y = 12 } }
+  elseif count == 2 then
+    positions = { { x = 8, y = 12 }, { x = 24, y = 12 } }
+  else
+    positions = { { x = 8, y = 4 }, { x = 24, y = 4 }, { x = 8, y = 20 }, { x = 24, y = 20 } }
+  end
+  return { positions = positions, icon_size = icon_size }
+end
+
+local function add_blueprint_signal_icon(cell, entry, position, layout)
+  local overlay = cell.add {
+    type = "flow",
+    direction = "horizontal",
+    ignored_by_interaction = true,
+  }
+  overlay.style.width = SLOT_SIZE
+  overlay.style.height = SLOT_SIZE
+  overlay.style.left_padding = position.x
+  overlay.style.top_padding = position.y
+
+  local icon = overlay.add {
+    type = "sprite-button",
+    sprite = entry.sprite,
+    quality = entry.quality,
+    style = "expend_toolbar_preview_button",
+    ignored_by_interaction = true,
+  }
+  icon.style.size = layout.icon_size
+end
+
+local function add_blueprint_icon_overlay(cell, slot)
+  local entries = collect_blueprint_icon_entries(slot)
+  if #entries == 0 then
+    return
+  end
+
+  local layout = blueprint_icon_layout(slot, #entries)
+  for index, entry in ipairs(entries) do
+    local position = layout.positions[index]
+    if position then
+      add_blueprint_signal_icon(cell, entry, position, layout)
+    end
+  end
+end
+
+local function add_slot_quality_overlay(cell, bar_id, position, slot)
+  if not has_inventory_count(slot) then
+    return
+  end
+  local quality = quality_sprite(slot.grade)
+  if not quality then
+    return
+  end
+  local overlay = cell.add {
+    type = "flow",
+    name = slot_quality_name(bar_id, position),
+    direction = "horizontal",
+    style = "expend_toolbar_quality_box",
+    ignored_by_interaction = true,
+  }
+  overlay.add {
+    type = "sprite",
+    sprite = quality,
+    style = "expend_toolbar_quality",
+    ignored_by_interaction = true,
+  }
+end
+
+local function refresh_slot_quality_overlay(cell, bar_id, position, slot)
+  if not cell or not cell.valid then
+    return
+  end
+  local old = cell[slot_quality_name(bar_id, position)]
+  if old and old.valid then
+    old.destroy()
+  end
+  add_slot_quality_overlay(cell, bar_id, position, slot)
+end
+
 local function clone_slot(slot)
   if not slot or not slot.name then
     return nil
@@ -449,6 +915,8 @@ local function clone_slot(slot)
     entity_count = slot.entity_count,
     active_index = slot.active_index,
     contents_size = slot.contents_size,
+    record_link = slot.record_link,
+    icons = clone_icons(slot.icons),
   }
 end
 
@@ -461,7 +929,13 @@ local function clone_slots(slots)
 end
 
 local function same_slot(a, b)
-  return a and b and a.name == b.name and normalize_grade(a.grade) == normalize_grade(b.grade) and (a.data or "") == (b.data or "")
+  return a and b
+      and a.name == b.name
+      and (a.kind or "item") == (b.kind or "item")
+      and normalize_grade(a.grade) == normalize_grade(b.grade)
+      and (a.data or "") == (b.data or "")
+      and record_link_key(a.record_link) == record_link_key(b.record_link)
+      and icons_key(a.icons) == icons_key(b.icons)
 end
 
 local function same_named_slot(a, b)
@@ -503,7 +977,7 @@ local function ghost_slot(player)
   if not name then
     return nil
   end
-  return { name = name, grade = normalize_grade(ghost.quality) }
+  return { kind = "item", name = name, grade = normalize_grade(ghost.quality) }
 end
 
 local function cursor_slot(player, include_record_data)
@@ -512,7 +986,7 @@ local function cursor_slot(player, include_record_data)
   if stack_slot then
     return stack_slot
   end
-  local record_slot = slot_from_record(player, safe_value(function() return player.cursor_record end), include_record_data)
+  local record_slot = slot_from_record(player, safe_value(function() return player.cursor_record end))
   if record_slot then
     return record_slot
   end
@@ -644,6 +1118,13 @@ local function clear_cursor(player)
   player.cursor_ghost = nil
 end
 
+local function mark_cursor_temporary(player)
+  safe_value(function()
+    player.cursor_stack_temporary = true
+    return true
+  end)
+end
+
 local function clear_move_state(state)
   state.moving = nil
 end
@@ -662,22 +1143,37 @@ local function sync_cursor_state(player, state)
 end
 
 local function set_cursor_ghost(player, slot)
-  if (slot.kind == "exported-stack" or slot.kind == "record") and slot.data and player.cursor_stack and player.cursor_stack.valid then
-    clear_cursor(player)
-    local ok, result = pcall(function() return player.cursor_stack.import_stack(slot.data) end)
-    if ok and result == 0 then
-      return true
-    end
-  end
-  if slot.kind == "record" then
-    if player.cursor_stack and player.cursor_stack.valid and prototypes.item[slot.name] then
+  if slot.kind == "record" and slot.record_link and player.cursor_stack and player.cursor_stack.valid then
+    local record = record_from_link(player, slot.record_link)
+    local data = record_matches_slot(player, record, slot) and safe_value(function() return record.export_record() end)
+    if data then
       clear_cursor(player)
-      if player.cursor_stack.set_stack({ name = slot.name, count = 1, quality = normalize_grade(slot.grade) }) then
+      local ok = pcall(function() return player.cursor_stack.import_stack(data) end)
+      if ok and player.cursor_stack.valid_for_read then
+        mark_cursor_temporary(player)
         return true
       end
     end
   end
-  player.cursor_ghost = { name = slot.name, quality = normalize_grade(slot.grade) }
+  if slot.kind == "exported-stack" and slot.data and player.cursor_stack and player.cursor_stack.valid then
+    clear_cursor(player)
+    local ok = pcall(function() return player.cursor_stack.import_stack(slot.data) end)
+    if ok and player.cursor_stack.valid_for_read then
+      mark_cursor_temporary(player)
+      return true
+    end
+  end
+  if is_blueprint_tool(slot) then
+    local item_name = tool_item_name(slot)
+    if player.cursor_stack and player.cursor_stack.valid and prototypes.item[item_name] then
+      clear_cursor(player)
+      if player.cursor_stack.set_stack({ name = item_name, count = 1, quality = normalize_grade(slot.grade) }) then
+        mark_cursor_temporary(player)
+        return true
+      end
+    end
+  end
+  player.cursor_ghost = { name = tool_item_name(slot) or slot.name, quality = normalize_grade(slot.grade) }
   return true
 end
 
@@ -737,28 +1233,16 @@ local function draw_slot(parent, player, state, bar, page, page_index, position,
       type = "sprite-button",
       name = slot_name(bar.id, position),
       sprite = item_sprite(slot.name),
-      number = tonumber(cell_text(main, slot.name, normalize_grade(slot.grade))) or nil,
+      number = tonumber(slot_count_text(main, slot)) or nil,
+      elem_tooltip = slot_elem_tooltip(slot),
       tooltip = hint_text(player, main, side, slot, hint_cache),
       style = chosen and "expend_toolbar_slot_selected" or "expend_toolbar_slot",
       tags = { mod = names.mod, act = names.action.take_item, bar = bar.id, page = page_index, pos = position },
       mouse_button_filter = { "left", "right", "middle" },
       raise_hover_events = true,
     }
-    local quality = quality_sprite(slot.grade)
-    if quality then
-      local overlay = cell.add {
-        type = "flow",
-        direction = "horizontal",
-        style = "expend_toolbar_quality_box",
-        ignored_by_interaction = true,
-      }
-      overlay.add {
-        type = "sprite",
-        sprite = quality,
-        style = "expend_toolbar_quality",
-        ignored_by_interaction = true,
-      }
-    end
+    add_blueprint_icon_overlay(cell, slot)
+    add_slot_quality_overlay(cell, bar.id, position, slot)
   elseif moving or state.copying or cursor_slot(player) then
     cell.add {
       type = "sprite-button",
@@ -1004,7 +1488,7 @@ function M.new_toolbar(player)
   M.paint(player)
 end
 
-function M.paint(player)
+function M.paint(player, reuse_snapshot)
   M.ensure_storage()
   for _, child in pairs(player.gui.screen.children) do
     local tag = read_tags(child)
@@ -1022,11 +1506,7 @@ function M.paint(player)
     return
   end
 
-  local wanted = wanted_items(state, player)
-  local main, side = {}, {}
-  if wanted then
-    main, side = stock.snapshot(player, wanted)
-  end
+  local main, side = snapshot_for_paint(player, state, reuse_snapshot)
   local hint_cache = {}
   for order, bar in ipairs(state.bars) do
     redraw_bar(player, order, bar, main, side, hint_cache, state.moving)
@@ -1055,7 +1535,7 @@ function M.needs_polling(player)
     return true
   end
   local values = settings.get_player_settings(player)
-  return values[names.setting.network_on].value and state.focus ~= nil
+  return values[names.setting.network_on].value
 end
 
 local function update_element(player, state, element, main, side, hint_cache)
@@ -1065,13 +1545,50 @@ local function update_element(player, state, element, main, side, hint_cache)
     local page = bar and bar.pages[tag.page or bar.active or 1] or nil
     local slot = page and page.slots[tag.pos] or nil
     if slot and slot.name and stock.item_known(slot.name) then
-      element.number = tonumber(cell_text(main, slot.name, slot.grade)) or nil
+      element.number = tonumber(slot_count_text(main, slot)) or nil
+      element.elem_tooltip = slot_elem_tooltip(slot)
       element.tooltip = hint_text(player, main, side, slot, hint_cache)
     end
   end
   for _, child in pairs(element.children or {}) do
     update_element(player, state, child, main, side, hint_cache)
   end
+end
+
+local function update_focused_element(player, state, focus, slot)
+  local main, side, ok = cached_snapshot(state)
+  if not ok then
+    main, side = fresh_snapshot(player, state)
+  end
+  local found = false
+  local function visit(element)
+    local tag = read_tags(element)
+    if tag.mod == names.mod
+        and tag.act == names.action.take_item
+        and tag.bar == focus.bar
+        and tag.page == focus.page
+        and tag.pos == focus.pos then
+      element.number = tonumber(slot_count_text(main, slot)) or nil
+      element.elem_tooltip = slot_elem_tooltip(slot)
+      element.tooltip = hint_text(player, main, side, slot, {})
+      refresh_slot_quality_overlay(element.parent, focus.bar, focus.pos, slot)
+      found = true
+      return
+    end
+    for _, child in pairs(element.children or {}) do
+      visit(child)
+      if found then
+        return
+      end
+    end
+  end
+  for _, child in pairs(player.gui.screen.children) do
+    visit(child)
+    if found then
+      break
+    end
+  end
+  return found
 end
 
 function M.refresh(player)
@@ -1086,9 +1603,10 @@ function M.refresh(player)
   end
   local wanted = wanted_items(state, player)
   if not wanted then
+    remember_snapshot(state, nil, {}, {})
     return
   end
-  local main, side = stock.snapshot(player, wanted)
+  local main, side = fresh_snapshot(player, state)
   local hint_cache = {}
   local touched = false
   for _, child in pairs(player.gui.screen.children) do
@@ -1306,15 +1824,6 @@ function M.remember_hover(event)
     return
   end
   state.focus = { bar = tag.bar, page = tag.page, pos = tag.pos }
-  local bar = nth_bar(state, tag.bar)
-  local page = bar and bar.pages[tag.page or bar.active or 1] or nil
-  local slot = page and page.slots[tag.pos] or nil
-  if slot and slot.name then
-    -- 普通视图物流网络只影响提示，悬停时即时刷新这一格即可。
-    local main, side = stock.snapshot(player, { [slot.name] = true })
-    event.element.number = tonumber(cell_text(main, slot.name, slot.grade)) or nil
-    event.element.tooltip = hint_text(player, main, side, slot, {})
-  end
 end
 
 function M.forget_hover(event)
@@ -1475,10 +1984,12 @@ function M.adjust_grade(player, step)
   local bar = focus and nth_bar(state, focus.bar) or nil
   local page = bar and bar.pages[focus.page or bar.active or 1] or nil
   local slot = page and page.slots[focus.pos] or nil
-  if slot and slot.name then
+  if slot and slot.name and has_inventory_count(slot) then
     local grade = normalize_grade(slot.grade)
     slot.grade = step > 0 and stock.raise_grade(grade) or stock.lower_grade(grade)
-    M.paint(player)
+    if not update_focused_element(player, state, focus, slot) then
+      M.paint(player, true)
+    end
   end
 end
 
@@ -1504,7 +2015,10 @@ function M.take(player, slot)
   if player.cursor_stack and player.cursor_stack.valid_for_read then
     return false
   end
-  if player.controller_type ~= defines.controllers.remote and slot.kind == "item" and stock.lift_to_cursor(player, slot) then
+  if player.controller_type ~= defines.controllers.remote
+      and slot.kind == "item"
+      and has_inventory_count(slot)
+      and stock.lift_to_cursor(player, slot) then
     player.play_sound { path = "utility/inventory_click" }
     return true
   end
