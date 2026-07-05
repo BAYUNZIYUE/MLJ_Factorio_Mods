@@ -14,6 +14,7 @@ mlj_factorio_mods/
 ├── ModZips/                    # packaged artifacts only; do not edit as source
 ├── tests/                      # long-lived regression guards, when present
 ├── tools/blueprint_lab/        # offline blueprint analysis/generation tooling
+├── references/mods/            # local third-party reference mods; ignored, read-only
 ├── DynamicInventory/           # runtime/settings inventory resizing mod
 ├── expend-toolbar/             # runtime/data/settings custom toolbar mod
 ├── py_quick_start/             # runtime/settings starter-items mod
@@ -28,6 +29,7 @@ mlj_factorio_mods/
 |------|----------|-------|
 | Pack or validate all mods | `pack_mods.py` | Source of truth for discovery, ignored dirs, entrypoint names, zip naming, and opening `ModZips/` |
 | Offline blueprint analysis/generation | `tools/blueprint_lab/` | Decode/re-encode blueprint strings, scan local blueprint corpora, record layout metrics, and generate seed blueprints outside any mod package |
+| Third-party reference mods | `references/mods/` | Local read-only reference code; ignored by Git and not a package input |
 | Runtime inventory logic | `DynamicInventory/` | Runtime/settings mod; no `data.lua` |
 | Custom toolbar logic | `expend-toolbar/` | Runtime/data/settings mod; compact runtime modules live directly under `src/` as `names.lua`, `stock.lua`, `panel.lua`, and `runtime.lua` |
 | Starter item logic | `py_quick_start/` | Runtime/settings mod; no `data.lua` |
@@ -132,6 +134,10 @@ copy the contents into the archive root.
   by domain or mod name. Do not place test files inside any mod `src/` tree.
 - Offline repository tools belong under `tools/`. They are not Factorio runtime
   mod files and must not be copied into any `<mod>/src/` tree.
+- Third-party reference mods belong under `references/mods/`. Keep them out of
+  Git and do not treat them as package inputs, authored source, or build
+  dependencies unless a future task explicitly promotes a specific file into an
+  owned mod.
 - One-off investigation scripts are temporary. Put them under `.codex/` while
   working, or remove them before handoff if they are not useful regression
   guards.
@@ -169,9 +175,11 @@ python3 pack_mods.py
 ## BUILD AND DEBUG DEPLOYMENT
 
 - Run `python3 pack_mods.py` to package every discovered mod.
-- Confirm the target artifact name under `ModZips/`.
+- Confirm the target artifact name under `ModZips/` and, when the Windows
+  Factorio mods directory exists, under `%AppData%\Factorio\mods`.
 - `pack_mods.py` also performs debug folder deployment for every successfully
-  packaged mod using this rule: if `%AppData%\Factorio\mods` already contains
+  packaged mod. It first copies the generated zip to `%AppData%\Factorio\mods`,
+  then applies this folder rule: if `%AppData%\Factorio\mods` already contains
   `{info.name}_*.zip`, skip copying the folder; otherwise copy the unpacked
   `{info.name}_{info.version}/` folder for the current package.
 - The folder deployed to `%AppData%\Factorio\mods` must be the archive root,
@@ -213,8 +221,8 @@ python3 pack_mods.py
 ## NOTES
 
 - `pack_mods.py` ignores `.git`, `.idea`, `.vscode`, `.vs`, `__pycache__`,
-  `bin`, `obj`, `tests`, `AGENTS.md`, `README.md`, plus `.zip` and `.psd`
-  files.
+  `bin`, `obj`, `tests`, `references`, `AGENTS.md`, `README.md`, plus `.zip`
+  and `.psd` files.
 - There is no repo-wide CI workflow in this checkout. Use the root `tests/`
   guards plus `python3 pack_mods.py` as the baseline validation unless a touched
   mod adds another dedicated local check.

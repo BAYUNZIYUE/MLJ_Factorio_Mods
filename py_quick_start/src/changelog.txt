@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 3.0.3
+Date: 2026-06-28
+  Changes:
+    - 声明支持 Factorio 2.1。
+    - 将标题和描述改为由 locale 接管，并补充推荐辅助模组。
+    - Marked the mod as compatible with Factorio 2.1.
+    - Moved title and description into locale and added recommended helper mods.
+---------------------------------------------------------------------------------------------------
 Version: 3.0.2
 Date: 2025-02-14
   Changes:

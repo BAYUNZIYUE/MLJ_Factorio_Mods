@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.0.5
+Date: 2026-06-28
+  Changes:
+    - 声明支持 Factorio 2.1。
+    - 补齐英文标题和模组描述的 locale。
+    - Marked the mod as compatible with Factorio 2.1.
+    - Added English locale entries for title and mod description.
+---------------------------------------------------------------------------------------------------
 Version: 1.0.4
 Date: 2025-02-15
   Changes:

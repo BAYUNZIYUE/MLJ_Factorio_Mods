@@ -1,7 +1,7 @@
 {
     "name": "ups_saving_quality_ships",
-    "version": "1.1.4",
-    "factorio_version": "2.0",
+    "version": "1.1.5",
+    "factorio_version": "2.1",
     "title": "UPS Saving Quality Ships",
     "author": "MengLei",
     "description": "Modify the logic of cargo interaction between a spaceship and the ground so as to simulate multiple identical spaceships operating at the same time to increase the ups.\n修改飞船与地面的货物交互逻辑，从而模拟多个相同的飞船同时运行的情形，以提高ups。",
@@ -10,6 +10,7 @@
     "dependencies": [
         "base",
         "space-age",
+        "quality",
         "? more-quality-scaling"
     ]
 }

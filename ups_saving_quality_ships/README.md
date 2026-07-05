@@ -10,6 +10,8 @@
 
 UPS Saving Quality Ships modifies cargo interaction between a spaceship and the ground to simulate multiple identical spaceships operating at the same time and improve UPS.
 
+This mod requires Space Age and the quality mod. In Factorio 2.1, Space Age can be enabled without quality, but this mod needs quality levels to calculate the ship multiplier and edit hub quality in blueprints.
+
 ## Features
 
 - Uses the quality level of the space platform hub as the simulation multiplier: ground-to-space cargo is divided by the multiplier on arrival, and space-to-ground cargo is multiplied by the multiplier before delivery.
@@ -112,6 +114,8 @@ If you have any comments or suggestions, please share them in the [Factorio disc
 ## 概览
 
 UPS 友好型品质飞船会修改飞船与地面的货物交互逻辑，从而模拟多个相同的飞船同时运行，以提高 UPS。
+
+本模组需要 Space Age 和 quality 模组。Factorio 2.1 中 Space Age 可以在不启用 quality 的情况下运行，但本模组需要品质等级来计算飞船倍率，并修改蓝图中的枢纽品质。
 
 ## 功能简介
 

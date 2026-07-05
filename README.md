@@ -20,6 +20,10 @@
 |------|------|
 | `tools/blueprint_lab/` | 离线蓝图分析和生成工具；用于解码蓝图字符串、扫描本地蓝图语料、提取紧凑布局经验，并生成第一版矩形黑盒种子蓝图 |
 
+## 本地参考代码
+
+`references/mods/` 可以存放第三方参考模组源码。这些目录只用于查阅和对照，不是本仓库自己的可打包模组，不参与 `pack_mods.py` 发现，也不会进入 Git。
+
 ## 目录约定
 
 每个可打包模组都使用同一种源码布局：
@@ -48,7 +52,7 @@
 python3 pack_mods.py
 ```
 
-产物会写入 `ModZips/`，文件名格式为：
+产物会写入 `ModZips/`，并在 Windows Factorio mods 目录存在时复制一份 zip 到该目录。文件名格式为：
 
 ```text
 {info.name}_{info.version}.zip
@@ -64,7 +68,7 @@ python3 pack_mods.py
 
 ## 调试部署
 
-打包脚本会按模组自动处理调试文件夹部署：
+打包脚本会按模组自动处理 zip 复制和调试文件夹部署：
 
 ```text
 %AppData%\Factorio\mods
@@ -72,6 +76,7 @@ python3 pack_mods.py
 
 注意事项：
 
+- 成功打包后，脚本会把本轮生成的 `{info.name}_{info.version}.zip` 复制到该目录。
 - 如果该目录已有 `{info.name}_*.zip`，脚本会跳过该模组的文件夹部署。
 - 如果该目录没有 `{info.name}_*.zip`，脚本会复制本轮打包生成的 `{info.name}_{info.version}/` 文件夹。
 - 不要直接把源码目录 `src/` 放进 Factorio mods 目录。
