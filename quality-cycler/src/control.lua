@@ -1,6 +1,6 @@
 local prefix = "quality-cycler-"
 local mapper_sides = { "to" }
-local debug_enabled = true
+local debug_enabled = false
 local ignore_list_setting_name = prefix .. "ignore-list"
 
 local function new_result()
@@ -608,18 +608,6 @@ local function get_upgrade_planner_candidate(player)
         return cursor_record, "cursor_record", cursor_record.valid_for_write
     end
 
-    local opened = player.opened
-    if opened and safe_value(function() return opened.type end) == "upgrade-planner" then
-        return opened, "opened_record", safe_value(function() return opened.valid_for_write end) == "true"
-    end
-
-    if opened
-            and safe_value(function() return opened.valid end) == "true"
-            and safe_value(function() return opened.valid_for_read end) == "true"
-            and safe_value(function() return opened.is_upgrade_item end) == "true" then
-        return opened, "opened_stack", true
-    end
-
     return nil, nil, false
 end
 
@@ -632,18 +620,6 @@ local function get_blueprint_candidate(player)
     local cursor_record = player.cursor_record
     if cursor_record and cursor_record.type == "blueprint" then
         return cursor_record, "cursor_record", cursor_record.valid_for_write
-    end
-
-    local opened = player.opened
-    if opened and safe_value(function() return opened.type end) == "blueprint" then
-        return opened, "opened_record", safe_value(function() return opened.valid_for_write end) == "true"
-    end
-
-    if opened
-            and safe_value(function() return opened.valid end) == "true"
-            and safe_value(function() return opened.valid_for_read end) == "true"
-            and safe_value(function() return opened.is_blueprint end) == "true" then
-        return opened, "opened_stack", true
     end
 
     return nil, nil, false
@@ -730,18 +706,6 @@ local function get_blueprint_book_candidate(player)
         return cursor_record, "cursor_record", cursor_record.valid_for_write
     end
 
-    local opened = player.opened
-    if opened and safe_value(function() return opened.type end) == "blueprint-book" then
-        return opened, "opened_record", safe_value(function() return opened.valid_for_write end) == "true"
-    end
-
-    if opened
-            and safe_value(function() return opened.valid end) == "true"
-            and safe_value(function() return opened.valid_for_read end) == "true"
-            and safe_value(function() return opened.is_blueprint_book end) == "true" then
-        return opened, "opened_stack", true
-    end
-
     return nil, nil, false
 end
 
@@ -770,7 +734,9 @@ local function on_quality_cycle(event)
         return
     end
 
-    debug_event_context(event, player)
+    if debug_enabled then
+        debug_event_context(event, player)
+    end
     local ignored_names = build_ignored_names(player)
 
     local upgrade_planner, source, writable = get_upgrade_planner_candidate(player)
@@ -850,12 +816,7 @@ local function on_quality_cycle(event)
         return
     end
 
-    debug_log("no upgrade planner, blueprint, or blueprint book candidate accepted")
-    player.print(localize_text(
-            player,
-            "请先手持蓝图、蓝图册或绿图，或选中可写的公共蓝图/绿图记录；然后使用品质上/下切换操作。我的蓝图中的记录不可直接写入，请先移动到背包或公共蓝图。",
-            "Hold a blueprint, blueprint book, or upgrade planner, or select a writable Public blueprint/upgrade-planner record; then use the quality up/down controls. Records in My blueprints are read-only, so move them to inventory or Public blueprints first."
-    ))
+    return
 end
 
 script.on_event(prefix .. "cycle-quality-up", on_quality_cycle)

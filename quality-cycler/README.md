@@ -20,11 +20,12 @@ Blueprint & Upgrade Planner Quality Cycler lets you raise or lower qualities ins
 
 ### Basic workflow
 
-- Put a blueprint, blueprint book, or upgrade planner in your inventory, or move it to Public blueprints.
-- Hold the item on the cursor or select a writable Public blueprint or upgrade-planner record.
-- Use the controls bound to quality up/down; quality up raises eligible targets by one step, and quality down lowers eligible targets by one step.
+- Put a blueprint, blueprint book, or upgrade planner in your inventory, or pick a writable Public blueprint record onto the cursor.
+- Hold the item or record on the cursor, then use the controls bound to quality up/down.
+- Quality up raises eligible targets by one step, and quality down lowers eligible targets by one step.
+- If your cursor is empty or holding something else, this mod ignores the quality wheel input without printing a warning.
 - Records in My blueprints are read-only to mods, so move them to inventory or Public blueprints before using this mod.
-- Opening a blueprint or upgrade-planner window and hovering a single row does not expose enough writable row information to mods, so this mod edits the writable item or record as a whole.
+- Opening a blueprint or upgrade-planner window and hovering a single row does not expose enough writable row information to mods, so the target must be held on the cursor.
 
 ### What gets changed
 
@@ -80,11 +81,12 @@ If you have any comments or suggestions, please share them in the [Factorio disc
 
 ### 基本流程
 
-- 将蓝图、蓝图册或绿图放在背包中，或移动到公共蓝图。
-- 手持该物品，或选中可写的公共蓝图/绿图记录。
-- 使用控制设置里绑定的品质上/下切换操作；品质上会让可修改目标升一档，品质下会让可修改目标降一档。
+- 将蓝图、蓝图册或绿图放在背包中，或把可写的公共蓝图记录拿到光标上。
+- 光标手持该物品或记录后，再使用控制设置里绑定的品质上/下切换操作。
+- 品质上会让可修改目标升一档，品质下会让可修改目标降一档。
+- 如果光标为空，或者手持的不是蓝图、蓝图册或绿图，本模组会忽略这次品质滚轮输入，不再弹出提示。
 - “我的蓝图”中的记录对模组只读，需要先移动到背包或公共蓝图再使用。
-- 打开蓝图或绿图窗口并悬停单行时，游戏不会向模组暴露足够的可写行信息，因此本模组会整体修改当前可写物品或记录。
+- 打开蓝图或绿图窗口并悬停单行时，游戏不会向模组暴露足够的可写行信息，因此目标必须被拿在光标上。
 
 ### 哪些对象会被修改
 

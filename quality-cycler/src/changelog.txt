@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.0.2
+Date: 2026-06-28
+  Changes:
+    - Declared Factorio 2.1 compatibility.
+    - Preserved the hard dependency on the quality mod for blueprint and upgrade-planner quality editing.
+---------------------------------------------------------------------------------------------------
 Version: 1.0.1
 Date: 2026-05-17
   Bugfixes:

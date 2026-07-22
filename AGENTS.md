@@ -11,9 +11,11 @@ those sources into loadable Factorio archives under `ModZips/`.
 ```text
 mlj_factorio_mods/
 ├── pack_mods.py                # discovers <mod>/src/info.json and packs all mods
+├── publish_mods.py             # explicit Mod Portal release script; never called by pack_mods.py
 ├── ModZips/                    # packaged artifacts only; do not edit as source
 ├── tests/                      # long-lived regression guards, when present
 ├── tools/blueprint_lab/        # offline blueprint analysis/generation tooling
+├── references/mods/            # local third-party reference mods; ignored, read-only
 ├── DynamicInventory/           # runtime/settings inventory resizing mod
 ├── expend-toolbar/             # runtime/data/settings custom toolbar mod
 ├── py_quick_start/             # runtime/settings starter-items mod
@@ -27,7 +29,9 @@ mlj_factorio_mods/
 | Task | Location | Notes |
 |------|----------|-------|
 | Pack or validate all mods | `pack_mods.py` | Source of truth for discovery, ignored dirs, entrypoint names, zip naming, and opening `ModZips/` |
+| Publish releases to Mod Portal | `publish_mods.py` | Explicit release-only tool; compares local `src/info.json` versions with Mod Portal releases and uploads only with `--execute` |
 | Offline blueprint analysis/generation | `tools/blueprint_lab/` | Decode/re-encode blueprint strings, scan local blueprint corpora, record layout metrics, and generate seed blueprints outside any mod package |
+| Third-party reference mods | `references/mods/` | Local read-only reference code; ignored by Git and not a package input |
 | Runtime inventory logic | `DynamicInventory/` | Runtime/settings mod; no `data.lua` |
 | Custom toolbar logic | `expend-toolbar/` | Runtime/data/settings mod; compact runtime modules live directly under `src/` as `names.lua`, `stock.lua`, `panel.lua`, and `runtime.lua` |
 | Starter item logic | `py_quick_start/` | Runtime/settings mod; no `data.lua` |
@@ -132,6 +136,10 @@ copy the contents into the archive root.
   by domain or mod name. Do not place test files inside any mod `src/` tree.
 - Offline repository tools belong under `tools/`. They are not Factorio runtime
   mod files and must not be copied into any `<mod>/src/` tree.
+- Third-party reference mods belong under `references/mods/`. Keep them out of
+  Git and do not treat them as package inputs, authored source, or build
+  dependencies unless a future task explicitly promotes a specific file into an
+  owned mod.
 - One-off investigation scripts are temporary. Put them under `.codex/` while
   working, or remove them before handoff if they are not useful regression
   guards.
@@ -143,6 +151,18 @@ copy the contents into the archive root.
   `pack_mods.py` checks `%AppData%\Factorio\mods` for `{info.name}_*.zip`. If
   a zip exists, skip folder deployment for that mod. If no zip exists, copy the
   unpacked `{info.name}_{info.version}/` folder for the current package.
+- Mod Portal publishing is a separate explicit release action. Do not call
+  `publish_mods.py` from `pack_mods.py`, tests, automatic packaging, or local
+  debug deployment.
+- `publish_mods.py` defaults to dry-run. Real uploads require explicit
+  `--execute` plus `FACTORIO_MOD_PORTAL_TOKEN` in the environment.
+- Never commit Factorio API keys, bearer tokens, `.env` files, or publish logs
+  that include credentials.
+- First-time Mod Portal creation must be explicit with `--create`; otherwise a
+  missing remote mod is an error, not an automatic publish.
+- Before running a real `publish_mods.py --execute`, verify that the matching
+  `ModZips/{info.name}_{info.version}.zip` was freshly produced and that the
+  user has explicitly asked to publish.
 
 ## ANTI-PATTERNS
 
@@ -163,19 +183,36 @@ copy the contents into the archive root.
 ```bash
 python3 tests/verify_blueprint_lab.py
 python3 tests/verify_pack_mods_ignores_non_runtime_files.py
+python3 tests/verify_publish_mods.py
 python3 pack_mods.py
 ```
 
 ## BUILD AND DEBUG DEPLOYMENT
 
 - Run `python3 pack_mods.py` to package every discovered mod.
-- Confirm the target artifact name under `ModZips/`.
+- Confirm the target artifact name under `ModZips/` and, when the Windows
+  Factorio mods directory exists, under `%AppData%\Factorio\mods`.
 - `pack_mods.py` also performs debug folder deployment for every successfully
-  packaged mod using this rule: if `%AppData%\Factorio\mods` already contains
+  packaged mod. It first copies the generated zip to `%AppData%\Factorio\mods`,
+  then applies this folder rule: if `%AppData%\Factorio\mods` already contains
   `{info.name}_*.zip`, skip copying the folder; otherwise copy the unpacked
   `{info.name}_{info.version}/` folder for the current package.
 - The folder deployed to `%AppData%\Factorio\mods` must be the archive root,
   for example `{info.name}_{info.version}/`; do not deploy raw `src/` directly.
+
+## MOD PORTAL RELEASES
+
+- Run `python3 publish_mods.py --dry-run` to compare local mod versions with
+  the Mod Portal without uploading.
+- Run `python3 publish_mods.py --mod <info.name> --dry-run` to inspect a single
+  mod before release.
+- Only run `FACTORIO_MOD_PORTAL_TOKEN=... python3 publish_mods.py --mod <info.name> --execute`
+  when the user explicitly asks to publish that mod.
+- Use `--create` only for first-time Mod Portal publication of a missing mod.
+- `publish_mods.py` does not build zips. Run `python3 pack_mods.py` first when a
+  fresh archive is needed, then confirm the expected `ModZips/` artifact exists.
+- `--require-clean` is available when the release should fail on any dirty Git
+  worktree state; without it, `--execute` prints dirty paths as a warning.
 
 ## GIT PRACTICES
 
@@ -213,10 +250,11 @@ python3 pack_mods.py
 ## NOTES
 
 - `pack_mods.py` ignores `.git`, `.idea`, `.vscode`, `.vs`, `__pycache__`,
-  `bin`, `obj`, `tests`, `AGENTS.md`, `README.md`, plus `.zip` and `.psd`
-  files.
+  `bin`, `obj`, `tests`, `references`, `AGENTS.md`, `README.md`, plus `.zip`
+  and `.psd` files.
 - There is no repo-wide CI workflow in this checkout. Use the root `tests/`
   guards plus `python3 pack_mods.py` as the baseline validation unless a touched
-  mod adds another dedicated local check.
+  mod adds another dedicated local check. Release-tool changes should also run
+  `python3 tests/verify_publish_mods.py`.
 - If a change may affect save compatibility, migration behavior, event legality,
   or Factorio API usage, re-check the official Factorio docs before editing.

@@ -40,10 +40,19 @@ local function wanted_names(wanted)
   return list
 end
 
-local function sane_quality(quality)
-  if type(quality) == "table" then
-    quality = quality.name
+local function quality_name(quality)
+  if type(quality) == "string" then
+    return quality
   end
+  local ok, name = pcall(function() return quality.name end)
+  if ok then
+    return name
+  end
+  return nil
+end
+
+local function sane_quality(quality)
+  quality = quality_name(quality)
   if not quality or quality == "" or quality == "quality-unknown" or not prototypes.quality[quality] then
     return "normal"
   end
@@ -91,7 +100,7 @@ end
 
 local function pour_stack(box, stack, wanted)
   if stack and stack.valid_for_read then
-    add_bucket(box, { name = stack.name, quality = stack.quality and stack.quality.name or "normal", count = stack.count }, wanted)
+    add_bucket(box, { name = stack.name, quality = stack.quality, count = stack.count }, wanted)
   end
 end
 
@@ -111,12 +120,11 @@ local function pour_networks(box, player, skip_character_network, wanted)
   end
   local wanted_list = wanted and wanted_names(wanted) or nil
   local grades = quality_order()
-  local directed_queries = wanted_list and (#wanted_list * math.max(#grades, 1)) or 0
   local own_network = skip_character_network and player.character and player.character.logistic_network or nil
   for _, network in ipairs(player.surface.find_logistic_networks_by_construction_area(player.position, player.force)) do
     if network ~= own_network then
-      -- 少量物品走定向查询；大量物品保留一次全量读取，避免网络调用次数反而膨胀。
-      if wanted_list and directed_queries <= 96 then
+      if wanted_list then
+        -- 工具栏只关心已保存物品；逐品质查询可避免 get_contents() 把品质信息丢给 tooltip。
         for _, name in ipairs(wanted_list) do
           pour_network_item(box, network, name, grades)
         end

@@ -471,7 +471,7 @@ local function write_missing_materials_section(player, requests)
 
   section.active = true
   for slot_index, request in ipairs(request_list) do
-    section.set_slot(slot_index, build_missing_material_slot(request))
+    section.set_slot(build_missing_material_slot(request), slot_index)
   end
 
   for slot_index = #request_list + 1, #section.filters do

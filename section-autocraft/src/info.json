@@ -1,13 +1,13 @@
 {
-  "name": "section-autocraft",
-  "version": "1.1.0",
-  "factorio_version": "2.0",
-  "title": "Section Autocraft",
-  "author": "MengLei",
-  "description": "Automatically hand craft items.\n\u81ea\u52a8\u624b\u6413\u7269\u54c1\u3002",
-  "contact": "https://github.com/MengLeiFudge/MLJ_Factorio_Mods",
-  "homepage": "https://github.com/MengLeiFudge/MLJ_Factorio_Mods",
-  "dependencies": [
-    "base"
-  ]
+    "name": "section-autocraft",
+    "version": "1.1.0",
+    "factorio_version": "2.1",
+    "title": "Section Autocraft",
+    "author": "MengLei",
+    "description": "Automatically hand craft items.\n自动手搓物品。",
+    "contact": "https://github.com/MengLeiFudge/MLJ_Factorio_Mods",
+    "homepage": "https://github.com/MengLeiFudge/MLJ_Factorio_Mods",
+    "dependencies": [
+        "base"
+    ]
 }

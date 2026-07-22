@@ -4655,12 +4655,20 @@ def materialize_layout(
     return wrapper
 
 
-def layout_with_single_node_columns(layout_plan: dict[str, Any], columns: int, *, lane_width: float | None = None) -> dict[str, Any]:
+def layout_with_single_node_columns(
+    layout_plan: dict[str, Any],
+    columns: int,
+    *,
+    lane_width: float | None = None,
+    row_spacing: float | None = None,
+) -> dict[str, Any]:
     layout = copy.deepcopy(layout_plan)
     if len(layout.get("nodes") or []) != 1:
         return layout
     if lane_width is not None:
         layout["lane_width"] = lane_width
+    if row_spacing is not None:
+        layout["row_spacing"] = row_spacing
     node = layout["nodes"][0]
     instances = max(1, int(node.get("instances") or 1))
     columns = max(1, min(columns, instances))
@@ -4849,6 +4857,8 @@ def layout_candidate_audit(
     return {
         "columns": node.get("columns"),
         "rows": node.get("rows"),
+        "lane_width": (summary.get("layout_selection") or {}).get("lane_width"),
+        "row_spacing": (summary.get("layout_selection") or {}).get("row_spacing"),
         "compress_output_boundary": compress_output_boundary,
         "width": summary.get("width"),
         "height": summary.get("height"),
@@ -4902,18 +4912,23 @@ def select_best_materialized_layout(
     instances = max(1, int(node.get("instances") or 1))
     max_columns = max(1, min(int(layout_plan.get("max_columns") or instances), instances))
     base_lane_width = float(layout_plan.get("lane_width") or 0.0)
+    base_row_spacing = float(layout_plan.get("row_spacing", layout_plan.get("spacing") or 0.0))
     force_lane_width_candidates = [base_lane_width]
     if base_lane_width > 0:
         force_lane_width_candidates.append(round(base_lane_width + 2.0, 3))
+    row_spacing_candidates = [base_row_spacing]
+    if preseparate_output_before_fanin and base_row_spacing > 0:
+        row_spacing_candidates.extend(round(base_row_spacing + offset, 3) for offset in (2.0, 4.0, 6.0, 8.0))
     candidate_audits: list[dict[str, Any]] = []
 
     def materialize_candidate(
         columns: int,
         lane_width: float,
+        row_spacing: float,
         *,
         candidate_compress_output_boundary: bool,
     ) -> tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any], bool]:
-        candidate_layout = layout_with_single_node_columns(layout_plan, columns, lane_width=lane_width)
+        candidate_layout = layout_with_single_node_columns(layout_plan, columns, lane_width=lane_width, row_spacing=row_spacing)
         safe_width_constraint = output_preseparation_safe_width_constraint(candidate_layout, knowledge)
         if safe_width_constraint is not None:
             candidate_layout["output_preseparation_safe_width_constraint"] = safe_width_constraint
@@ -4946,13 +4961,15 @@ def select_best_materialized_layout(
             raise ValueError(f"force_columns must be between 1 and {max_columns}, got {force_columns}")
         forced_best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any], dict[str, Any], bool] | None = None
         for lane_width in force_lane_width_candidates:
-            candidate = materialize_candidate(
-                force_columns,
-                lane_width,
-                candidate_compress_output_boundary=compress_output_boundary,
-            )
-            if forced_best is None or candidate[0] < forced_best[0]:
-                forced_best = candidate
+            for row_spacing in row_spacing_candidates:
+                candidate = materialize_candidate(
+                    force_columns,
+                    lane_width,
+                    row_spacing,
+                    candidate_compress_output_boundary=compress_output_boundary,
+                )
+                if forced_best is None or candidate[0] < forced_best[0]:
+                    forced_best = candidate
         assert forced_best is not None
         score, wrapper, connector_summary, forced_layout, selected_compress_output_boundary = forced_best
         selected_columns = forced_layout["nodes"][0]["columns"]
@@ -4961,12 +4978,14 @@ def select_best_materialized_layout(
             audit["selected"] = (
                 audit.get("columns") == selected_columns
                 and audit.get("rows") == selected_rows
+                and audit.get("lane_width") == forced_layout.get("lane_width")
+                and audit.get("row_spacing") == forced_layout.get("row_spacing")
                 and audit.get("compress_output_boundary") == selected_compress_output_boundary
                 and audit.get("score") == list(score)
             )
         forced_layout["layout_selection"] = {
             "strategy": "forced-single-node-columns",
-            "candidate_count": len(force_lane_width_candidates),
+            "candidate_count": len(force_lane_width_candidates) * len(row_spacing_candidates),
             "selected_columns": selected_columns,
             "selected_rows": selected_rows,
             "selected_lane_width": forced_layout.get("lane_width"),
@@ -4981,14 +5000,16 @@ def select_best_materialized_layout(
     boundary_modes = [False, True] if compress_output_boundary else [False]
     for columns in range(1, max_columns + 1):
         for candidate_compress_output_boundary in boundary_modes:
-            candidate_count += 1
-            candidate = materialize_candidate(
-                columns,
-                base_lane_width,
-                candidate_compress_output_boundary=candidate_compress_output_boundary,
-            )
-            if best is None or candidate[0] < best[0]:
-                best = candidate
+            for row_spacing in row_spacing_candidates:
+                candidate_count += 1
+                candidate = materialize_candidate(
+                    columns,
+                    base_lane_width,
+                    row_spacing,
+                    candidate_compress_output_boundary=candidate_compress_output_boundary,
+                )
+                if best is None or candidate[0] < best[0]:
+                    best = candidate
     assert best is not None
     score, wrapper, connector_summary, selected_layout, selected_compress_output_boundary = best
     selected_columns = selected_layout["nodes"][0]["columns"]
@@ -4997,6 +5018,8 @@ def select_best_materialized_layout(
         audit["selected"] = (
             audit.get("columns") == selected_columns
             and audit.get("rows") == selected_rows
+            and audit.get("lane_width") == selected_layout.get("lane_width")
+            and audit.get("row_spacing") == selected_layout.get("row_spacing")
             and audit.get("compress_output_boundary") == selected_compress_output_boundary
             and audit.get("score") == list(score)
         )
@@ -5195,6 +5218,7 @@ def render_markdown_report(summary: dict[str, Any]) -> str:
             marker = "selected" if item.get("selected") else "candidate"
             lines.append(
                 f"- {marker}: columns={item.get('columns')} rows={item.get('rows')} "
+                f"lane_width={item.get('lane_width')} row_spacing={item.get('row_spacing')} "
                 f"compress={item.get('compress_output_boundary')} "
                 f"safe_width={item.get('safe_width_status')} "
                 f"collisions={item.get('collision_count')} "

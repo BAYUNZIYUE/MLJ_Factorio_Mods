@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.5
+Date: 2026-06-28
+  Changes:
+    - 声明支持 Factorio 2.1。
+    - Added an explicit quality dependency because Factorio 2.1 changed Space Age to only recommend the quality mod.
+    - Marked the mod as compatible with Factorio 2.1.
+---------------------------------------------------------------------------------------------------
 Version: 1.1.4
 Date: 2026-06-07
   Changes:

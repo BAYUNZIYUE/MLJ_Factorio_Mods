@@ -16,8 +16,10 @@ def main() -> int:
         src_dir = Path(temp_dir) / "src"
         tests_dir = src_dir / "tests"
         docs_dir = src_dir / "docs"
+        references_dir = src_dir / "references"
         tests_dir.mkdir(parents=True)
         docs_dir.mkdir()
+        references_dir.mkdir()
 
         files = [
             src_dir / "control.lua",
@@ -25,6 +27,7 @@ def main() -> int:
             src_dir / "README.md",
             tests_dir / "verify_example.py",
             docs_dir / "README.md",
+            references_dir / "reference.lua",
         ]
         for file_path in files:
             file_path.write_text("placeholder", encoding="utf-8")

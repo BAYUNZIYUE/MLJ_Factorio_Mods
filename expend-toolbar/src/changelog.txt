@@ -1,4 +1,9 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.0.1
+Date: 2026-06-28
+  Changes:
+    - Declared Factorio 2.1 compatibility and raised the base dependency to 2.1.
+---------------------------------------------------------------------------------------------------
 Version: 1.0.0
 Date: 25. 05. 2026
   Features:
@@ -7,5 +12,9 @@ Date: 25. 05. 2026
     - Started the standalone Expend Toolbar changelog.
   Bugfixes:
     - Improved remote starmap hiding, cursor-record slot handling, and normal-view item pickup behavior.
-    - Preserved blueprint-like slot contents by preferring cursor stacks over cursor records and importing saved record exports before falling back to empty tool items.
+    - Preserved blueprint-like cursor stack contents while storing pure cursor records as lightweight player/game blueprint-library links instead of large saved record exports.
     - Repainted empty slots after cursor changes so held blueprints and blueprint books are stored as full cursor payloads instead of plain empty tool names.
+    - Preserved non-normal quality names read from Factorio quality prototype objects, and treated successful blueprint-like imports by the restored cursor stack instead of only by a zero return code.
+    - Kept blueprint-like slot preview icons, hid inventory count numbers for blueprint-like tools, and marked toolbar-created blueprint cursors as temporary when restored.
+    - Preserved signal quality markers on blueprint-like preview icons, aligned preview signals on a fixed 40x40 slot grid, restored vanilla normal-item tooltip content while appending non-zero quality count rows, and kept blueprint-like tool tooltips free of mod-added saved-record details.
+    - Localized toolbar tooltip control hints, sorted quality count rows from low to high quality, labelled side counts with the current surface name, and kept cached count rows stable while changing slot quality.
