@@ -1866,6 +1866,25 @@ def main() -> int:
     ):
         print(f"FAIL: expected forced over-wide rows to be marked over the pre-separation safe width: {forced_selector_layout} {forced_selector_summary}")
         return 1
+    _, row_spacing_selector_summary, row_spacing_selector_layout = select_best_materialized_layout(
+        preseparation_selector_layout,
+        byproduct_mappings,
+        label="fixture-byproduct-row-spacing-candidates",
+        connect_boundaries=True,
+        knowledge=knowledge,
+        preseparate_output_before_fanin=True,
+    )
+    row_spacing_candidates = row_spacing_selector_layout.get("layout_selection", {}).get("candidates") or []
+    candidate_row_spacings = sorted({item.get("row_spacing") for item in row_spacing_candidates})
+    if (
+        row_spacing_selector_layout["layout_selection"].get("candidate_count") != 15
+        or len(row_spacing_candidates) != 15
+        or candidate_row_spacings != [2.0, 4.0, 6.0, 8.0, 10.0]
+        or sum(1 for item in row_spacing_candidates if item.get("selected")) != 1
+        or row_spacing_selector_summary.get("output_preseparation_exposure_audit") is None
+    ):
+        print(f"FAIL: expected pre-fanin selector search to audit multiple row-spacing candidates: {row_spacing_selector_layout} {row_spacing_selector_summary}")
+        return 1
     capacity_unresolved_lane_mappings = deepcopy(capacity_multi_lane_mappings)
     capacity_unresolved_lane_mappings[0]["layout"]["entities"][-1] = {
         "name": "turbo-splitter",

@@ -76,7 +76,6 @@ def main() -> int:
     require_contains(control_lua, "upgrade_rules", "control.lua")
     require_contains(control_lua, "localize_text", "control.lua")
     require_contains(control_lua, "normalize_stored_quality(shifted)", "control.lua")
-    require_contains(control_lua, "品质上/下切换操作", "control.lua")
     require_contains(control_lua, "event.element", "control.lua")
     require_contains(control_lua, "opened_self", "control.lua")
     require_contains(control_lua, "player.gui.screen.children", "control.lua")
@@ -108,11 +107,12 @@ def main() -> int:
     require_contains(control_lua, 'string.gsub(raw_value, "，", ",")', "control.lua")
     require_contains(control_lua, "ignored_names", "control.lua")
     require_contains(control_lua, "is_upgrade_item", "control.lua")
-    require_contains(control_lua, "player.opened", "control.lua")
     require_contains(control_lua, "cursor_record", "control.lua")
     require_contains(control_lua, "valid_for_write", "control.lua")
     require_contains(control_lua, "read-only", "control.lua")
     require_contains(control_lua, 'quality == "any"', "control.lua")
+    require_contains(control_lua, "local debug_enabled = false", "control.lua")
+    require_contains(control_lua, "if debug_enabled then\n        debug_event_context(event, player)\n    end", "control.lua")
 
     if "for index = 1, 24 do" in control_lua:
         fail("control.lua must use mapper_count instead of a hard-coded 24 mapper limit")
@@ -128,6 +128,10 @@ def main() -> int:
         fail("item downgrades to normal must test the current non-normal quality, not normal-vs-normal")
     if "mapper_target_is_allowed(mapper, shifted, ignored_names)" in control_lua:
         fail("mapper downgrades to normal must test the current non-normal quality, not normal-vs-normal")
+    if "player.print(localize_text(\n            player,\n            \"请先手持蓝图" in control_lua:
+        fail("quality-cycler must return silently when there is no held blueprint/book/planner target")
+    if "local opened = player.opened" in control_lua:
+        fail("quality-cycler must not treat an opened blueprint window as a wheel target")
 
     print("quality-cycler simple guard passed")
     return 0
